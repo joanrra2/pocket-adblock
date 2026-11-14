@@ -92,11 +92,12 @@ void App::applyUpstream(void* ctx)
             up = gw;
     }
     if (!up) parseIp4(CONFIG_SINKHOLE_UPSTREAM_DNS, up);
-    self->dns_.setUpstream(up);
+    self->dns_.setUpstream(up, s.upstreamIp2);
 
-    char ip[16];
+    char ip[16], ip2[16] = "none";
     formatIp4(up, ip);
-    ESP_LOGI(TAG, "upstream DNS %s", ip);
+    if (self->dns_.backupUpstream()) formatIp4(self->dns_.backupUpstream(), ip2);
+    ESP_LOGI(TAG, "upstream DNS %s, backup %s", ip, ip2);
 }
 
 // A freshly flashed image boots as PENDING_VERIFY. If it still runs and the DNS

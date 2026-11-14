@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <cstring>
+#include <initializer_list>
 
 #include "esp_log.h"
 #include "esp_random.h"
@@ -148,6 +149,8 @@ void DnsServer::onClientPacket()
     p->questionKey = qkey;
     p->cacheKey = ckey;
     p->upstreamIp = up;
+    p->upstreamIp2 = upstream2_;
+    p->failedMask = 0;
     p->client = from;
     p->deadline = xTaskGetTickCount() + kTimeout;
     pendingInUse_++;
@@ -156,9 +159,15 @@ void DnsServer::onClientPacket()
     sockaddr_in to{};
     to.sin_family = AF_INET;
     to.sin_port = htons(kDnsPort);
-    to.sin_addr.s_addr = up;
-    if (sendto(upstreamSock_, buf_, static_cast<size_t>(len), 0,
-               reinterpret_cast<sockaddr*>(&to), sizeof(to)) < 0) {
+    int sent = 0;
+    for (uint32_t target : {p->upstreamIp, p->upstreamIp2}) {
+        if (!target) continue;
+        to.sin_addr.s_addr = target;
+        if (sendto(upstreamSock_, buf_, static_cast<size_t>(len), 0,
+                   reinterpret_cast<sockaddr*>(&to), sizeof(to)) >= 0)
+            sent++;
+    }
+    if (!sent) {
         p->used = false;
         pendingInUse_--;
     }
@@ -179,8 +188,18 @@ void DnsServer::onUpstreamPacket()
 
     for (auto& p : pending_) {
         if (!p.used || p.upstreamId != id) continue;
-        if (p.upstreamIp != from.sin_addr.s_addr) return;   // spoofed / wrong server
+        const uint32_t src = from.sin_addr.s_addr;
+        const int which = src == p.upstreamIp ? 0 : (p.upstreamIp2 && src == p.upstreamIp2) ? 1 : -1;
+        if (which < 0) return;                              // spoofed / wrong server
         if (qend && p.questionKey != key) return;           // not our question
+        // Racing two resolvers: a SERVFAIL/REFUSED from one must not beat a real
+        // answer from the other. Relay an error only once both have failed.
+        const uint8_t rcode = buf_[3] & 0x0F;
+        if (p.upstreamIp2 && rcode != 0 && rcode != 3) {
+            p.failedMask |= static_cast<uint8_t>(1 << which);
+            if (p.failedMask != 0x3) return;
+        }
+        wins_[which]++;
         dns::wr16(buf_, p.clientId);
         reply(p.client, buf_, static_cast<size_t>(len));  // client first, cache after
         cache_.store(p.cacheKey, buf_, static_cast<size_t>(len));

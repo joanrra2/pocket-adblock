@@ -51,6 +51,9 @@ struct Settings {
 
     // ---- v4 ----
     uint8_t txPower;  // TxPower
+
+    // ---- v5 ----
+    uint32_t upstreamIp2;  // backup resolver raced against the primary, 0 = none
 };
 
 enum TxPower : uint8_t { TxAuto = 0, TxFull = 1, TxReduced = 2 };
@@ -59,7 +62,7 @@ class Config {
 public:
     // Bump when fields are appended to Settings, and add the previous version's
     // byte length to Config::validBytes() so stored settings migrate.
-    static constexpr uint16_t kVersion = 4;
+    static constexpr uint16_t kVersion = 5;
 
     esp_err_t load();  // defaults if missing / older version
     Settings get();    // copy, thread-safe (~1 KB: avoid on small stacks)

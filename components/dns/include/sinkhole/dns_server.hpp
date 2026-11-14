@@ -27,7 +27,15 @@ public:
     }
 
     esp_err_t start();
-    void setUpstream(uint32_t ipNetOrder) { upstream_ = ipNetOrder; }
+    // With a backup set, every forwarded query is sent to both and the first
+    // matching answer wins: a dead or slow resolver costs no latency.
+    void setUpstream(uint32_t primary, uint32_t backup = 0)
+    {
+        upstream_ = primary;
+        upstream2_ = backup != primary ? backup : 0;
+    }
+    uint32_t backupUpstream() const { return upstream2_; }
+    uint32_t wins(int i) const { return wins_[i]; }
     // Captive portal: while there is no uplink, clients on the setup AP get our
     // own address for every name, so phones pop up the setup page by themselves.
     void setCaptive(bool on, uint32_t apIp, uint32_t apMask)
@@ -50,6 +58,8 @@ private:
         uint32_t questionKey;
         uint32_t cacheKey;
         uint32_t upstreamIp;
+        uint32_t upstreamIp2;  // 0 = no backup for this query
+        uint8_t failedMask;    // which upstreams answered with an error
         sockaddr_in client;
         TickType_t deadline;
     };
@@ -70,6 +80,8 @@ private:
     int serverSock_ = -1;
     int upstreamSock_ = -1;
     std::atomic<uint32_t> upstream_{0};
+    std::atomic<uint32_t> upstream2_{0};
+    std::atomic<uint32_t> wins_[2] = {0, 0};  // first answers: primary / backup
     std::atomic<uint32_t> pendingInUse_{0};
     std::atomic<bool> running_{false};
     std::atomic<bool> captive_{false};

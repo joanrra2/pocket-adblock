@@ -194,7 +194,10 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
     <p class="k mt">Prefer a DHCP reservation in your router if it has one. A wrong static address makes the device unreachable: hold BOOT for 3 s to get the setup access point back.</p></div>
    <div class="card"><h2>Upstream DNS</h2>
     <form data-f="dns"><label>Forward allowed queries to</label><select name="mode"><option value="builtin">Quad9 (built-in)</option><option value="router">My router (DHCP)</option><option value="custom">Custom address</option></select>
-     <label>Custom IPv4</label><input name="ip" placeholder="1.1.1.1"><div class="row mt"><button class="btn p">Save</button></div></form>
+     <label>Custom IPv4</label><input name="ip" placeholder="1.1.1.1">
+     <label>Backup resolver (optional)</label><input name="backup" placeholder="e.g. 1.1.1.1, empty = none">
+     <p class="k">With a backup, each query goes to both at once and the first answer wins: no waiting when one is down or slow. Both providers then see your queries.</p>
+     <div class="row mt"><button class="btn p">Save</button></div></form>
     <details class="mt"><summary class="k" style="cursor:pointer">Ads still showing on some devices?</summary>
      <p class="mu mt">Devices also get DNS servers over <b>IPv6</b> from the router, and use them instead of this one. In the router, turn off IPv6 DNS advertisement (RDNSS/DHCPv6) or point it at this device. Also switch off "Secure DNS" / "DNS over HTTPS" in browsers, which bypasses every local DNS server.</p></details></div>
    <div class="card"><h2>Remote wake (MQTT)</h2>
@@ -248,7 +251,7 @@ function renderStatus(s){
  $('#net').innerHTML=[
   ['Wi-Fi',w.connected?esc(w.ssid)+' <span class="mu">'+w.rssi+' dBm</span>':'<span class="wa">'+esc(w.state)+(w.reason?' · '+esc(w.reason):'')+'</span>'],
   ['Address',w.connected?w.ip+' <span class="mu">· '+esc(s.hostname)+'.local</span>':'–'],
-  ['Upstream',d.upstream+' <span class="mu">('+d.upstreamMode+')</span>'],
+  ['Upstream',d.upstream+' <span class="mu">('+d.upstreamMode+')</span>'+(d.backup?'<br>'+d.backup+' <span class="mu">backup · wins '+n(d.winsPrimary)+' / '+n(d.winsBackup)+'</span>':'')],
   ['Cache',n(d.cacheSize)+' answers · '+(d.cachePsram?'PSRAM':'internal RAM')],
   ['Setup AP',w.apOn?esc(w.apSsid)+' · '+w.apClients+' connected':'off'],
   ['Memory',n(s.memory.internalFree/1024|0)+' KB free'+(s.memory.psram?' · PSRAM '+n(s.memory.psramFree/1048576|0)+' MB':'')]
@@ -311,7 +314,7 @@ async function loadWol(){
 }
 async function loadSettings(){
  const s=await api('/api/settings');
- fill('wifi',{ssid:s.staSsid});fill('radio',{tx:s.txPower});fill('ap',{ssid:s.apSsid,always:s.apAlways?'1':'0'});fill('dns',{mode:s.upstreamMode,ip:s.upstreamIp});
+ fill('wifi',{ssid:s.staSsid});fill('radio',{tx:s.txPower});fill('ap',{ssid:s.apSsid,always:s.apAlways?'1':'0'});fill('dns',{mode:s.upstreamMode,ip:s.upstreamIp,backup:s.backupIp});
  fill('mqtt',{uri:s.mqttUri,user:s.mqttUser,prefix:s.mqttPrefix});fill('admin',{user:s.adminUser});fill('hostname',{hostname:s.hostname});
  fill('upd',{url:s.blocklistUrl,hours:s.updateHours});fill('ip',{mode:s.ipMode,ip:s.ipAddr,mask:s.ipMask,gw:s.ipGw,dns:s.ipDns});$('#mtopic').textContent=(s.mqttPrefix||'sinkhole')+'/wol/<name>/set';
 }

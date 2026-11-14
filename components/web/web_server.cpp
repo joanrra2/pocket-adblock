@@ -265,6 +265,9 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
         .num("dropped", d_.counters.dropped.load())
         .num("pending", d_.dns.pendingCount())
         .ip("upstream", d_.dns.upstream())
+        .ip("backup", d_.dns.backupUpstream())
+        .num("winsPrimary", d_.dns.wins(0))
+        .num("winsBackup", d_.dns.wins(1))
         .str("upstreamMode", upstreamModeName(s.upstreamMode))
         .num("cacheSize", static_cast<int64_t>(d_.dns.cache().capacity()))
         .boolean("cachePsram", d_.dns.cache().inPsram())
@@ -425,6 +428,7 @@ esp_err_t WebServer::getSettings(httpd_req_t* req)
         .str("adminUser", s.adminUser)
         .str("upstreamMode", upstreamModeName(s.upstreamMode))
         .ip("upstreamIp", s.upstreamIp)
+        .ip("backupIp", s.upstreamIp2)
         .str("blocklistUrl", s.blocklistUrl)
         .num("updateHours", s.updateHours)
         .str("mqttUri", s.mqttUri)
@@ -484,12 +488,15 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         UpstreamMode mode = strcmp(a, "router") == 0   ? UpstreamMode::Router
                             : strcmp(a, "custom") == 0 ? UpstreamMode::Custom
                                                        : UpstreamMode::Builtin;
-        uint32_t ip = 0;
+        uint32_t ip = 0, backup = 0;
         if (mode == UpstreamMode::Custom && !parseIp4(b, ip))
             return sendError(req, "400 Bad Request", "custom mode needs a valid IPv4 address");
+        if (field(form, "backup", c, 20) && c[0] && !parseIp4(c, backup))
+            return sendError(req, "400 Bad Request", "invalid backup address");
         d_.cfg.modify([&](Settings& s) {
             s.upstreamMode = mode;
             if (ip) s.upstreamIp = ip;
+            s.upstreamIp2 = backup;  // empty field = no backup
         });
         if (d_.applyUpstream) d_.applyUpstream(d_.appCtx);
         return sendOk(req);
