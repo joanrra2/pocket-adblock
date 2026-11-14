@@ -20,6 +20,8 @@ public:
 
     // domain: lower-case, no trailing dot, "www." already stripped.
     bool isBlocked(const char* domain, size_t len);
+    // On the allow list (the domain or a parent)?
+    bool isAllowed(const char* domain, size_t len);
 
     // Global switch with optional auto-resume (pause for N seconds).
     void setEnabled(bool on) { enabled_ = on; resumeAt_ = 0; }

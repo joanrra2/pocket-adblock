@@ -272,6 +272,7 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
         .num("allowed", d_.counters.allowed.load())
         .num("timeouts", d_.counters.upstreamTimeouts.load())
         .num("dropped", d_.counters.dropped.load())
+        .num("bypassBlocked", d_.counters.bypassBlocked.load())
         .num("pending", d_.dns.pendingCount())
         .ip("upstream", d_.dns.upstream())
         .ip("backup", d_.dns.backupUpstream())
@@ -487,6 +488,8 @@ esp_err_t WebServer::getSettings(httpd_req_t* req)
         .str("upstreamMode", upstreamModeName(s.upstreamMode))
         .ip("upstreamIp", s.upstreamIp)
         .ip("backupIp", s.upstreamIp2)
+        .boolean("guardCanary", s.bypassGuard & 1)
+        .boolean("guardEncrypted", s.bypassGuard & 2)
         .str("blocklistUrl", s.blocklistUrl)
         .num("updateHours", s.updateHours)
         .str("mqttUri", s.mqttUri)
@@ -559,6 +562,14 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
             s.upstreamIp2 = backup;  // empty field = no backup
         });
         if (d_.applyUpstream) d_.applyUpstream(d_.appCtx);
+        return sendOk(req);
+    }
+    if (strcmp(section, "guard") == 0) {
+        field(form, "canary", a, 4);
+        field(form, "encrypted", b, 4);
+        const uint8_t flags = static_cast<uint8_t>((a[0] == '1' ? 1 : 0) | (b[0] == '1' ? 2 : 0));
+        d_.cfg.modify([&](Settings& s) { s.bypassGuard = flags; });
+        d_.dns.setGuard(flags);
         return sendOk(req);
     }
     if (strcmp(section, "update") == 0) {

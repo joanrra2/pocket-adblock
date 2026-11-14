@@ -58,6 +58,9 @@ struct Settings {
     // ---- v6 ----
     char fwManifestUrl[192];  // release manifest for firmware update checks, empty = off
     bool fwAuto;              // install updates automatically (signed builds only)
+
+    // ---- v7 ----
+    uint8_t bypassGuard;  // guard::kCanary | guard::kEncryptedDns
 };
 
 enum TxPower : uint8_t { TxAuto = 0, TxFull = 1, TxReduced = 2 };
@@ -66,7 +69,7 @@ class Config {
 public:
     // Bump when fields are appended to Settings, and add the previous version's
     // byte length to Config::validBytes() so stored settings migrate.
-    static constexpr uint16_t kVersion = 6;
+    static constexpr uint16_t kVersion = 7;
 
     esp_err_t load();  // defaults if missing / older version
     Settings get();    // copy, thread-safe (~1 KB: avoid on small stacks)

@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "sinkhole/bypass_guard.hpp"
 #include "sinkhole/dns_packet.hpp"
 
 namespace sinkhole {
@@ -132,6 +133,21 @@ void DnsServer::onClientPacket(int sock)
         const uint32_t apIp = apIp_, mask = apMask_;
         if (apIp && (clientIp & mask) == (apIp & mask)) {
             reply(from, false, buf_, dns::buildCaptive(buf_, sizeof(buf_), q, apIp));
+            return;
+        }
+    }
+
+    // Bypass guard (canary domains / encrypted-DNS resolvers): NXDOMAIN, so
+    // browsers and phones keep using this server. Respects pause and allow list.
+    if (const uint8_t g = guard_) {
+        const guard::Hit hit = guard::check(q.name, q.nameLen, g);
+        if (hit != guard::Hit::None && filter_.enabled() &&
+            (hit == guard::Hit::Canary || !filter_.isAllowed(q.name, q.nameLen))) {
+            counters_.blocked++;
+            counters_.bypassBlocked++;
+            clients_.record(client, true);
+            log_.add(client, q.name, true);
+            reply(from, v6, buf_, dns::buildNxdomain(buf_, q));
             return;
         }
     }

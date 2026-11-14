@@ -119,6 +119,7 @@ struct Counters {
     std::atomic<uint32_t> allowed{0};
     std::atomic<uint32_t> upstreamTimeouts{0};
     std::atomic<uint32_t> dropped{0};  // pending table full / malformed
+    std::atomic<uint32_t> bypassBlocked{0};  // canary / encrypted-DNS lookups answered NXDOMAIN
 };
 
 }  // namespace sinkhole

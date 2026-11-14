@@ -52,6 +52,8 @@ public:
         captive_ = on;
     }
     bool captive() const { return captive_; }
+    // guard::kCanary | guard::kEncryptedDns (see bypass_guard.hpp).
+    void setGuard(uint8_t flags) { guard_ = flags; }
     uint32_t upstream() const { return upstream_; }
     uint32_t pendingCount() const { return pendingInUse_; }
     bool running() const { return running_; }
@@ -97,6 +99,7 @@ private:
     std::atomic<uint32_t> pendingInUse_{0};
     std::atomic<bool> running_{false};
     std::atomic<bool> captive_{false};
+    std::atomic<uint8_t> guard_{0};
     std::atomic<uint32_t> apIp_{0};
     std::atomic<uint32_t> apMask_{0};
 

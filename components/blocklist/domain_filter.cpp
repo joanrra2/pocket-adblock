@@ -21,6 +21,17 @@ bool DomainFilter::enabled()
     return enabled_;
 }
 
+bool DomainFilter::isAllowed(const char* domain, size_t len)
+{
+    uint64_t hashes[16];
+    size_t n = 0;
+    forEachSuffix(domain, len, [&](const char* s, size_t l) {
+        hashes[n++] = fnv1a40(s, l);
+        return n == sizeof(hashes) / sizeof(hashes[0]);
+    });
+    return allow_.containsAny(hashes, n);
+}
+
 bool DomainFilter::isBlocked(const char* domain, size_t len)
 {
     if (!len || !enabled()) return false;

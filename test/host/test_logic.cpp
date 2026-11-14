@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "sinkhole/bypass_guard.hpp"
 #include "sinkhole/dns_packet.hpp"
 #include "sinkhole/hash_table.hpp"
 
@@ -215,11 +216,39 @@ static void testDnsPacket()
     CHECK(dns::questionKey(a1.data(), a1.size()) == dns::questionKey(a2.data(), a2.size()));
 }
 
+static void testBypassGuard()
+{
+    using guard::Hit;
+    auto chk = [](const char* n, uint8_t f) { return guard::check(n, std::strlen(n), f); };
+    const uint8_t all = guard::kCanary | guard::kEncryptedDns;
+    CHECK(chk("use-application-dns.net", guard::kCanary) == Hit::Canary);
+    CHECK(chk("mask.icloud.com", all) == Hit::Canary);
+    CHECK(chk("mask-h2.icloud.com", all) == Hit::Canary);
+    CHECK(chk("icloud.com", all) == Hit::None);               // parent is not a canary
+    CHECK(chk("notmask.icloud.com", all) == Hit::None);       // label boundary
+    CHECK(chk("dns.google", guard::kCanary) == Hit::None);    // list off
+    CHECK(chk("dns.google", all) == Hit::EncryptedDns);
+    CHECK(chk("mozilla.cloudflare-dns.com", all) == Hit::EncryptedDns);  // subdomain
+    CHECK(chk("xcloudflare-dns.com", all) == Hit::None);
+    CHECK(chk("google.com", all) == Hit::None);
+    CHECK(chk("use-application-dns.net", 0) == Hit::None);
+
+    auto q = makeQuery("use-application-dns.net", dns::kTypeA, true);
+    dns::Question qq;
+    CHECK(dns::parseQuery(q.data(), q.size(), qq));
+    const size_t n = dns::buildNxdomain(q.data(), qq);
+    CHECK(n == qq.end);
+    CHECK((q[3] & 0x0F) == 3);                           // NXDOMAIN
+    CHECK(q[2] & 0x80);                                  // response
+    CHECK(dns::rd16(q.data() + 6) == 0 && dns::rd16(q.data() + 10) == 0);  // no answers, OPT dropped
+}
+
 int main()
 {
     testHashTable();
     testCompactFormat();
     testDnsPacket();
+    testBypassGuard();
     std::printf(failures ? "%d FAILED\n" : "all host tests passed\n", failures);
     return failures ? 1 : 0;
 }

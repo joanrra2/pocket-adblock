@@ -114,6 +114,7 @@ void Config::applyDefaults(Settings& s)
     s.updateHours = CONFIG_SINKHOLE_BLOCKLIST_UPDATE_HOURS;
     copyStr(s.mqttPrefix, "sinkhole");
     copyStr(s.fwManifestUrl, CONFIG_SINKHOLE_FW_MANIFEST_URL);
+    s.bypassGuard = 1;  // canary domains on, encrypted-DNS list off (see bypass_guard.hpp)
 }
 
 // Bytes of Settings that were meaningful in a given stored version. Fields are
@@ -125,6 +126,7 @@ size_t Config::validBytes(uint16_t version)
         case 3: return offsetof(Settings, txPower);
         case 4: return offsetof(Settings, upstreamIp2);
         case 5: return offsetof(Settings, fwManifestUrl);
+        case 6: return offsetof(Settings, bypassGuard);
         case kVersion: return sizeof(Settings);
         default: return 0;  // unknown / too old: start from defaults
     }

@@ -106,8 +106,22 @@ ads come back, even though the IPv4 DNS points here. Pick one:
 When the network routes IPv6 (the device gets a global address by SLAAC) the
 overview shows a reminder about this.
 
-Also check that browsers don't use their own encrypted DNS ("Secure DNS" in Chrome
-and Edge, "DNS over HTTPS" in Firefox): set them to "use the system's DNS" / off.
+Browsers and phones can also skip local DNS with their own encrypted DNS.
+*Settings → Bypass protection* handles the automatic cases:
+
+- **Tell browsers and phones to use this DNS** (on by default) answers the official
+  canary domains with NXDOMAIN: Firefox then turns off its automatic DNS-over-HTTPS
+  (`use-application-dns.net`) and Apple devices turn off iCloud Private Relay
+  (`mask.icloud.com`). Chrome and Edge only upgrade to encrypted DNS when the system
+  resolver supports it, which this one doesn't.
+- **Block known encrypted-DNS servers** (off by default) also blocks the names of
+  well-known DNS-over-HTTPS/TLS servers (Google, Cloudflare, Quad9, NextDNS, AdGuard…),
+  for apps and browsers set to one by hand. A phone with *Private DNS* set to one of
+  them loses Internet until it is set back to *Automatic* or *Off*. Domains on the
+  allow list still pass.
+
+Both pause together with blocking. A browser set by hand to an encrypted-DNS server
+by IP address can't be stopped by DNS: set it to "use the system's DNS" / off.
 
 ### Wi-Fi behaviour and recovery
 
