@@ -95,6 +95,7 @@ void App::applyUpstream(void* ctx)
     if (!up) parseIp4(CONFIG_SINKHOLE_UPSTREAM_DNS, up);
     self->dns_.setUpstream(up, s.upstreamIp2);
     self->dns_.setGuard(s.bypassGuard);
+    self->dns_.setCnameCheck(s.cnameCheck);
 
     char ip[16], ip2[16] = "none";
     formatIp4(up, ip);

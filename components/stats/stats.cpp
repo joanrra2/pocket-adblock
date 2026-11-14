@@ -174,6 +174,18 @@ void QueryLog::add(const ClientAddr& addr, const char* domain, bool blocked)
     if (count_ < cap_) count_++;
 }
 
+void QueryLog::markBlocked(const ClientAddr& addr, const char* domain)
+{
+    LockGuard g(mu_);
+    for (size_t k = 0; k < count_ && k < 64; k++) {
+        QueryEntry& e = ring_[(head_ + cap_ - 1 - k) % cap_];
+        if (!e.blocked && e.addr == addr && strncmp(e.domain, domain, sizeof(e.domain) - 1) == 0) {
+            e.blocked = true;
+            return;
+        }
+    }
+}
+
 size_t QueryLog::page(size_t& cursor, const QueryFilter& f, QueryEntry* out, size_t max)
 {
     LockGuard g(mu_);

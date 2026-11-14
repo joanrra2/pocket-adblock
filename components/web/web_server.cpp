@@ -273,6 +273,7 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
         .num("timeouts", d_.counters.upstreamTimeouts.load())
         .num("dropped", d_.counters.dropped.load())
         .num("bypassBlocked", d_.counters.bypassBlocked.load())
+        .num("cnameBlocked", d_.counters.cnameBlocked.load())
         .num("pending", d_.dns.pendingCount())
         .ip("upstream", d_.dns.upstream())
         .ip("backup", d_.dns.backupUpstream())
@@ -490,6 +491,7 @@ esp_err_t WebServer::getSettings(httpd_req_t* req)
         .ip("backupIp", s.upstreamIp2)
         .boolean("guardCanary", s.bypassGuard & 1)
         .boolean("guardEncrypted", s.bypassGuard & 2)
+        .boolean("cnameCheck", s.cnameCheck)
         .str("blocklistUrl", s.blocklistUrl)
         .num("updateHours", s.updateHours)
         .str("mqttUri", s.mqttUri)
@@ -567,9 +569,15 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
     if (strcmp(section, "guard") == 0) {
         field(form, "canary", a, 4);
         field(form, "encrypted", b, 4);
+        field(form, "cname", c, 4);
         const uint8_t flags = static_cast<uint8_t>((a[0] == '1' ? 1 : 0) | (b[0] == '1' ? 2 : 0));
-        d_.cfg.modify([&](Settings& s) { s.bypassGuard = flags; });
+        const bool cname = c[0] == '1';
+        d_.cfg.modify([&](Settings& s) {
+            s.bypassGuard = flags;
+            s.cnameCheck = cname;
+        });
         d_.dns.setGuard(flags);
+        d_.dns.setCnameCheck(cname);
         return sendOk(req);
     }
     if (strcmp(section, "update") == 0) {

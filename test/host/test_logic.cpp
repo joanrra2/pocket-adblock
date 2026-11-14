@@ -243,8 +243,46 @@ static void testBypassGuard()
     CHECK(dns::rd16(q.data() + 6) == 0 && dns::rd16(q.data() + 10) == 0);  // no answers, OPT dropped
 }
 
+static void testCnameTargets()
+{
+    // Response: metrics.shop.com CNAME shop.eulerian.net (compressed against
+    // the question: "shop" + pointer to "eulerian.net" in a second CNAME), A.
+    auto p = makeQuery("metrics.shop.com", dns::kTypeA, false);
+    const size_t qend = p.size();
+    p[2] |= 0x80;
+    p[7] = 3;  // ANCOUNT
+    auto rr = [&](uint16_t type, const std::vector<uint8_t>& rdata) {
+        const uint8_t h[] = {0xC0, 0x0C, static_cast<uint8_t>(type >> 8), static_cast<uint8_t>(type), 0, 1,
+                             0, 0, 0, 60, 0, static_cast<uint8_t>(rdata.size())};
+        p.insert(p.end(), h, h + sizeof(h));
+        p.insert(p.end(), rdata.begin(), rdata.end());
+    };
+    const size_t firstRdata = p.size() + 12;
+    rr(dns::kTypeCname, {7, 'e', 'u', 'l', 'e', 'r', 'i', 'a', 'n', 3, 'n', 'e', 't', 0});
+    rr(dns::kTypeCname, {4, 'S', 'H', 'O', 'P', 0xC0, static_cast<uint8_t>(firstRdata)});  // -> eulerian.net
+    rr(dns::kTypeA, {1, 2, 3, 4});
+
+    std::vector<std::string> seen;
+    bool hit = dns::anyCnameTarget(p.data(), p.size(), qend, [&](const char* n, size_t l) {
+        seen.emplace_back(n, l);
+        return std::string(n, l) == "shop.eulerian.net";
+    });
+    CHECK(hit);
+    CHECK(seen.size() == 2 && seen[0] == "eulerian.net" && seen[1] == "shop.eulerian.net");
+    CHECK(!dns::anyCnameTarget(p.data(), p.size(), qend, [](const char*, size_t) { return false; }));
+
+    char name[254];
+    CHECK(dns::readName(p.data(), p.size(), dns::kHeaderLen, name, sizeof(name)));
+    CHECK(std::string(name) == "metrics.shop.com");
+    // A pointer loop and a truncated packet are rejected, not followed forever.
+    std::vector<uint8_t> loop = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xC0, 12};
+    CHECK(!dns::readName(loop.data(), loop.size(), 12, name, sizeof(name)));
+    CHECK(!dns::anyCnameTarget(p.data(), firstRdata + 3, qend, [](const char*, size_t) { return true; }));
+}
+
 int main()
 {
+    testCnameTargets();
     testHashTable();
     testCompactFormat();
     testDnsPacket();

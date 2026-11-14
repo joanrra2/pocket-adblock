@@ -96,6 +96,9 @@ public:
     // Allocates the long history when CONFIG_SINKHOLE_QUERY_HISTORY_EXTENDED.
     void begin();
     void add(const ClientAddr& addr, const char* domain, bool blocked);
+    // Flips the newest matching allowed entry to blocked (decided after the
+    // upstream answered, e.g. CNAME cloaking). Only looks at recent entries.
+    void markBlocked(const ClientAddr& addr, const char* domain);
 
     // Paged, newest first. `cursor` counts entries already scanned (start at 0);
     // copies up to `max` matches and returns how many. The lock is held only per
@@ -120,6 +123,7 @@ struct Counters {
     std::atomic<uint32_t> upstreamTimeouts{0};
     std::atomic<uint32_t> dropped{0};  // pending table full / malformed
     std::atomic<uint32_t> bypassBlocked{0};  // canary / encrypted-DNS lookups answered NXDOMAIN
+    std::atomic<uint32_t> cnameBlocked{0};   // allowed names that were aliases of blocked ones
 };
 
 }  // namespace sinkhole

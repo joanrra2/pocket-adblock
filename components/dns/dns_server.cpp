@@ -177,6 +177,13 @@ void DnsServer::onClientPacket(int sock)
     const uint32_t qkey = dns::questionKey(buf_, q.end);
     const uint32_t ckey = DnsCache::keyFor(qkey, dns::rd16(buf_ + 10) > 0);
     if (size_t hit = cache_.lookup(ckey, buf_, q.end, out_, sizeof(out_))) {
+        // Cached answers are re-checked too, so allow-list and setting changes
+        // apply at once (only answers that carry aliases cost anything).
+        if (cnameCloaked(out_, hit, q.end)) {
+            countCnameBlocked(client, q.name);
+            reply(from, v6, buf_, dns::buildBlocked(buf_, sizeof(buf_), q));
+            return;
+        }
         reply(from, v6, out_, hit);
         return;
     }
@@ -258,6 +265,24 @@ void DnsServer::onUpstreamPacket()
         }
         wins_[which]++;
         dns::wr16(buf_, p.clientId);
+        // CNAME cloaking: an allowed name that is an alias of a blocked one
+        // (metrics.shop.com -> shop.eulerian.net) is blocked too. Not cached,
+        // so allow-list changes apply at once.
+        if (qend && rcode == 0 && cnameCloaked(buf_, static_cast<size_t>(len), qend)) {
+            dns::Question q{};
+            q.end = qend;
+            q.qtype = dns::rd16(buf_ + qend - 4);
+            const ClientAddr client =
+                p.clientV6 ? ClientAddr::fromV6(reinterpret_cast<const uint8_t*>(&p.client.v6.sin6_addr))
+                           : ClientAddr::fromV4(p.client.v4.sin_addr.s_addr);
+            char name[254];
+            if (!dns::readName(buf_, static_cast<size_t>(len), dns::kHeaderLen, name, sizeof(name))) name[0] = '\0';
+            countCnameBlocked(client, strncmp(name, "www.", 4) == 0 && name[4] ? name + 4 : name);
+            reply(p.client, p.clientV6, buf_, dns::buildBlocked(buf_, sizeof(buf_), q));
+            p.used = false;
+            pendingInUse_--;
+            return;
+        }
         reply(p.client, p.clientV6, buf_, static_cast<size_t>(len));  // client first, cache after
         cache_.store(p.cacheKey, buf_, static_cast<size_t>(len));
         p.used = false;
@@ -265,6 +290,21 @@ void DnsServer::onUpstreamPacket()
         return;
     }
     // Late reply for an expired query: ignore.
+}
+
+bool DnsServer::cnameCloaked(const uint8_t* pkt, size_t len, size_t qend)
+{
+    if (!cnameCheck_ || dns::rd16(pkt + 6) < 2) return false;  // an alias needs >= 2 answers
+    return dns::anyCnameTarget(pkt, len, qend, [this](const char* n, size_t l) { return filter_.isBlocked(n, l); });
+}
+
+// The query was counted and logged as allowed when it arrived.
+void DnsServer::countCnameBlocked(const ClientAddr& client, const char* name)
+{
+    if (name[0]) log_.markBlocked(client, name);
+    counters_.allowed--;
+    counters_.blocked++;
+    counters_.cnameBlocked++;
 }
 
 void DnsServer::expirePending()

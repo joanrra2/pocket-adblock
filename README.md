@@ -12,6 +12,10 @@ PSRAM, and takes advantage of PSRAM when the board has it.
 - **~218k domains on a 4 MB C3, ~830k on 8 MB+** stored as compact 40-bit hashes in flash,
   memory-mapped and binary-searched. No file system, no RAM index.
 - **Non-blocking DNS forwarding**: one slow upstream lookup never stalls other clients.
+- **Hidden trackers caught (CNAME cloaking)**: a site's own subdomain that is an alias of
+  a blocked tracker (`smetrics.ikea.com` → `…2o7.net`) is blocked too, also for cached answers.
+- **Bypass protection**: Firefox's automatic DNS-over-HTTPS and iCloud Private Relay are
+  told to stand down; optionally, well-known encrypted-DNS servers are blocked.
 - **DNS answer cache** (4096 entries in PSRAM on boards that have it, 32 in internal RAM otherwise).
   Answers with TTL 0 or a few seconds (some resolvers, Quad9 at times, send them) are still
   cached for 30 s, while clients see the upstream's own TTL

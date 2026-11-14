@@ -137,6 +137,54 @@ inline bool forEachRecord(uint8_t* pkt, size_t len, size_t questionEnd, F&& fn)
 }
 
 constexpr uint16_t kTypeOpt = 41;  // EDNS pseudo-record: its "TTL" is flags, not a TTL
+constexpr uint16_t kTypeCname = 5;
+
+// Decodes a (possibly compressed) name at offset `i` into lower-case dotted
+// text. False if malformed, looping or longer than `cap`.
+inline bool readName(const uint8_t* pkt, size_t len, size_t i, char* out, size_t cap)
+{
+    size_t o = 0;
+    int jumps = 0;
+    while (i < len) {
+        const uint8_t l = pkt[i];
+        if (l == 0) {
+            out[o] = '\0';
+            return true;
+        }
+        if ((l & 0xC0) == 0xC0) {
+            if (i + 1 >= len || ++jumps > 16) return false;
+            i = static_cast<size_t>(l & 0x3F) << 8 | pkt[i + 1];
+            continue;
+        }
+        if (l & 0xC0) return false;
+        if (i + 1 + l > len || o + l + 2 > cap) return false;
+        if (o) out[o++] = '.';
+        for (uint8_t k = 0; k < l; k++) out[o++] = static_cast<char>(tolower(pkt[i + 1 + k]));
+        i += 1 + l;
+    }
+    return false;
+}
+
+// Calls fn(name, nameLen) for each CNAME target in the answer section until fn
+// returns true. Returns true if it did (false also for malformed packets).
+template <typename F>
+inline bool anyCnameTarget(const uint8_t* pkt, size_t len, size_t questionEnd, F&& fn)
+{
+    const unsigned answers = rd16(pkt + 6);
+    size_t i = questionEnd;
+    char name[254];
+    for (unsigned r = 0; r < answers; r++) {
+        i = skipName(pkt, len, i);
+        if (!i || i + 10 > len) return false;
+        const uint16_t type = rd16(pkt + i);
+        const uint16_t rdlen = rd16(pkt + i + 8);
+        if (i + 10 + rdlen > len) return false;
+        if (type == kTypeCname && readName(pkt, len, i + 10, name, sizeof(name)) && fn(name, strlen(name)))
+            return true;
+        i += 10 + rdlen;
+    }
+    return false;
+}
 
 inline uint32_t rd32(const uint8_t* p)
 {

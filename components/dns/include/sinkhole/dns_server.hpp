@@ -54,6 +54,8 @@ public:
     bool captive() const { return captive_; }
     // guard::kCanary | guard::kEncryptedDns (see bypass_guard.hpp).
     void setGuard(uint8_t flags) { guard_ = flags; }
+    // Block allowed names whose answer is a CNAME to a blocked domain.
+    void setCnameCheck(bool on) { cnameCheck_ = on; }
     uint32_t upstream() const { return upstream_; }
     uint32_t pendingCount() const { return pendingInUse_; }
     bool running() const { return running_; }
@@ -79,6 +81,8 @@ private:
     void onClientPacket(int sock);
     void onUpstreamPacket();
     void expirePending();
+    bool cnameCloaked(const uint8_t* pkt, size_t len, size_t qend);
+    void countCnameBlocked(const ClientAddr& client, const char* name);
     Pending* allocPending();
     void reply(const ClientSockAddr& to, bool v6, const uint8_t* data, size_t len);
 
@@ -100,6 +104,7 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> captive_{false};
     std::atomic<uint8_t> guard_{0};
+    std::atomic<bool> cnameCheck_{false};
     std::atomic<uint32_t> apIp_{0};
     std::atomic<uint32_t> apMask_{0};
 

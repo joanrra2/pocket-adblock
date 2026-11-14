@@ -61,6 +61,9 @@ struct Settings {
 
     // ---- v7 ----
     uint8_t bypassGuard;  // guard::kCanary | guard::kEncryptedDns
+
+    // ---- v8 ----
+    bool cnameCheck;  // block allowed names that are CNAMEs of blocked ones
 };
 
 enum TxPower : uint8_t { TxAuto = 0, TxFull = 1, TxReduced = 2 };
@@ -69,7 +72,7 @@ class Config {
 public:
     // Bump when fields are appended to Settings, and add the previous version's
     // byte length to Config::validBytes() so stored settings migrate.
-    static constexpr uint16_t kVersion = 7;
+    static constexpr uint16_t kVersion = 8;
 
     esp_err_t load();  // defaults if missing / older version
     Settings get();    // copy, thread-safe (~1 KB: avoid on small stacks)
