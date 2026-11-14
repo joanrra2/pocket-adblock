@@ -74,6 +74,20 @@ Prebuilt images for every board are attached to each
 4. Point your router's DHCP DNS, or individual devices, at the device's address
    (also reachable as **http://sinkhole.local**).
 
+### Make sure nothing bypasses it (IPv6!)
+
+Devices use whatever DNS servers the network hands them, and they hand out **two**
+kinds: IPv4 (DHCP) and IPv6 (router advertisements / DHCPv6). If your router
+advertises its own or your ISP's IPv6 DNS, phones and PCs quietly use that one and
+ads come back, even though the IPv4 DNS points here. Pick one:
+
+- In the router, turn off IPv6 DNS / RDNSS advertisement (often "IPv6 DNS: automatic"
+  → set it to this device's IPv6 address, see Settings, or disable it), or
+- turn off IPv6 on the LAN if you don't need it.
+
+Also check that browsers don't use their own encrypted DNS ("Secure DNS" in Chrome
+and Edge, "DNS over HTTPS" in Firefox): set them to "use the system's DNS" / off.
+
 ### Wi-Fi behaviour and recovery
 
 | Situation | What happens |

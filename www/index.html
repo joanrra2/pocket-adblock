@@ -187,7 +187,9 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
     <p class="k mt">Holding BOOT for 3 s also turns it on for 15 minutes; 10 s resets all settings.</p></div>
    <div class="card"><h2>Upstream DNS</h2>
     <form data-f="dns"><label>Forward allowed queries to</label><select name="mode"><option value="builtin">Quad9 (built-in)</option><option value="router">My router (DHCP)</option><option value="custom">Custom address</option></select>
-     <label>Custom IPv4</label><input name="ip" placeholder="1.1.1.1"><div class="row mt"><button class="btn p">Save</button></div></form></div>
+     <label>Custom IPv4</label><input name="ip" placeholder="1.1.1.1"><div class="row mt"><button class="btn p">Save</button></div></form>
+    <details class="mt"><summary class="k" style="cursor:pointer">Ads still showing on some devices?</summary>
+     <p class="mu mt">Devices also get DNS servers over <b>IPv6</b> from the router, and use them instead of this one. In the router, turn off IPv6 DNS advertisement (RDNSS/DHCPv6) or point it at this device. Also switch off "Secure DNS" / "DNS over HTTPS" in browsers, which bypasses every local DNS server.</p></details></div>
    <div class="card"><h2>Remote wake (MQTT)</h2>
     <form data-f="mqtt"><label>Broker URI</label><input name="uri" placeholder="mqtts://broker.example.com:8883">
      <div class="row"><div style="flex:1"><label>User</label><input name="user"></div><div style="flex:1"><label>Password (empty = keep)</label><input name="pass" type="password" autocomplete="new-password"></div></div>
