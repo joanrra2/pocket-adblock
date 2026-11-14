@@ -120,6 +120,28 @@ menu "DNS Sinkhole"
         default 2048
         range 64 32768
 
+    config SINKHOLE_BLOOM_FILTER
+        bool "RAM bloom filter in front of the flash blocklist (uses extra RAM)"
+        default n
+        help
+            Keeps a bloom filter of the blocklist in RAM so most domains that are
+            NOT listed are answered without reading flash. Sized for the slot
+            capacity at boot: about BITS_PER_ENTRY/8 bytes per domain
+            (10 bits: ~270 KB for the 4 MB layout, ~1 MB for the 8 MB layout).
+            Allocated in PSRAM when present, otherwise in internal RAM only if it
+            fits; if allocation fails the firmware runs without it.
+            Recommended: ESP32-S3 / ESP32 boards with PSRAM. Not recommended on the
+            ESP32-C3: it would take the internal RAM that HTTPS updates need.
+
+    config SINKHOLE_BLOOM_BITS_PER_ENTRY
+        int "Bloom filter bits per domain"
+        depends on SINKHOLE_BLOOM_FILTER
+        default 10
+        range 4 24
+        help
+            10 bits = ~1% false positives (those just fall through to the flash
+            lookup, so results are always exact).
+
     config SINKHOLE_WOL_MAX_HOSTS
         int "Wake-on-LAN hosts"
         default 16

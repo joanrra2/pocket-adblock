@@ -111,6 +111,22 @@ public:
 
     bool contains(uint64_t h) const { return version_ == kBlocklistV2 ? containsV2(h) : containsV1(h); }
 
+    // Calls fn(hash) for every entry, in order (used to build the bloom filter).
+    template <typename F>
+    void forEach(F&& fn) const
+    {
+        if (version_ != kBlocklistV2) {
+            for (uint32_t i = 0; i < count_; i++) fn(loadHash(data_ + static_cast<size_t>(i) * kHashBytes));
+            return;
+        }
+        const uint8_t* cnt = counts();
+        const uint8_t* s = suffixes();
+        for (uint32_t b = 0; b < kV2Buckets; b++)
+            for (uint32_t i = 0; i < cnt[b]; i++, s += 3)
+                fn(static_cast<uint64_t>(b) << 24 | static_cast<uint64_t>(s[0]) | static_cast<uint64_t>(s[1]) << 8 |
+                   static_cast<uint64_t>(s[2]) << 16);
+    }
+
     // Structure check before activation: v1 strictly ascending; v2 index
     // consistent with the count and suffixes ascending within each bucket.
     bool isValid() const { return version_ == kBlocklistV2 ? validV2() : validV1(); }
@@ -183,6 +199,57 @@ private:
     const uint8_t* data_ = nullptr;
     uint32_t count_ = 0;
     uint8_t version_ = kBlocklistV1;
+};
+
+// Bloom filter over 40-bit domain hashes, on caller-provided memory. The inputs
+// are already FNV hashes, so k bit positions come from double hashing.
+class BloomBits {
+public:
+    void attach(uint8_t* bits, size_t bytes, uint8_t k)
+    {
+        bits_ = bits;
+        bytes_ = bytes;
+        nbits_ = static_cast<uint32_t>(bytes * 8);
+        k_ = k;
+    }
+    void clear() { memset(bits_, 0, bytes_); }
+    void add(uint64_t h)
+    {
+        uint32_t a, b;
+        seeds(h, a, b);
+        for (uint8_t i = 0; i < k_; i++, a += b) {
+            const uint32_t bit = slot(a);
+            bits_[bit >> 3] |= static_cast<uint8_t>(1u << (bit & 7));
+        }
+    }
+    bool mayContain(uint64_t h) const
+    {
+        uint32_t a, b;
+        seeds(h, a, b);
+        for (uint8_t i = 0; i < k_; i++, a += b) {
+            const uint32_t bit = slot(a);
+            if (!(bits_[bit >> 3] & (1u << (bit & 7)))) return false;
+        }
+        return true;
+    }
+    bool ready() const { return bits_ != nullptr; }
+    size_t bytes() const { return bytes_; }
+
+private:
+    // 32-bit only: 64-bit division is a slow library call on these MCUs.
+    static void seeds(uint64_t h, uint32_t& a, uint32_t& b)
+    {
+        a = static_cast<uint32_t>((h * 0x9E3779B97F4A7C15ULL) >> 32);
+        b = static_cast<uint32_t>((h * 0xC2B2AE3D27D4EB4FULL) >> 32) | 1;  // odd step
+    }
+    uint32_t slot(uint32_t a) const  // multiply-shift range reduction, no modulo
+    {
+        return static_cast<uint32_t>((static_cast<uint64_t>(a) * nbits_) >> 32);
+    }
+    uint8_t* bits_ = nullptr;
+    size_t bytes_ = 0;
+    uint32_t nbits_ = 0;
+    uint8_t k_ = 0;
 };
 
 // Calls fn(suffix, len) for "a.b.example.com", "b.example.com", "example.com".

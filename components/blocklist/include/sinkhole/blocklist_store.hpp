@@ -27,6 +27,10 @@ struct BlocklistInfo {
     uint8_t format;            // 1, 2 (compact) or 0 when none
     bool signedOk;             // signature verified against the configured key
     bool keyConfigured;        // firmware built with a blocklist public key
+    uint32_t bloomBytes;       // 0 = no bloom filter
+    bool bloomPsram;
+    bool bloomReady;
+    uint32_t bloomSkips;       // lookups answered by the bloom filter alone
 };
 
 class BlocklistStore {
@@ -61,6 +65,8 @@ private:
     esp_err_t writeAt(size_t offset, const uint8_t* data, size_t len);
     esp_err_t payloadWrite(const uint8_t* data, size_t len);
     void importKey();
+    void setupBloom();
+    void rebuildBloom(const HashTable& table);
     bool verifySignature(const BlocklistHeader& hdr, const uint8_t* sig);
 
     const esp_partition_t* slots_[2] = {nullptr, nullptr};
@@ -84,6 +90,12 @@ private:
     size_t sigLen_ = 0;
     bool trailerOverflow_ = false;
     psa_key_id_t pubKey_ = 0;
+
+    // Optional RAM bloom filter (CONFIG_SINKHOLE_BLOOM_FILTER).
+    BloomBits bloom_;
+    bool bloomPsram_ = false;
+    std::atomic<bool> bloomReady_{false};
+    std::atomic<uint32_t> bloomSkips_{0};
 };
 
 }  // namespace sinkhole

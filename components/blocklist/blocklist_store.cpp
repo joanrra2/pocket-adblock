@@ -3,9 +3,12 @@
 #include <cstdio>
 #include <cstring>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "sdkconfig.h"
 #include "sinkhole/config.hpp"
+#include "sinkhole/memory.hpp"
 
 namespace sinkhole {
 
@@ -34,6 +37,8 @@ esp_err_t BlocklistStore::begin()
         return ESP_ERR_NOT_FOUND;
     }
 
+    setupBloom();
+
     uint8_t preferred = 0;
     nvs::loadU8(kSlotKey, preferred);
     preferred &= 1;
@@ -50,6 +55,7 @@ esp_err_t BlocklistStore::begin()
             ESP_LOGI(TAG, "slot %c active: %lu hashes", 'A' + slot,
                      static_cast<unsigned long>(m.hdr.count));
             if (slot != preferred) nvs::saveU8(kSlotKey, static_cast<uint8_t>(slot));
+            rebuildBloom(m.table);
             return ESP_OK;
         }
         ESP_LOGW(TAG, "slot %c unusable: %s", 'A' + slot, why);
@@ -140,6 +146,10 @@ void BlocklistStore::unmap(Mapped& m)
 
 bool BlocklistStore::contains(uint64_t hash)
 {
+    if (bloomReady_ && !bloom_.mayContain(hash)) {  // definitely not listed: no flash read
+        bloomSkips_++;
+        return false;
+    }
     LockGuard g(mu_);
     return active_.valid && active_.table.contains(hash);
 }
@@ -155,6 +165,10 @@ BlocklistInfo BlocklistStore::info()
     i.format = active_.valid ? active_.hdr.version : 0;
     i.signedOk = active_.valid && active_.signedOk;
     i.keyConfigured = pubKey_ != 0;
+    i.bloomBytes = static_cast<uint32_t>(bloom_.bytes());
+    i.bloomPsram = bloomPsram_;
+    i.bloomReady = bloomReady_;
+    i.bloomSkips = bloomSkips_;
     i.capacity = slots_[0] ? capacityFor(i.format ? i.format : kBlocklistV2, slots_[0]->size) : 0;
     return i;
 }
@@ -334,6 +348,7 @@ esp_err_t BlocklistStore::finishWrite(char* why, size_t whyLen)
     }
 
     Mapped old;
+    bloomReady_ = false;  // the old filter must not answer for the new list
     {
         LockGuard g(mu_);
         old = active_;
@@ -342,6 +357,7 @@ esp_err_t BlocklistStore::finishWrite(char* why, size_t whyLen)
         activatedUptime_ = uptimeSeconds();
     }
     unmap(old);
+    rebuildBloom(fresh.table);
     nvs::saveU8(kSlotKey, static_cast<uint8_t>(writeSlot_));
     ESP_LOGI(TAG, "slot %c active: %lu hashes (format v%u)", 'A' + writeSlot_,
              static_cast<unsigned long>(hdr.count), hdr.version);
@@ -349,6 +365,41 @@ esp_err_t BlocklistStore::finishWrite(char* why, size_t whyLen)
     writeSlot_ = -1;
     writing_ = false;
     return ESP_OK;
+}
+
+// ------------------------------------------------------------------ bloom filter
+
+void BlocklistStore::setupBloom()
+{
+#if CONFIG_SINKHOLE_BLOOM_FILTER
+    const uint32_t cap = capacityFor(kBlocklistV2, slots_[0]->size);  // the densest format
+    const size_t bytes = (static_cast<size_t>(cap) * CONFIG_SINKHOLE_BLOOM_BITS_PER_ENTRY + 7) / 8;
+    void* mem = psramAvailable() ? heap_caps_calloc(1, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : nullptr;
+    bloomPsram_ = mem != nullptr;
+    if (!mem) mem = heap_caps_calloc(1, bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!mem) {
+        ESP_LOGW(TAG, "bloom filter: no room for %u KB, running without it", static_cast<unsigned>(bytes / 1024));
+        return;
+    }
+    // k = bits per entry * ln 2 (optimal number of hash functions).
+    const uint8_t k = static_cast<uint8_t>((CONFIG_SINKHOLE_BLOOM_BITS_PER_ENTRY * 693 + 500) / 1000);
+    bloom_.attach(static_cast<uint8_t*>(mem), bytes, k ? k : 1);
+    ESP_LOGI(TAG, "bloom filter: %u KB in %s, %d bits/domain, k=%u", static_cast<unsigned>(bytes / 1024),
+             bloomPsram_ ? "PSRAM" : "internal RAM", CONFIG_SINKHOLE_BLOOM_BITS_PER_ENTRY, k);
+#endif
+}
+
+// Lookups bypass the filter (bloomReady_ = false) while it is rebuilt.
+void BlocklistStore::rebuildBloom(const HashTable& table)
+{
+    if (!bloom_.ready()) return;
+    bloomReady_ = false;
+    const int64_t t0 = esp_timer_get_time();
+    bloom_.clear();
+    table.forEach([this](uint64_t h) { bloom_.add(h); });
+    bloomReady_ = true;
+    ESP_LOGI(TAG, "bloom filter rebuilt: %lu domains in %lld ms", static_cast<unsigned long>(table.size()),
+             static_cast<long long>((esp_timer_get_time() - t0) / 1000));
 }
 
 // ------------------------------------------------------------------ signatures

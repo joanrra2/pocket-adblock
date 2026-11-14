@@ -116,6 +116,27 @@ static void testCompactFormat()
 
     CHECK(capacityFor(kBlocklistV1, 0xD0000) == 170380);
     CHECK(capacityFor(kBlocklistV2, 0xD0000) == 261781);
+
+    // Bloom filter over the same table: never a false negative, ~1% false
+    // positives at 10 bits per entry, and forEach() yields every hash.
+    std::vector<uint8_t> bits(n * 10 / 8 + 1);
+    BloomBits bloom;
+    bloom.attach(bits.data(), bits.size(), 7);
+    size_t seen = 0;
+    b.forEach([&](uint64_t h) { bloom.add(h); seen++; });
+    CHECK(seen == n);
+    int falseNeg = 0, falsePos = 0, probes = 0;
+    for (uint64_t h : v) falseNeg += !bloom.mayContain(h);
+    for (int i = 0; i < 200000; i++) {
+        x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+        const uint64_t probe = x & kHashMask;
+        if (std::binary_search(v.begin(), v.end(), probe)) continue;
+        probes++;
+        falsePos += bloom.mayContain(probe);
+    }
+    CHECK(falseNeg == 0);
+    CHECK(falsePos * 100 < probes * 2);  // < 2%
+    std::printf("bloom: %d false positives in %d probes (%.2f%%)\n", falsePos, probes, 100.0 * falsePos / probes);
 }
 
 static std::vector<uint8_t> makeQuery(const char* name, uint16_t qtype, bool edns)
