@@ -1,5 +1,6 @@
 #include "sinkhole/dns_cache.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
 
@@ -94,6 +95,9 @@ void DnsCache::store(uint32_t key, const uint8_t* resp, size_t len)
                                  });
     if (!ok) return;
     if (minTtl == UINT32_MAX) minTtl = kEmptyAnswerTtl;
+    // Floor for TTL-0 / very short answers (lookup() still reports the
+    // upstream's own TTL to clients, aged, never below 1 s).
+    minTtl = std::max<uint32_t>(minTtl, CONFIG_SINKHOLE_DNS_CACHE_MIN_TTL);  // no warning when 0
     if (minTtl == 0) return;
     if (minTtl > CONFIG_SINKHOLE_DNS_CACHE_MAX_TTL) minTtl = CONFIG_SINKHOLE_DNS_CACHE_MAX_TTL;
 

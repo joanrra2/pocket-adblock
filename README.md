@@ -13,6 +13,9 @@ PSRAM, and takes advantage of PSRAM when the board has it.
   memory-mapped and binary-searched. No file system, no RAM index.
 - **Non-blocking DNS forwarding**: one slow upstream lookup never stalls other clients.
 - **DNS answer cache** (4096 entries in PSRAM on boards that have it, 32 in internal RAM otherwise).
+  Answers with TTL 0 or a few seconds (some resolvers, Quad9 at times, send them) are still
+  cached for 30 s, while clients see the upstream's own TTL
+  (`SINKHOLE_DNS_CACHE_MIN_TTL`, 0 turns this off).
 - **A/B blocklist slots**: updates go to the inactive slot and are verified
   (SHA-256, size, sort order) before going live. A bad download never replaces a working list.
 - **OTA for firmware and blocklists** from the web UI, with automatic rollback if new

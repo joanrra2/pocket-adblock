@@ -103,6 +103,18 @@ menu "DNS Sinkhole"
         default 3600
         range 30 86400
 
+    config SINKHOLE_DNS_CACHE_MIN_TTL
+        int "Keep short-lived answers cached for at least this many seconds"
+        default 30
+        range 0 300
+        help
+            Some resolvers answer with TTL 0 (or a few seconds), which would make
+            every repeat query wait for the upstream again. Answers below this
+            floor are still cached for this long, but clients are always told the
+            upstream's remaining TTL (at least 1 s), so they never hold an answer
+            longer than the upstream asked. 0 disables the floor (TTL-0 answers
+            are then never cached).
+
     config SINKHOLE_QUERY_HISTORY_EXTENDED
         bool "Long query history (uses extra RAM, PSRAM recommended)"
         default n
