@@ -135,6 +135,10 @@ int Updater::compareVersions(const char* a, const char* b)
         b = *eb == '.' ? eb + 1 : eb;
         if (*ea != '.' && *eb != '.') break;
     }
+    // Same numbers: a pre-release ("0.2.1-dev", "-rc1") is older than the
+    // release itself, as in semver.
+    const bool preA = *a == '-', preB = *b == '-';
+    if (preA != preB) return preA ? -1 : 1;
     return 0;
 }
 
