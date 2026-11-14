@@ -68,7 +68,7 @@ bool BlocklistStore::mapSlot(int slot, Mapped& out, bool verifyHash, char* why, 
         setWhy(why, whyLen, "empty or not an SHBL list");
         return false;
     }
-    const size_t payload = static_cast<size_t>(hdr.count) * kHashBytes;
+    const size_t payload = payloadSize(hdr.version, hdr.count);
     if (hdr.count == 0 || kHdr + payload > part->size) {
         setWhy(why, whyLen, "count does not fit the partition");
         return false;
@@ -83,7 +83,7 @@ bool BlocklistStore::mapSlot(int slot, Mapped& out, bool verifyHash, char* why, 
         return false;
     }
     const uint8_t* base = static_cast<const uint8_t*>(ptr);
-    HashTable table(base + kHdr, hdr.count);
+    HashTable table(base + kHdr, hdr.count, hdr.version);
 
     if (verifyHash) {
         uint8_t digest[32];
@@ -96,9 +96,9 @@ bool BlocklistStore::mapSlot(int slot, Mapped& out, bool verifyHash, char* why, 
             return false;
         }
     }
-    if (!table.isSorted()) {
+    if (!table.isValid()) {
         esp_partition_munmap(handle);
-        setWhy(why, whyLen, "hashes not sorted");
+        setWhy(why, whyLen, "hashes not sorted / index inconsistent");
         return false;
     }
 
@@ -131,7 +131,8 @@ BlocklistInfo BlocklistStore::info()
     i.createdUnix = active_.valid ? active_.hdr.createdUnix : 0;
     i.activatedUptime = activatedUptime_;
     i.slot = activeSlot_ < 0 ? '-' : static_cast<char>('A' + activeSlot_);
-    i.capacity = slots_[0] ? static_cast<uint32_t>((slots_[0]->size - kHdr) / kHashBytes) : 0;
+    i.format = active_.valid ? active_.hdr.version : 0;
+    i.capacity = slots_[0] ? capacityFor(i.format ? i.format : kBlocklistV2, slots_[0]->size) : 0;
     return i;
 }
 
@@ -232,13 +233,6 @@ esp_err_t BlocklistStore::finishWrite(char* why, size_t whyLen)
         return ESP_FAIL;
     }
 
-    if (payloadBytes_ == 0 || payloadBytes_ % kHashBytes != 0) {
-        setWhy(why, whyLen, "size is not a whole number of 5-byte hashes");
-        abortWrite();
-        return ESP_ERR_INVALID_SIZE;
-    }
-    const uint32_t count = static_cast<uint32_t>(payloadBytes_ / kHashBytes);
-
     if (mode_ == Mode::WithHeader) {
         memcpy(&hdr, headBuf_, sizeof(hdr));
         if (!headerLooksValid(hdr)) {
@@ -246,7 +240,7 @@ esp_err_t BlocklistStore::finishWrite(char* why, size_t whyLen)
             abortWrite();
             return ESP_ERR_INVALID_VERSION;
         }
-        if (hdr.count != count) {
+        if (hdr.count == 0 || payloadBytes_ != payloadSize(hdr.version, hdr.count)) {
             setWhy(why, whyLen, "header count does not match payload (truncated download?)");
             abortWrite();
             return ESP_ERR_INVALID_SIZE;
@@ -257,11 +251,17 @@ esp_err_t BlocklistStore::finishWrite(char* why, size_t whyLen)
             return ESP_ERR_INVALID_CRC;
         }
     } else {
+        // Raw upload (esp32-c3-adblock format): headerless v1, 5 bytes per hash.
+        if (payloadBytes_ == 0 || payloadBytes_ % kHashBytes != 0) {
+            setWhy(why, whyLen, "size is not a whole number of 5-byte hashes");
+            abortWrite();
+            return ESP_ERR_INVALID_SIZE;
+        }
         memcpy(hdr.magic, kBlocklistMagic, 4);
-        hdr.version = kBlocklistVersion;
+        hdr.version = kBlocklistV1;
         hdr.hashBytes = kHashBytes;
         hdr.headerSize = kHdr;
-        hdr.count = count;
+        hdr.count = static_cast<uint32_t>(payloadBytes_ / kHashBytes);
         hdr.createdUnix = 0;
         memcpy(hdr.sha256, digest, sizeof(digest));
     }
@@ -290,8 +290,8 @@ esp_err_t BlocklistStore::finishWrite(char* why, size_t whyLen)
     }
     unmap(old);
     nvs::saveU8(kSlotKey, static_cast<uint8_t>(writeSlot_));
-    ESP_LOGI(TAG, "slot %c active: %lu hashes", 'A' + writeSlot_,
-             static_cast<unsigned long>(count));
+    ESP_LOGI(TAG, "slot %c active: %lu hashes (format v%u)", 'A' + writeSlot_,
+             static_cast<unsigned long>(hdr.count), hdr.version);
 
     writeSlot_ = -1;
     writing_ = false;

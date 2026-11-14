@@ -36,7 +36,7 @@ static void testHashTable()
         for (int k = 0; k < kHashBytes; k++) blob.push_back(static_cast<uint8_t>(x >> (8 * k)));
 
     HashTable t(blob.data(), static_cast<uint32_t>(v.size()));
-    CHECK(t.isSorted());
+    CHECK(t.isValid());
     CHECK(t.contains(h("doubleclick.net")));
     CHECK(t.contains(h("tracker.io")));
     CHECK(!t.contains(h("github.com")));
@@ -49,6 +49,73 @@ static void testHashTable()
     });
     CHECK(seen.size() == 4);
     CHECK(seen.back() == "example.com");  // never the bare TLD
+}
+
+// Same layout as tools/build_blocklist.py payload_v2().
+static std::vector<uint8_t> buildV2(const std::vector<uint64_t>& sorted)
+{
+    std::vector<std::vector<uint32_t>> buckets(kV2Buckets);
+    for (uint64_t h : sorted) buckets[h >> 24].push_back(static_cast<uint32_t>(h) & 0xFFFFFF);
+    std::vector<uint8_t> out(kV2IndexBytes);
+    uint32_t total = 0;
+    for (size_t b = 0; b < kV2Buckets; b++) {
+        if (b % 256 == 0)
+            for (int k = 0; k < 4; k++) out[(b / 256) * 4 + k] = static_cast<uint8_t>(total >> (8 * k));
+        out[kV2CoarseBytes + b] = static_cast<uint8_t>(buckets[b].size());
+        total += static_cast<uint32_t>(buckets[b].size());
+    }
+    for (const auto& b : buckets)
+        for (uint32_t s : b) {
+            out.push_back(static_cast<uint8_t>(s));
+            out.push_back(static_cast<uint8_t>(s >> 8));
+            out.push_back(static_cast<uint8_t>(s >> 16));
+        }
+    return out;
+}
+
+static void testCompactFormat()
+{
+    // 300k pseudo-random 40-bit hashes, sorted and unique.
+    uint64_t x = 0x9E3779B97F4A7C15ULL;
+    std::vector<uint64_t> v;
+    for (int i = 0; i < 300000; i++) {
+        x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+        v.push_back(x & kHashMask);
+    }
+    std::sort(v.begin(), v.end());
+    v.erase(std::unique(v.begin(), v.end()), v.end());
+    const uint32_t n = static_cast<uint32_t>(v.size());
+
+    std::vector<uint8_t> v1;
+    for (uint64_t h : v)
+        for (int k = 0; k < kHashBytes; k++) v1.push_back(static_cast<uint8_t>(h >> (8 * k)));
+    std::vector<uint8_t> v2 = buildV2(v);
+    CHECK(v2.size() == payloadSize(kBlocklistV2, n));
+    CHECK(v2.size() < v1.size());
+
+    HashTable a(v1.data(), n, kBlocklistV1), b(v2.data(), n, kBlocklistV2);
+    CHECK(a.isValid());
+    CHECK(b.isValid());
+    int mismatches = 0, misses = 0;
+    for (size_t i = 0; i < v.size(); i += 7) misses += !b.contains(v[i]);
+    for (int i = 0; i < 200000; i++) {
+        x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+        const uint64_t probe = x & kHashMask;
+        mismatches += a.contains(probe) != b.contains(probe);
+    }
+    CHECK(misses == 0);
+    CHECK(mismatches == 0);
+
+    // Corruptions are caught before activation.
+    std::vector<uint8_t> bad = v2;
+    bad[kV2CoarseBytes + 1234] ^= 1;  // a bucket count
+    CHECK(!HashTable(bad.data(), n, kBlocklistV2).isValid());
+    bad = v2;
+    std::swap(bad[kV2IndexBytes], bad[kV2IndexBytes + 3]);  // suffix order
+    CHECK(!HashTable(bad.data(), n, kBlocklistV2).isValid() || v2[kV2IndexBytes] == v2[kV2IndexBytes + 3]);
+
+    CHECK(capacityFor(kBlocklistV1, 0xD0000) == 170380);
+    CHECK(capacityFor(kBlocklistV2, 0xD0000) == 261781);
 }
 
 static std::vector<uint8_t> makeQuery(const char* name, uint16_t qtype, bool edns)
@@ -124,6 +191,7 @@ static void testDnsPacket()
 int main()
 {
     testHashTable();
+    testCompactFormat();
     testDnsPacket();
     std::printf(failures ? "%d FAILED\n" : "all host tests passed\n", failures);
     return failures ? 1 : 0;

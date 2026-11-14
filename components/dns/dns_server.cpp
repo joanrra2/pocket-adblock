@@ -6,6 +6,7 @@
 
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_timer.h"
 #include "sinkhole/dns_packet.hpp"
 
 namespace sinkhole {
@@ -135,7 +136,16 @@ void DnsServer::onClientPacket(int sock)
         }
     }
 
+    const int64_t t0 = esp_timer_get_time();
     const bool blocked = filter_.isBlocked(q.name, q.nameLen);
+    // Rolling average of the filter cost (allow/custom/blocklist), published
+    // every 256 queries; only this task writes the accumulators.
+    filterSumUs_ += static_cast<uint32_t>(esp_timer_get_time() - t0);
+    if (++filterN_ == 256) {
+        filterAvgUs10_ = filterSumUs_ * 10 / 256;
+        filterSumUs_ = 0;
+        filterN_ = 0;
+    }
     const bool banned = clients_.record(client, blocked);
     log_.add(client, q.name, blocked || banned);
 

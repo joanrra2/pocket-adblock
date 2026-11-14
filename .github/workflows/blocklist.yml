@@ -19,12 +19,13 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build (fails if a source is unreachable)
-        run: python3 tools/build_blocklist.py blocklist.bin | tee build.log
+        run: python3 tools/build_blocklist.py blocklist.bin | tee build.log   # compact SHBL v2
       - name: Sanity checks
         run: |
           size=$(stat -c%s blocklist.bin)
-          test $(( (size - 64) % 5 )) -eq 0
-          test "$size" -gt 250000                 # >50k domains: catches a silently shrunk list
+          payload=$(( size - 64 - 1024 - 65536 ))
+          test $(( payload % 3 )) -eq 0
+          test $(( payload / 3 )) -gt 50000       # >50k domains: catches a silently shrunk list
           test "$size" -le $((0xD0000))           # fits a 4 MB-layout slot
       - name: Publish
         env:

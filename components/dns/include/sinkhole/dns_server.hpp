@@ -41,6 +41,8 @@ public:
     }
     uint32_t backupUpstream() const { return upstream2_; }
     uint32_t wins(int i) const { return wins_[i]; }
+    // Average time to decide blocked/allowed, in 0.1 us (0 until 256 queries).
+    uint32_t filterAvgUs10() const { return filterAvgUs10_; }
     // Captive portal: while there is no uplink, clients on the setup AP get our
     // own address for every name, so phones pop up the setup page by themselves.
     void setCaptive(bool on, uint32_t apIp, uint32_t apMask)
@@ -89,6 +91,9 @@ private:
     std::atomic<uint32_t> upstream_{0};
     std::atomic<uint32_t> upstream2_{0};
     std::atomic<uint32_t> wins_[2] = {0, 0};  // first answers: primary / backup
+    std::atomic<uint32_t> filterAvgUs10_{0};
+    uint32_t filterSumUs_ = 0;
+    uint32_t filterN_ = 0;
     std::atomic<uint32_t> pendingInUse_{0};
     std::atomic<bool> running_{false};
     std::atomic<bool> captive_{false};

@@ -267,7 +267,7 @@ const ES={
 'not configured':'sin configurar','connecting':'conectando','connected':'conectado','retrying':'reintentando','network not found':'red no encontrada','wrong password?':'¿contraseña incorrecta?',
 'signal lost':'señal perdida','disconnected':'desconectado','network security not supported':'seguridad de red no compatible','signal too weak':'señal demasiado débil',
 'authentication expired':'autenticación caducada','connection failed':'conexión fallida','connection error':'error de conexión',
-'Domains':'Dominios','of {0} · slot {1}':'de {0} · ranura {1}','Custom / allowed':'Propios / permitidos','Loaded':'Cargada','{0} ago':'hace {0}','Last update':'Última actualización',
+'Domains':'Dominios','compact':'compacta','of {0} · slot {1}':'de {0} · ranura {1}','Custom / allowed':'Propios / permitidos','Loaded':'Cargada','{0} ago':'hace {0}','Last update':'Última actualización',
 'in progress…':'en curso…','none since restart':'ninguna desde el reinicio','Version':'Versión','Uptime':'Tiempo encendido','Internal RAM free':'RAM interna libre','PSRAM free':'PSRAM libre','none':'ninguna',
 'Connected':'Conectado','to {0}':'a {0}','Not configured':'Sin configurar','{0} attempts':'{0} intentos','next in {0}s':'siguiente en {0} s','· now {0} dBm':'· ahora {0} dBm',
 'Now':'Ahora','forced for {0}':'forzado durante {0}','Broker connected.':'Broker conectado.','Broker not connected.':'Broker no conectado.','Set up a broker in':'Configura un broker en',
@@ -354,7 +354,7 @@ function renderStatus(s){
  $('#notices').innerHTML=no.map(x=>`<div class="notice">${x}</div>`).join('');
  // updates view
  const u=s.update;
- $('#blinfo').innerHTML=kv([['Domains',n(b.count)+' <span class="mu">'+tr('of {0} · slot {1}',n(b.capacity),b.slot)+'</span>'],['Custom / allowed',b.custom+' / '+b.allow],
+ $('#blinfo').innerHTML=kv([['Domains',n(b.count)+' <span class="mu">'+tr('of {0} · slot {1}',n(b.capacity),b.slot)+(b.format?' · '+(b.format==2?tr('compact'):'v1'):'')+'</span>'],['Custom / allowed',b.custom+' / '+b.allow],
   ['Loaded',b.count?tr('{0} ago',ago(b.activeFor)):'–'],
   ['Last update',u.running||b.writing?'<span class="wa">'+tr('in progress…')+'</span>':u.lastAgo<0?tr('none since restart'):tr('{0} ago',ago(u.lastAgo))+' · <span class="'+(u.lastOk?'ok':'bad')+'">'+esc(u.message)+'</span>']]);
  $('#blbar').style.width=(b.capacity?b.count/b.capacity*100:0)+'%';

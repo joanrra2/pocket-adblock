@@ -23,7 +23,8 @@ struct BlocklistInfo {
     uint32_t createdUnix;
     uint32_t activatedUptime;  // seconds since boot when it went live
     char slot;                 // 'A', 'B' or '-' when none
-    uint32_t capacity;         // max hashes a slot can hold
+    uint32_t capacity;         // max hashes a slot can hold (in the active format)
+    uint8_t format;            // 1, 2 (compact) or 0 when none
 };
 
 class BlocklistStore {
