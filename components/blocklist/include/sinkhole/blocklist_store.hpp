@@ -38,6 +38,8 @@ public:
     esp_err_t begin();
 
     bool contains(uint64_t hash);
+    // Any of several hashes (the suffixes of one name) under a single lock.
+    bool containsAny(const uint64_t* hashes, size_t n);
     BlocklistInfo info();
 
     // ---- writer (one at a time; used by HTTP upload and the URL updater) ----

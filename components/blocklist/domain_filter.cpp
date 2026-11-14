@@ -33,13 +33,11 @@ bool DomainFilter::isBlocked(const char* domain, size_t len)
         return n == sizeof(hashes) / sizeof(hashes[0]);
     });
 
-    for (size_t i = 0; i < n; i++)
-        if (allow_.containsHash(hashes[i])) return false;
-    for (size_t i = 0; i < n; i++)
-        if (custom_.containsHash(hashes[i])) return true;
-    for (size_t i = 0; i < n; i++)
-        if (store_.contains(hashes[i])) return true;
-    return false;
+    // One lock per list for all suffixes (not one per suffix), and empty
+    // lists are skipped without locking: this is the per-query hot path.
+    if (allow_.containsAny(hashes, n)) return false;
+    if (custom_.containsAny(hashes, n)) return true;
+    return store_.containsAny(hashes, n);
 }
 
 }  // namespace sinkhole

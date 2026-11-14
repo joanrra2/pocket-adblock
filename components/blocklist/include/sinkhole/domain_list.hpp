@@ -2,6 +2,7 @@
 // Fixed-capacity list of user-managed domains (custom block list / allow list),
 // persisted as one NVS blob.
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -22,6 +23,7 @@ public:
     esp_err_t add(const char* domain);  // ESP_ERR_INVALID_ARG / ESP_ERR_NO_MEM / ESP_ERR_INVALID_STATE (dup)
     esp_err_t remove(const char* domain);
     bool containsHash(uint64_t h);
+    bool containsAny(const uint64_t* hashes, size_t n);  // lock-free when empty
     size_t count();
 
     // Copies entry i into out (thread-safe iteration for the web UI).
@@ -42,6 +44,7 @@ private:
     Entry entries_[kCapacity]{};
     uint64_t hashes_[kCapacity]{};
     size_t count_ = 0;
+    std::atomic<size_t> published_{0};  // count_ readable without the lock
 };
 
 }  // namespace sinkhole

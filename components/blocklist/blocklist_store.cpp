@@ -154,6 +154,25 @@ bool BlocklistStore::contains(uint64_t hash)
     return active_.valid && active_.table.contains(hash);
 }
 
+bool BlocklistStore::containsAny(const uint64_t* hashes, size_t n)
+{
+    uint64_t candidates[16];
+    size_t m = 0;
+    for (size_t i = 0; i < n && m < 16; i++) {
+        if (bloomReady_ && !bloom_.mayContain(hashes[i])) {  // definitely not listed
+            bloomSkips_++;
+            continue;
+        }
+        candidates[m++] = hashes[i];
+    }
+    if (!m) return false;
+    LockGuard g(mu_);
+    if (!active_.valid) return false;
+    for (size_t i = 0; i < m; i++)
+        if (active_.table.contains(candidates[i])) return true;
+    return false;
+}
+
 BlocklistInfo BlocklistStore::info()
 {
     LockGuard g(mu_);

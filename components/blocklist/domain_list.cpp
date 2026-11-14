@@ -47,6 +47,7 @@ esp_err_t DomainList::load()
     count_ = n / sizeof(Entry);
     for (size_t i = 0; i < count_; i++) entries_[i].name[kMaxLen - 1] = '\0';
     rehashLocked();
+    published_ = count_;
     return ESP_OK;
 }
 
@@ -72,6 +73,7 @@ esp_err_t DomainList::add(const char* domain)
     memcpy(entries_[count_].name, norm, kMaxLen);
     hashes_[count_] = fnv1a40(norm, strlen(norm));
     count_++;
+    published_ = count_;
     return saveLocked();
 }
 
@@ -87,6 +89,7 @@ esp_err_t DomainList::remove(const char* domain)
             hashes_[j - 1] = hashes_[j];
         }
         count_--;
+        published_ = count_;
         return saveLocked();
     }
     return ESP_ERR_NOT_FOUND;
@@ -97,6 +100,16 @@ bool DomainList::containsHash(uint64_t h)
     LockGuard g(mu_);
     for (size_t i = 0; i < count_; i++)
         if (hashes_[i] == h) return true;
+    return false;
+}
+
+bool DomainList::containsAny(const uint64_t* hashes, size_t n)
+{
+    if (published_ == 0) return false;  // the common case: no custom entries
+    LockGuard g(mu_);
+    for (size_t i = 0; i < count_; i++)
+        for (size_t j = 0; j < n; j++)
+            if (hashes_[i] == hashes[j]) return true;
     return false;
 }
 
