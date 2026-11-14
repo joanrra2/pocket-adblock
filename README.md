@@ -3,7 +3,7 @@
 [![build](https://github.com/OWNER/esp-dns-sinkhole/actions/workflows/build.yml/badge.svg)](https://github.com/OWNER/esp-dns-sinkhole/actions/workflows/build.yml)
 [![ESP-IDF v6.1](https://img.shields.io/badge/ESP--IDF-v6.1-blue)](https://github.com/espressif/esp-idf/releases/tag/v6.1)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Ko-fi](https://img.shields.io/badge/Ko--fi-support%20this%20project-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/KOFI_USERNAME)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-support%20this%20project-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/joanramon)
 
 A Pi-hole-style **DNS ad-blocker and Wake-on-LAN node** for a few-dollar ESP32,
 written in plain **ESP-IDF v6.1** (no Arduino). It runs on a $2 ESP32-C3 with no
@@ -228,7 +228,7 @@ buffers stay in internal RAM.
 ## Support
 
 If this is useful to you, you can support development on
-[Ko-fi](https://ko-fi.com/KOFI_USERNAME) ☕
+[Ko-fi](https://ko-fi.com/joanramon) ☕
 
 ## License
 
