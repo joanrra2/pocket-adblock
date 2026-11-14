@@ -14,6 +14,7 @@
 #include "sdkconfig.h"
 #include "sinkhole/dns_cache.hpp"
 #include "sinkhole/domain_filter.hpp"
+#include "sinkhole/local_records.hpp"
 #include "sinkhole/rtos.hpp"
 #include "sinkhole/stats.hpp"
 
@@ -60,6 +61,9 @@ public:
     uint32_t pendingCount() const { return pendingInUse_; }
     bool running() const { return running_; }
     const DnsCache& cache() const { return cache_; }
+    LocalRecords& records() { return records_; }
+    // Drop cached answers (e.g. after a forward rule changed). Done by the DNS task.
+    void flushCache() { flushCache_ = true; }
 
 private:
     struct Pending {
@@ -105,10 +109,12 @@ private:
     std::atomic<bool> captive_{false};
     std::atomic<uint8_t> guard_{0};
     std::atomic<bool> cnameCheck_{false};
+    std::atomic<bool> flushCache_{false};
     std::atomic<uint32_t> apIp_{0};
     std::atomic<uint32_t> apMask_{0};
 
     DnsCache cache_;
+    LocalRecords records_;
     Pending pending_[CONFIG_SINKHOLE_DNS_MAX_PENDING]{};
     uint8_t buf_[1536];  // any non-fragmented UDP datagram
     uint8_t out_[DnsCache::kMaxResponse];

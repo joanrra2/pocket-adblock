@@ -70,6 +70,14 @@ menu "DNS Sinkhole"
         default 64
         range 8 256
 
+    config SINKHOLE_MAX_LOCAL_RECORDS
+        int "Local DNS names and forward rules"
+        default 24
+        range 4 256
+        help
+            Fixed addresses (nas.home -> 192.168.1.10) and forward rules (lan -> router).
+            56 bytes of RAM each.
+
     config SINKHOLE_MAX_CUSTOM_DOMAINS
         int "Custom block / allow entries (each list)"
         default 64

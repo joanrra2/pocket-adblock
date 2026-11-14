@@ -22,6 +22,7 @@ public:
     // (with the client's txid and aged TTLs) into out; returns 0 on a miss.
     size_t lookup(uint32_t key, const uint8_t* query, size_t qend, uint8_t* out, size_t cap);
     void store(uint32_t key, const uint8_t* resp, size_t len);
+    void clear();
 
     // Separate keys for EDNS / non-EDNS queries: an OPT record must only go
     // back to clients that sent one.

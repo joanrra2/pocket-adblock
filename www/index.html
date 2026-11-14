@@ -208,6 +208,10 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
     <details class="mt"><summary class="k" style="cursor:pointer">Ads still showing on some devices?</summary>
      <p class="mu mt">Devices also get DNS servers over <b>IPv6</b> from the router, and use them instead of this one. In the router, turn off IPv6 DNS advertisement (RDNSS/DHCPv6) or point it at this device. Also switch off "Secure DNS" / "DNS over HTTPS" in browsers, which bypasses every local DNS server.</p>
      <p class="mu mt">This device also answers DNS over IPv6, at the addresses shown under Network on the overview.</p></details></div>
+   <div class="card"><h2>Local names</h2>
+    <p class="mu">Give devices on your network a name, or send every name under a suffix (like lan or in-addr.arpa) to another DNS server such as your router, so its device names and reverse lookups work.</p>
+    <div id="recs" class="mt"></div>
+    <form data-f="recadd" class="mt"><div class="row"><select name="kind" style="flex:0 0 auto;width:auto"><option value="address">Name → address</option><option value="forward">Suffix → DNS server</option></select><input name="name" placeholder="nas.home" required><input name="ip" placeholder="192.168.1.10" required><button class="btn p">Add</button></div></form></div>
    <div class="card"><h2>Extra protection</h2>
     <form data-f="guard">
      <label class="ck"><input type="checkbox" name="canary" value="1"> <span>Tell browsers and phones to use this DNS</span></label>
@@ -261,7 +265,7 @@ const ES={
 'IP address':'Dirección IP','Mode':'Modo','Automatic (DHCP)':'Automática (DHCP)','Static':'Estática','Address':'Dirección','Netmask':'Máscara de red','Gateway':'Puerta de enlace',
 'DNS for the device itself':'DNS para el propio dispositivo','= gateway':'= puerta de enlace','Apply':'Aplicar',
 'Prefer a DHCP reservation in your router if it has one. A wrong static address makes the device unreachable: hold BOOT for 3 s to get the setup access point back.':'Mejor una reserva DHCP en tu router si la tiene. Una dirección estática incorrecta deja el dispositivo inaccesible: mantén BOOT 3 s para recuperar el punto de acceso de configuración.',
-'Upstream DNS':'DNS de reenvío','Extra protection':'Protección adicional','Catch trackers hidden behind a site's own domain':'Detectar rastreadores ocultos tras el dominio de la web','Some trackers sit on a subdomain of the site (metrics.shop.com) that points to a tracking company. Answers whose aliases (CNAME) lead to a blocked domain are blocked too.':'Algunos rastreadores usan un subdominio de la propia web (metrics.tienda.com) que apunta a una empresa de rastreo. Las respuestas cuyos alias (CNAME) llevan a un dominio bloqueado también se bloquean.','{0} hidden trackers caught':'{0} rastreadores ocultos detectados','Tell browsers and phones to use this DNS':'Pedir a navegadores y móviles que usen este DNS','Answers the official signals so Firefox turns off its automatic DNS-over-HTTPS and Apple turns off iCloud Private Relay on this network.':'Responde a las señales oficiales para que Firefox desactive su DNS sobre HTTPS automático y Apple desactive el Relay privado de iCloud en esta red.','Block known encrypted-DNS servers':'Bloquear servidores DNS cifrados conocidos','Stops apps from looking up Google, Cloudflare, Quad9 and other DNS-over-HTTPS servers. A phone with "Private DNS" set to one of them loses Internet until it is set to Automatic or Off. Allowed domains still pass.':'Impide que las apps encuentren los servidores DNS sobre HTTPS de Google, Cloudflare, Quad9 y otros. Un móvil con "DNS privado" apuntando a uno de ellos se queda sin Internet hasta ponerlo en Automático o Desactivado. Los dominios permitidos siguen pasando.','{0} bypass attempts stopped':'{0} intentos de evasión frenados','Forward allowed queries to':'Reenviar las consultas permitidas a','Quad9 (built-in)':'Quad9 (integrado)','My router (DHCP)':'Mi router (DHCP)','Custom address':'Dirección personalizada',
+'Upstream DNS':'DNS de reenvío','Extra protection':'Protección adicional','Local names':'Nombres locales','Name → address':'Nombre → dirección','Suffix → DNS server':'Sufijo → servidor DNS','No local names yet.':'Aún no hay nombres locales.','and subdomains → DNS':'y subdominios → DNS','Give devices on your network a name, or send every name under a suffix (like lan or in-addr.arpa) to another DNS server such as your router, so its device names and reverse lookups work.':'Pon nombre a los dispositivos de tu red, o envía todos los nombres bajo un sufijo (como lan o in-addr.arpa) a otro servidor DNS, por ejemplo tu router, para que funcionen sus nombres de dispositivo y las búsquedas inversas.','Catch trackers hidden behind a site's own domain':'Detectar rastreadores ocultos tras el dominio de la web','Some trackers sit on a subdomain of the site (metrics.shop.com) that points to a tracking company. Answers whose aliases (CNAME) lead to a blocked domain are blocked too.':'Algunos rastreadores usan un subdominio de la propia web (metrics.tienda.com) que apunta a una empresa de rastreo. Las respuestas cuyos alias (CNAME) llevan a un dominio bloqueado también se bloquean.','{0} hidden trackers caught':'{0} rastreadores ocultos detectados','Tell browsers and phones to use this DNS':'Pedir a navegadores y móviles que usen este DNS','Answers the official signals so Firefox turns off its automatic DNS-over-HTTPS and Apple turns off iCloud Private Relay on this network.':'Responde a las señales oficiales para que Firefox desactive su DNS sobre HTTPS automático y Apple desactive el Relay privado de iCloud en esta red.','Block known encrypted-DNS servers':'Bloquear servidores DNS cifrados conocidos','Stops apps from looking up Google, Cloudflare, Quad9 and other DNS-over-HTTPS servers. A phone with "Private DNS" set to one of them loses Internet until it is set to Automatic or Off. Allowed domains still pass.':'Impide que las apps encuentren los servidores DNS sobre HTTPS de Google, Cloudflare, Quad9 y otros. Un móvil con "DNS privado" apuntando a uno de ellos se queda sin Internet hasta ponerlo en Automático o Desactivado. Los dominios permitidos siguen pasando.','{0} bypass attempts stopped':'{0} intentos de evasión frenados','Forward allowed queries to':'Reenviar las consultas permitidas a','Quad9 (built-in)':'Quad9 (integrado)','My router (DHCP)':'Mi router (DHCP)','Custom address':'Dirección personalizada',
 'Custom IPv4':'IPv4 personalizada','Backup resolver (optional)':'Resolvedor de respaldo (opcional)','e.g. 1.1.1.1, empty = none':'p. ej. 1.1.1.1, vacío = ninguno',
 'With a backup, each query goes to both at once and the first answer wins: no waiting when one is down or slow. Both providers then see your queries.':'Con respaldo, cada consulta va a ambos a la vez y gana la primera respuesta: sin esperas si uno falla o va lento. Ambos proveedores verán tus consultas.',
 'Ads still showing on some devices?':'¿Siguen saliendo anuncios en algunos dispositivos?','Devices also get DNS servers over':'Los dispositivos también reciben servidores DNS por',
@@ -432,7 +436,12 @@ async function loadWol(){
   <div class="row mt"><button class="btn p s" data-a="wake" data-v="${esc(x.name)}">${tr('Wake')}</button><button class="btn s d" data-a="wolrm" data-v="${esc(x.name)}">${tr('Remove')}</button>
   ${x.wokeAgo>=0?'<span class="k">'+tr('woken {0} ago',ago(x.wokeAgo))+'</span>':''}</div></div>`).join(''):'<div class="card mu">'+tr('No computers yet. Add one below.')+'</div>';
 }
+async function loadRecs(){
+ const r=await api('/api/records');
+ $('#recs').innerHTML=r.length?r.map(x=>`<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--ln);padding:6px 0"><span><b>${esc(x.name)}</b> <span class="k">${x.kind=='forward'?tr('and subdomains → DNS'):'→'}</span> ${x.ip}</span><button class="btn s d" data-a="recrm" data-v="${esc(x.kind+' '+x.name)}">${tr('Remove')}</button></div>`).join(''):'<p class="k">'+tr('No local names yet.')+'</p>';
+}
 async function loadSettings(){
+ loadRecs().catch(()=>{});
  const s=await api('/api/settings');
  fill('wifi',{ssid:s.staSsid});fill('radio',{tx:s.txPower});fill('ap',{ssid:s.apSsid,always:s.apAlways?'1':'0'});fill('dns',{mode:s.upstreamMode,ip:s.upstreamIp,backup:s.backupIp});fill('guard',{canary:s.guardCanary,encrypted:s.guardEncrypted,cname:s.cnameCheck});
  fill('mqtt',{uri:s.mqttUri,user:s.mqttUser,prefix:s.mqttPrefix});fill('admin',{user:s.adminUser});fill('hostname',{hostname:s.hostname});
@@ -469,6 +478,7 @@ const A={
  ban:(v,el)=>act('/api/ban',{ip:v,banned:el.dataset.b},loadClients),
  wake:v=>act('/api/wol',{action:'wake',name:v},loadWol),
  wolrm:v=>confirm(tr('Remove {0}?',v))&&act('/api/wol',{action:'remove',name:v},loadWol),
+ recrm:v=>{const[k,...n]=v.split(' ');act('/api/records',{action:'remove',kind:k,name:n.join(' ')},loadRecs)},
  fetch:()=>act('/api/blocklist/fetch',{}),
  fwcheck:()=>act('/api/firmware/check',{}),
  fwinstall:()=>confirm(tr('Install the update and restart?'))&&act('/api/firmware/install',{}),
@@ -487,6 +497,7 @@ const F={
  radio:d=>act('/api/settings',{section:'radio',...d}),
  ap:(d,f)=>act('/api/settings',{section:'ap',...d},()=>{f.pass.value='';refresh()}),
  dns:d=>act('/api/settings',{section:'dns',...d}),
+ recadd:(d,f)=>act('/api/records',{action:'add',...d},()=>{f.reset();loadRecs()}),
  guard:d=>act('/api/settings',{section:'guard',canary:d.canary?1:0,encrypted:d.encrypted?1:0,cname:d.cname?1:0}),
  mqtt:(d,f)=>act('/api/settings',{section:'mqtt',...d},()=>f.pass.value=''),
  admin:d=>act('/api/settings',{section:'admin',...d}),

@@ -199,9 +199,9 @@ inline void wr32(uint8_t* p, uint32_t v)
     p[3] = static_cast<uint8_t>(v);
 }
 
-// Captive-portal answer: A -> ipNetOrder (TTL 0, so nothing caches it after setup),
-// anything else -> NODATA.
-inline size_t buildCaptive(uint8_t* buf, size_t cap, const Question& q, uint32_t ipNetOrder)
+// Local answer: A -> ipNetOrder, anything else -> NODATA. TTL 0 for the
+// captive portal (nothing caches it after setup), short for local names.
+inline size_t buildCaptive(uint8_t* buf, size_t cap, const Question& q, uint32_t ipNetOrder, uint32_t ttl = 0)
 {
     if (q.qtype != kTypeA) {
         Question nodata = q;
@@ -211,7 +211,7 @@ inline size_t buildCaptive(uint8_t* buf, size_t cap, const Question& q, uint32_t
     size_t n = buildBlocked(buf, cap, q);
     if (n != q.end + 16) return n;
     uint8_t* a = buf + q.end;
-    memset(a + 6, 0, 4);                  // TTL 0
+    wr32(a + 6, ttl);
     memcpy(a + 12, &ipNetOrder, 4);       // already network byte order
     return n;
 }

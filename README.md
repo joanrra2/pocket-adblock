@@ -142,6 +142,19 @@ Settings also has **Reconnect now** and **Forget** for the uplink.
 By default the blocklist auto-updates every 24 h from esp32-c3-adblock's weekly
 release. You can change the URL, or upload your own list, under **Updates**.
 
+### Local names
+
+*Settings → Local names* gives devices on your network a name and can hand whole
+suffixes to another DNS server:
+
+- **Name → address**: `nas.home → 192.168.1.10`. Answered locally (TTL 60 s); exact
+  name only. Also overrides blocking for that one name.
+- **Suffix → DNS server**: `lan → 192.168.1.1` sends `lan` and everything under it to
+  your router, so the names it knows from DHCP work. `in-addr.arpa → router` does the
+  same for reverse lookups (IP → name). Longest suffix wins; never blocked.
+
+24 entries by default (`SINKHOLE_MAX_LOCAL_RECORDS`, 56 bytes each).
+
 ## Blocklists
 
 ```bash

@@ -70,6 +70,8 @@ private:
     esp_err_t getQueries(httpd_req_t* req);
     esp_err_t getLists(httpd_req_t* req);
     esp_err_t postLists(httpd_req_t* req);
+    esp_err_t getRecords(httpd_req_t* req);
+    esp_err_t postRecords(httpd_req_t* req);
     esp_err_t postBlocking(httpd_req_t* req);
     esp_err_t postBan(httpd_req_t* req);
     esp_err_t getSettings(httpd_req_t* req);

@@ -72,6 +72,8 @@ const WebServer::Route WebServer::kRoutes[] = {
     {"/api/queries", HTTP_GET, &WebServer::getQueries, true},
     {"/api/lists", HTTP_GET, &WebServer::getLists, true},
     {"/api/lists", HTTP_POST, &WebServer::postLists, true},
+    {"/api/records", HTTP_GET, &WebServer::getRecords, true},
+    {"/api/records", HTTP_POST, &WebServer::postRecords, true},
     {"/api/blocking", HTTP_POST, &WebServer::postBlocking, true},
     {"/api/ban", HTTP_POST, &WebServer::postBan, true},
     {"/api/settings", HTTP_GET, &WebServer::getSettings, true},
@@ -422,6 +424,49 @@ esp_err_t WebServer::getLists(httpd_req_t* req)
     j.endArray();
     j.endObject();
     return j.finish();
+}
+
+esp_err_t WebServer::getRecords(httpd_req_t* req)
+{
+    LocalRecords::Record r;
+    JsonWriter j(req);
+    j.beginArray();
+    for (size_t i = 0; d_.dns.records().at(i, r); i++)
+        j.beginObject()
+            .str("name", r.name)
+            .ip("ip", r.ip)
+            .str("kind", r.kind == LocalRecords::Kind::Forward ? "forward" : "address")
+            .endObject();
+    j.endArray();
+    return j.finish();
+}
+
+// action=add|remove, kind=address|forward, name, ip (add only)
+esp_err_t WebServer::postRecords(httpd_req_t* req)
+{
+    char form[kFormMax], action[16] = "", kind[16] = "", name[64] = "", ipText[20] = "";
+    if (readForm(req, form, sizeof(form)) < 0) return sendError(req, "400 Bad Request", "bad body");
+    field(form, "action", action, sizeof(action));
+    field(form, "kind", kind, sizeof(kind));
+    field(form, "name", name, sizeof(name));
+    field(form, "ip", ipText, sizeof(ipText));
+    const auto k = strcmp(kind, "forward") == 0 ? LocalRecords::Kind::Forward : LocalRecords::Kind::Address;
+    esp_err_t err;
+    if (strcmp(action, "remove") == 0) {
+        err = d_.dns.records().remove(name, k);
+    } else {
+        uint32_t ip = 0;
+        if (!parseIp4(ipText, ip)) return sendError(req, "400 Bad Request", "a valid IPv4 address is required");
+        err = d_.dns.records().add(name, ip, k);
+    }
+    if (err == ESP_OK && k == LocalRecords::Kind::Forward) d_.dns.flushCache();  // stale upstream answers
+    switch (err) {
+        case ESP_OK: return sendOk(req);
+        case ESP_ERR_INVALID_ARG: return sendError(req, "400 Bad Request", "not a valid name");
+        case ESP_ERR_NO_MEM: return sendError(req, "409 Conflict", "no room for more local names");
+        case ESP_ERR_NOT_FOUND: return sendError(req, "404 Not Found", "no such entry");
+        default: return sendError(req, "500 Internal Server Error", esp_err_to_name(err));
+    }
 }
 
 esp_err_t WebServer::postLists(httpd_req_t* req)

@@ -69,6 +69,11 @@ size_t DnsCache::lookup(uint32_t key, const uint8_t* query, size_t qend, uint8_t
     return 0;
 }
 
+void DnsCache::clear()
+{
+    for (size_t i = 0; i < sets_ * 2; i++) entries_[i].key = 0;
+}
+
 void DnsCache::store(uint32_t key, const uint8_t* resp, size_t len)
 {
     if (!sets_ || len > kMaxResponse || len < dns::kHeaderLen) return;

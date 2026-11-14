@@ -16,6 +16,7 @@ namespace {
 constexpr const char* TAG = "dns";
 constexpr uint16_t kDnsPort = 53;
 constexpr TickType_t kTimeout = pdMS_TO_TICKS(CONFIG_SINKHOLE_DNS_UPSTREAM_TIMEOUT_MS);
+constexpr uint32_t kLocalTtl = 60;  // local names: short, so edits show up quickly
 
 int openUdp(uint16_t port)
 {
@@ -54,6 +55,7 @@ int openUdp6(uint16_t port)
 esp_err_t DnsServer::start()
 {
     cache_.begin();
+    records_.load();
     serverSock_ = openUdp(kDnsPort);
     upstreamSock_ = openUdp(0);  // ephemeral source port
     server6Sock_ = openUdp6(kDnsPort);
@@ -94,6 +96,7 @@ void DnsServer::run()
             if (server6Sock_ >= 0 && FD_ISSET(server6Sock_, &rd)) onClientPacket(server6Sock_);
         }
         expirePending();
+        if (flushCache_.exchange(false)) cache_.clear();
     }
 }
 
@@ -137,9 +140,22 @@ void DnsServer::onClientPacket(int sock)
         }
     }
 
+    // Local names first: they are the user's own and never blocked.
+    LocalRecords::Kind localKind;
+    uint32_t localIp = 0;
+    const bool local = records_.lookup(q.name, q.nameLen, localKind, localIp);
+    if (local && localKind == LocalRecords::Kind::Address) {
+        counters_.allowed++;
+        clients_.record(client, false);
+        log_.add(client, q.name, false);
+        reply(from, v6, buf_, dns::buildCaptive(buf_, sizeof(buf_), q, localIp, kLocalTtl));
+        return;
+    }
+    const uint32_t forwardTo = local ? localIp : 0;  // forward rule: that server only
+
     // Bypass guard (canary domains / encrypted-DNS resolvers): NXDOMAIN, so
     // browsers and phones keep using this server. Respects pause and allow list.
-    if (const uint8_t g = guard_) {
+    if (const uint8_t g = forwardTo ? 0 : guard_.load()) {
         const guard::Hit hit = guard::check(q.name, q.nameLen, g);
         if (hit != guard::Hit::None && filter_.enabled() &&
             (hit == guard::Hit::Canary || !filter_.isAllowed(q.name, q.nameLen))) {
@@ -153,7 +169,7 @@ void DnsServer::onClientPacket(int sock)
     }
 
     const int64_t t0 = esp_timer_get_time();
-    const bool blocked = filter_.isBlocked(q.name, q.nameLen);
+    const bool blocked = !forwardTo && filter_.isBlocked(q.name, q.nameLen);
     // Rolling average of the filter cost (allow/custom/blocklist), published
     // every 256 queries; only this task writes the accumulators.
     filterSumUs_ += static_cast<uint32_t>(esp_timer_get_time() - t0);
@@ -188,7 +204,7 @@ void DnsServer::onClientPacket(int sock)
         return;
     }
 
-    const uint32_t up = upstream_;
+    const uint32_t up = forwardTo ? forwardTo : upstream_.load();
     Pending* p = up ? allocPending() : nullptr;
     if (!p) {
         counters_.dropped++;  // no upstream yet, or table full: client will retry
@@ -212,7 +228,7 @@ void DnsServer::onClientPacket(int sock)
     p->questionKey = qkey;
     p->cacheKey = ckey;
     p->upstreamIp = up;
-    p->upstreamIp2 = upstream2_;
+    p->upstreamIp2 = forwardTo ? 0 : upstream2_.load();
     p->failedMask = 0;
     p->client = from;
     p->clientV6 = v6;
