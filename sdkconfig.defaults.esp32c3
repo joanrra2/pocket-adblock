@@ -1,0 +1,2 @@
+# C3 SuperMini and most C3 boards expose the USB-Serial-JTAG port, not a UART bridge.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

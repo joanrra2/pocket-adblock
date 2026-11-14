@@ -1,0 +1,99 @@
+menu "DNS Sinkhole"
+
+    config SINKHOLE_HOSTNAME
+        string "Hostname (mDNS name, without .local)"
+        default "sinkhole"
+
+    config SINKHOLE_AP_PASSWORD
+        string "Default setup access point password (min 8 chars)"
+        default "sinkhole-setup"
+        help
+            WPA2 password of the device's own access point. Change it from the web UI.
+
+    config SINKHOLE_ADMIN_USER
+        string "Default web admin user"
+        default "admin"
+
+    config SINKHOLE_ADMIN_PASSWORD
+        string "Default web admin password"
+        default "sinkhole"
+        help
+            The web UI shows a warning while this default is still in use.
+
+    config SINKHOLE_UPSTREAM_DNS
+        string "Default upstream DNS resolver (IPv4)"
+        default "9.9.9.9"
+
+    config SINKHOLE_BLOCKLIST_URL
+        string "Default blocklist URL"
+        default "https://github.com/M-Abozaid/esp32-c3-adblock/releases/download/blocklist/blocklist.bin"
+        help
+            Raw (headerless) lists from esp32-c3-adblock and SHBL v1 lists from
+            tools/build_blocklist.py are both accepted. Leave empty to disable.
+
+    config SINKHOLE_BLOCKLIST_UPDATE_HOURS
+        int "Hours between automatic blocklist updates (0 = off)"
+        default 24
+        range 0 720
+
+    config SINKHOLE_MAX_CLIENTS
+        int "Tracked DNS clients"
+        default 64
+        range 8 256
+
+    config SINKHOLE_MAX_CUSTOM_DOMAINS
+        int "Custom block / allow entries (each list)"
+        default 64
+        range 8 512
+
+    config SINKHOLE_DNS_MAX_PENDING
+        int "Concurrent upstream DNS queries"
+        default 32
+        range 4 128
+
+    config SINKHOLE_DNS_UPSTREAM_TIMEOUT_MS
+        int "Upstream DNS timeout (ms)"
+        default 2000
+        range 200 10000
+
+    config SINKHOLE_DNS_CACHE_PSRAM
+        int "DNS answer cache entries when PSRAM is present"
+        default 4096
+        range 0 16384
+        help
+            ~530 bytes each. A hit answers in microseconds instead of an upstream
+            round trip. Halved automatically until it fits the free PSRAM.
+
+    config SINKHOLE_DNS_CACHE_INTERNAL
+        int "DNS answer cache entries without PSRAM (0 = no cache)"
+        default 32
+        range 0 512
+
+    config SINKHOLE_DNS_CACHE_MAX_TTL
+        int "Cap cached answers at this many seconds"
+        default 3600
+        range 30 86400
+
+    config SINKHOLE_WOL_MAX_HOSTS
+        int "Wake-on-LAN hosts"
+        default 16
+        range 1 64
+
+    config SINKHOLE_BOOT_BUTTON_GPIO
+        int "BOOT button GPIO (-1 = none)"
+        default 9 if IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32C2
+        default 0
+        range -1 48
+        help
+            Hold 3 s: turn the setup access point on for 15 minutes.
+            Hold 10 s: factory reset (erases settings, keeps the blocklist).
+
+    config SINKHOLE_WIFI_MAX_TX_POWER
+        int "Max Wi-Fi TX power in 0.25 dBm units (0 = driver default)"
+        default 0
+        range 0 84
+        help
+            Some C3 SuperMini boards have a badly matched antenna and drop the
+            connection at full power. 34 (= 8.5 dBm) usually fixes them.
+
+endmenu

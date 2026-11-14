@@ -1,0 +1,85 @@
+#pragma once
+// Persistent device settings (one versioned NVS blob) plus small NVS helpers
+// other components use for their own fixed-size tables.
+
+#include <cstddef>
+#include <cstdint>
+
+#include "esp_err.h"
+#include "sinkhole/rtos.hpp"
+
+namespace sinkhole {
+
+enum class UpstreamMode : uint8_t { Builtin = 0, Router = 1, Custom = 2 };
+
+struct Settings {
+    uint16_t version;
+
+    char hostname[32];
+
+    // Station (uplink) Wi-Fi. Empty SSID = not provisioned yet.
+    char staSsid[33];
+    char staPass[65];
+
+    // Device's own access point.
+    char apSsid[33];  // empty = "Sinkhole-XXXX" from MAC
+    char apPass[65];
+    bool apAlways;    // false (default): AP only while no uplink is configured or connected
+
+    // Web admin (HTTP Basic auth).
+    char adminUser[32];
+    char adminPass[64];
+
+    // DNS
+    UpstreamMode upstreamMode;
+    uint32_t upstreamIp;  // network byte order, used when Custom
+    bool blocking;
+
+    // Blocklist auto-update
+    char blocklistUrl[256];
+    uint16_t updateHours;  // 0 = off
+
+    // MQTT bridge (remote Wake-on-LAN). Empty URI = disabled.
+    char mqttUri[128];
+    char mqttUser[64];
+    char mqttPass[64];
+    char mqttPrefix[48];
+};
+
+class Config {
+public:
+    static constexpr uint16_t kVersion = 2;  // bump when Settings changes layout or defaults
+
+    esp_err_t load();  // defaults if missing / older version
+    Settings get();    // copy, thread-safe
+
+    // Apply a change and persist it: cfg.modify([](Settings& s){ ... });
+    template <typename F>
+    esp_err_t modify(F&& fn)
+    {
+        LockGuard g(mu_);
+        fn(s_);
+        return saveLocked();
+    }
+
+    bool usingDefaultAdminPassword();
+
+    static void applyDefaults(Settings& s);
+
+private:
+    esp_err_t saveLocked();
+
+    Mutex mu_;
+    Settings s_{};
+};
+
+// NVS helpers for fixed-size tables, all in the "sinkhole" namespace.
+namespace nvs {
+esp_err_t init();  // nvs_flash_init with erase-on-version-mismatch
+esp_err_t loadBlob(const char* key, void* data, size_t len, size_t* outLen = nullptr);
+esp_err_t saveBlob(const char* key, const void* data, size_t len);
+esp_err_t loadU8(const char* key, uint8_t& out);
+esp_err_t saveU8(const char* key, uint8_t v);
+}  // namespace nvs
+
+}  // namespace sinkhole

@@ -1,0 +1,13 @@
+# ESP32-S3 (any module): full clock, PSRAM when the module has it.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# PSRAM is optional. Octal is what N8R8/N16R8/N32R16V modules use; on a module
+# with quad PSRAM (R2) or none, init fails and the firmware simply runs without
+# it (the DNS cache then falls back to internal RAM).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+# Only memory we explicitly ask for (the DNS cache) goes to PSRAM; Wi-Fi, lwIP
+# and TLS buffers stay in faster internal RAM.
+CONFIG_SPIRAM_USE_CAPS_ALLOC=y

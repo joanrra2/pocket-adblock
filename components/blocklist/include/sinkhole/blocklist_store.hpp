@@ -1,0 +1,78 @@
+#pragma once
+// A/B blocklist storage on raw flash partitions ("bl_a" / "bl_b", subtype 0x40).
+//
+// The active slot is memory-mapped, so a lookup is a binary search on a plain
+// pointer: no file system, no RAM index. Updates stream into the inactive slot,
+// get verified (size, SHA-256, sort order) and only then become active; a bad
+// or interrupted download never touches the list that is serving queries.
+
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+
+#include "esp_err.h"
+#include "esp_partition.h"
+#include "psa/crypto.h"
+#include "sinkhole/hash_table.hpp"
+#include "sinkhole/rtos.hpp"
+
+namespace sinkhole {
+
+struct BlocklistInfo {
+    uint32_t count;
+    uint32_t createdUnix;
+    uint32_t activatedUptime;  // seconds since boot when it went live
+    char slot;                 // 'A', 'B' or '-' when none
+    uint32_t capacity;         // max hashes a slot can hold
+};
+
+class BlocklistStore {
+public:
+    esp_err_t begin();
+
+    bool contains(uint64_t hash);
+    BlocklistInfo info();
+
+    // ---- writer (one at a time; used by HTTP upload and the URL updater) ----
+    esp_err_t beginWrite();
+    esp_err_t write(const uint8_t* data, size_t len);
+    // Verifies and activates. `why` gets a human-readable reason on failure.
+    esp_err_t finishWrite(char* why, size_t whyLen);
+    void abortWrite();
+    bool writing() const { return writing_.load(); }
+
+private:
+    struct Mapped {
+        const esp_partition_t* part = nullptr;
+        esp_partition_mmap_handle_t handle = 0;
+        const uint8_t* base = nullptr;
+        BlocklistHeader hdr{};
+        HashTable table;
+        bool valid = false;
+    };
+
+    const esp_partition_t* slotPartition(int slot) const { return slots_[slot]; }
+    bool mapSlot(int slot, Mapped& out, bool verifyHash, char* why, size_t whyLen);
+    static void unmap(Mapped& m);
+    esp_err_t writeAt(size_t offset, const uint8_t* data, size_t len);
+    esp_err_t payloadWrite(const uint8_t* data, size_t len);
+
+    const esp_partition_t* slots_[2] = {nullptr, nullptr};
+
+    Mutex mu_;  // guards active_ / activeSlot_
+    Mapped active_;
+    int activeSlot_ = -1;
+    uint32_t activatedUptime_ = 0;
+
+    // writer state
+    std::atomic<bool> writing_{false};
+    int writeSlot_ = -1;
+    size_t erasedUpTo_ = 0;
+    size_t payloadBytes_ = 0;
+    uint8_t headBuf_[sizeof(BlocklistHeader)]{};
+    size_t headLen_ = 0;
+    enum class Mode { Detect, WithHeader, Raw } mode_ = Mode::Detect;
+    psa_hash_operation_t sha_ = PSA_HASH_OPERATION_INIT;
+};
+
+}  // namespace sinkhole

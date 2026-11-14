@@ -1,0 +1,16 @@
+# Board profile: ESP32-S3 modules with OCTAL flash (e.g. ESP32-S3-WROOM-2
+# N16R8V / N32R16V, 1.8 V). Octal flash must be configured at build time; do NOT
+# use this profile on ordinary quad-flash S3 boards, they won't boot.
+#
+#   idf.py -B build-s3-octal \
+#     -D SDKCONFIG=build-s3-octal/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32s3-octal-flash.defaults" \
+#     set-target esp32s3 build
+CONFIG_ESPTOOLPY_OCT_FLASH=y
+CONFIG_ESPTOOLPY_FLASHMODE_OPI=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# Only the first 8 MB are partitioned (2 x 1.5 MB apps, 2 x 2.4 MB blocklists,
+# ~500k domains each); that avoids 32-bit flash addressing on 32 MB parts.
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_8mb.csv"

@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Sinkhole</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%237c8cff' opacity='.25'/%3E%3Ccircle cx='16' cy='16' r='8' fill='%237c8cff'/%3E%3C/svg%3E">
+<style>
+:root{--bg:#0b0f15;--s1:#121822;--s2:#19212d;--ln:#232d3b;--tx:#e7edf5;--mu:#8a97a8;--ac:#7c8cff;--ok:#34d399;--bad:#fb7185;--wa:#fbbf24;--r:16px}
+@media (prefers-color-scheme:light){:root{--bg:#f3f5f9;--s1:#fff;--s2:#eef1f6;--ln:#e0e5ed;--tx:#0f172a;--mu:#64748b;--ac:#5a5ff0;--ok:#059669;--bad:#e11d48;--wa:#d97706}}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--tx);display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
+a{color:var(--ac)}
+aside{background:var(--s1);border-right:1px solid var(--ln);padding:22px 14px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column}
+.brand{display:flex;gap:10px;align-items:center;padding:0 10px 22px;font-weight:700;font-size:17px;letter-spacing:-.01em}
+nav{display:flex;flex-direction:column;gap:2px}
+nav a{display:flex;gap:12px;align-items:center;padding:10px 12px;border-radius:11px;color:var(--mu);text-decoration:none;font-weight:550}
+nav a:hover{background:var(--s2);color:var(--tx)}
+nav a.on{background:color-mix(in srgb,var(--ac) 15%,transparent);color:var(--ac)}
+.side-foot{margin-top:auto;padding:0 12px;color:var(--mu);font-size:12px}
+svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+main{padding:28px clamp(16px,4vw,44px) 40px;max-width:1120px;width:100%;min-width:0;overflow-x:clip}
+.card,.list>div{min-width:0}
+header{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+h1{font-size:24px;font-weight:700;letter-spacing:-.02em;flex:1}
+h2{font-size:15px;font-weight:650;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.card{background:var(--s1);border:1px solid var(--ln);border-radius:var(--r);padding:18px;margin-bottom:16px}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}
+.stats{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:16px}
+.stat{background:var(--s1);border:1px solid var(--ln);border-radius:var(--r);padding:14px 16px}
+.stat b{display:block;font-size:24px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.k,.mu{color:var(--mu)}.k{font-size:12.5px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:99px;font-size:12.5px;font-weight:600;background:var(--s2)}
+.pill:before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.wa{color:var(--wa)}
+.hero{display:flex;gap:24px;align-items:center;flex-wrap:wrap}
+.ring{position:relative;width:132px;height:132px;flex:none}
+.ring svg{transform:rotate(-90deg)}.ring circle{fill:none;stroke-width:12}
+.ring .c{position:absolute;inset:0;display:grid;place-content:center;text-align:center}
+.ring .c b{font-size:26px;font-weight:750;letter-spacing:-.03em}
+.seg{display:inline-flex;background:var(--s2);border-radius:11px;padding:3px;gap:2px;flex-wrap:wrap}
+.seg button{border:0;background:none;color:var(--mu);padding:7px 13px;border-radius:9px;font:inherit;font-weight:600;cursor:pointer}
+.seg button.on{background:var(--s1);color:var(--tx);box-shadow:0 1px 3px #0003}
+.btn{font:inherit;font-weight:600;padding:8px 14px;border-radius:10px;border:1px solid var(--ln);background:var(--s2);color:var(--tx);cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--mu)}.btn.p{background:var(--ac);border-color:var(--ac);color:#fff}
+.btn.d{color:var(--bad)}.btn.s{padding:5px 10px;font-size:13px}.btn:disabled{opacity:.5;cursor:wait}
+input,select{font:inherit;padding:9px 12px;border-radius:10px;border:1px solid var(--ln);background:var(--bg);color:var(--tx);width:100%;min-width:0}
+input[type=file]{padding:5px;color:var(--mu);font-size:13px}
+input[type=file]::file-selector-button{font:inherit;font-weight:600;color:var(--tx);background:var(--s2);border:1px solid var(--ln);border-radius:8px;padding:5px 12px;margin-right:10px;cursor:pointer}
+input:focus,select:focus{outline:2px solid color-mix(in srgb,var(--ac) 60%,transparent);border-color:transparent}
+label{display:block;font-size:12.5px;color:var(--mu);margin:10px 0 4px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.row>input{flex:1 1 170px;width:auto}
+.mt{margin-top:12px}
+.list>div{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--ln)}
+.list>div:last-child{border:0}.list .g{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--ok)}.dot.x{background:var(--bad)}.dot.off{background:var(--ln)}
+.bar{height:6px;border-radius:9px;background:var(--s2);overflow:hidden;display:flex}.bar i{background:var(--bad)}.bar u{background:var(--ok);text-decoration:none}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--s2);border:1px solid var(--ln);border-radius:99px;padding:4px 6px 4px 12px;font-size:13px}
+.chip button{border:0;background:none;color:var(--mu);cursor:pointer;font-size:15px;line-height:1;width:22px;height:22px;border-radius:50%}
+.chip button:hover{background:var(--ln);color:var(--bad)}
+.hosts{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
+.host{background:var(--s2);border-radius:13px;padding:14px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px}.kv dt{color:var(--mu)}.kv dd{overflow-wrap:anywhere}
+.notice{border-radius:12px;padding:10px 14px;margin-bottom:12px;background:color-mix(in srgb,var(--wa) 14%,transparent);color:var(--wa);font-weight:550}
+.prog{height:4px;border-radius:4px;background:var(--ac);width:0;transition:width .2s;margin-top:8px}
+.spark{width:100%;height:70px;display:block}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--tx);color:var(--bg);padding:10px 16px;border-radius:12px;font-weight:600;display:none;z-index:9;max-width:90vw}
+.toast.e{background:var(--bad);color:#fff}
+code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
+[hidden]{display:none!important}
+@media (max-width:760px){
+ body{grid-template-columns:minmax(0,1fr)}
+ aside{position:fixed;inset:auto 0 0 0;height:auto;padding:6px 4px calc(6px + env(safe-area-inset-bottom));border-right:0;border-top:1px solid var(--ln);z-index:5}
+ .brand,.side-foot{display:none}
+ nav{flex-direction:row;justify-content:space-around}
+ nav a{flex-direction:column;gap:2px;font-size:10.5px;padding:6px 2px;flex:1 1 0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ main{padding-bottom:96px}
+ .hero{justify-content:center;text-align:center}
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+ <symbol id="i-dash" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></symbol>
+ <symbol id="i-lists" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 7.8-8 9-4.6-1.2-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+ <symbol id="i-devices" viewBox="0 0 24 24"><rect x="2" y="4" width="15" height="11" rx="2"/><path d="M6 19h7M9.5 15v4"/><rect x="18" y="8" width="4" height="11" rx="1"/></symbol>
+ <symbol id="i-wake" viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></symbol>
+ <symbol id="i-system" viewBox="0 0 24 24"><path d="M12 3v11m0 0l-4-4m4 4l4-4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
+ <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17" r="2"/></symbol>
+</svg>
+
+<aside>
+ <div class="brand"><svg width="28" height="28" viewBox="0 0 32 32"><circle cx="16" cy="16" r="15" fill="var(--ac)" opacity=".18"/><circle cx="16" cy="16" r="10" fill="var(--ac)" opacity=".4"/><circle cx="16" cy="16" r="5" fill="var(--ac)"/></svg>Sinkhole</div>
+ <nav>
+  <a href="#dash"><svg class="i"><use href="#i-dash"/></svg>Overview</a>
+  <a href="#lists"><svg class="i"><use href="#i-lists"/></svg>Filters</a>
+  <a href="#devices"><svg class="i"><use href="#i-devices"/></svg>Devices</a>
+  <a href="#wake"><svg class="i"><use href="#i-wake"/></svg>Wake</a>
+  <a href="#system"><svg class="i"><use href="#i-system"/></svg>Updates</a>
+  <a href="#settings"><svg class="i"><use href="#i-settings"/></svg>Settings</a>
+ </nav>
+ <div class="side-foot"><div id="ver"></div><a href="https://github.com/M-Abozaid/esp32-c3-adblock" target="_blank" rel="noopener">based on esp32-c3-adblock</a></div>
+</aside>
+
+<main>
+ <header><h1 id="title">Overview</h1><span id="pill" class="pill">…</span></header>
+ <div id="notices"></div>
+
+ <section id="dash">
+  <div class="card hero">
+   <div class="ring"><svg width="132" height="132" viewBox="0 0 132 132"><circle cx="66" cy="66" r="54" stroke="var(--s2)"/><circle id="ringv" cx="66" cy="66" r="54" stroke="var(--bad)" stroke-linecap="round" stroke-dasharray="0 400"/></svg>
+    <div class="c"><b id="pct">0%</b><span class="k">blocked</span></div></div>
+   <div style="flex:1;min-width:220px">
+    <div style="font-size:18px;font-weight:650" id="headline">…</div>
+    <div class="mu" id="subline"></div>
+    <div class="seg mt" id="modes">
+     <button data-a="mode" data-v="on">On</button><button data-a="mode" data-v="5">Pause 5 min</button><button data-a="mode" data-v="60">1 hour</button><button data-a="mode" data-v="off">Off</button>
+    </div>
+   </div>
+  </div>
+  <div class="stats">
+   <div class="stat"><span class="k">Queries</span><b id="s-q">–</b></div>
+   <div class="stat"><span class="k">Blocked</span><b id="s-b" class="bad">–</b></div>
+   <div class="stat"><span class="k">Answered from cache</span><b id="s-c">–</b></div>
+   <div class="stat"><span class="k">Domains on blocklist</span><b id="s-l">–</b></div>
+  </div>
+  <div class="grid">
+   <div class="card"><h2>Activity <span class="k" style="font-weight:400">queries / min</span></h2>
+    <svg class="spark" viewBox="0 0 300 70" preserveAspectRatio="none"><defs><linearGradient id="gr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--ac)" stop-opacity=".35"/><stop offset="1" stop-color="var(--ac)" stop-opacity="0"/></linearGradient></defs>
+     <path id="area" fill="url(#gr)"/><path id="line" fill="none" stroke="var(--ac)" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>
+    <div class="row mu" style="justify-content:space-between;font-size:12px"><span id="rate">collecting…</span><span>last 5 min</span></div></div>
+   <div class="card"><h2>Network</h2><dl class="kv" id="net"></dl></div>
+  </div>
+  <div class="card"><h2>Live queries</h2>
+   <div class="row"><input id="ff" placeholder="Filter by domain or client IP"><div class="seg"><button data-a="feedmode" data-v="all" class="on">All</button><button data-a="feedmode" data-v="blocked">Blocked</button></div></div>
+   <div class="list mt" id="feed"></div></div>
+ </section>
+
+ <section id="lists" hidden>
+  <div class="card"><div class="seg" id="ltabs"><button data-a="ltab" data-v="block" class="on">Blocked domains</button><button data-a="ltab" data-v="allow">Always allowed</button></div>
+   <p class="mu mt" id="lhelp"></p>
+   <form class="row mt" data-f="adddomain"><input name="domain" placeholder="ads.example.com" autocomplete="off" required><button class="btn p">Add</button></form>
+   <div class="chips mt" id="chips"></div></div>
+ </section>
+
+ <section id="devices" hidden>
+  <div class="card"><h2>Devices using this resolver</h2><div class="list" id="clients"></div></div>
+ </section>
+
+ <section id="wake" hidden>
+  <div class="hosts" id="hosts"></div>
+  <div class="card mt"><h2>Add a computer</h2>
+   <form data-f="woladd"><div class="row"><input name="name" placeholder="Name, e.g. office-pc" required><input name="mac" placeholder="MAC aa:bb:cc:dd:ee:ff" required><input name="ip" placeholder="IP (optional, shows online state)"><button class="btn p">Save</button></div></form>
+   <p class="mu mt">The PC needs wired Ethernet with Wake-on-LAN enabled in BIOS/UEFI and on its network adapter. Wake it, then connect with AnyDesk, RustDesk or RDP.</p></div>
+  <div class="card"><h2>Wake from anywhere</h2><p class="mu">Publish any message to <code id="mtopic">sinkhole/wol/&lt;name&gt;/set</code> on your MQTT broker. No open ports needed. <span id="mstate"></span></p></div>
+ </section>
+
+ <section id="system" hidden>
+  <div class="grid">
+   <div class="card"><h2>Blocklist</h2><dl class="kv" id="blinfo"></dl>
+    <div class="bar mt"><u id="blbar" style="width:0;background:var(--ac)"></u></div>
+    <form data-f="upd"><label>Update URL</label><input name="url" placeholder="https://…/blocklist.bin">
+     <label>Check every (hours, 0 = never)</label><div class="row"><input name="hours" type="number" min="0" max="720" style="max-width:120px"><button class="btn">Save</button></div></form>
+    <div class="row mt"><button class="btn p" data-a="fetch">Download now</button></div>
+    <label>Or upload a .bin built with tools/build_blocklist.py</label><div class="row"><input type="file" id="blf" accept=".bin"><button class="btn" data-a="upload" data-v="bl">Upload</button></div><div class="prog" id="blp"></div></div>
+   <div class="card"><h2>Firmware</h2><dl class="kv" id="fwinfo"></dl>
+    <label>Upload a firmware image (esp-dns-sinkhole.bin)</label><div class="row"><input type="file" id="fwf" accept=".bin"><button class="btn p" data-a="upload" data-v="fw">Install</button></div><div class="prog" id="fwp"></div>
+    <p class="mu mt">The device restarts into the new image and goes back to the previous one automatically if it doesn't come up healthy within a minute.</p>
+    <div class="row mt"><button class="btn d" data-a="reboot">Restart device</button></div></div>
+  </div>
+ </section>
+
+ <section id="settings" hidden>
+  <div class="grid">
+   <div class="card"><h2>Your Wi-Fi</h2><div class="mu" id="wst"></div>
+    <div class="row mt"><button class="btn" data-a="scan" id="scanb">Scan networks</button><span class="k" id="scanm"></span></div>
+    <div class="list" id="nets"></div>
+    <form data-f="wifi"><label>Network</label><input name="ssid" required><label>Password</label><input name="pass" type="password" autocomplete="current-password">
+     <div class="row mt"><button class="btn p">Connect</button><button class="btn" type="button" data-a="reconnect">Reconnect</button><button class="btn d" type="button" data-a="forget">Forget</button></div></form></div>
+   <div class="card"><h2>Setup access point</h2><div class="mu" id="ast"></div>
+    <form data-f="ap"><label>Name (empty = Sinkhole-XXXX)</label><input name="ssid">
+     <label>New password (8+ characters, empty = keep)</label><input name="pass" type="password" autocomplete="new-password">
+     <label>Turn on</label><select name="always"><option value="0">When your Wi-Fi is down (recommended)</option><option value="1">Always</option></select>
+     <div class="row mt"><button class="btn p">Save</button></div></form>
+    <p class="k mt">Holding BOOT for 3 s also turns it on for 15 minutes; 10 s resets all settings.</p></div>
+   <div class="card"><h2>Upstream DNS</h2>
+    <form data-f="dns"><label>Forward allowed queries to</label><select name="mode"><option value="builtin">Quad9 (built-in)</option><option value="router">My router (DHCP)</option><option value="custom">Custom address</option></select>
+     <label>Custom IPv4</label><input name="ip" placeholder="1.1.1.1"><div class="row mt"><button class="btn p">Save</button></div></form></div>
+   <div class="card"><h2>Remote wake (MQTT)</h2>
+    <form data-f="mqtt"><label>Broker URI</label><input name="uri" placeholder="mqtts://broker.example.com:8883">
+     <div class="row"><div style="flex:1"><label>User</label><input name="user"></div><div style="flex:1"><label>Password (empty = keep)</label><input name="pass" type="password" autocomplete="new-password"></div></div>
+     <label>Topic prefix</label><input name="prefix" placeholder="sinkhole"><div class="row mt"><button class="btn p">Save</button><span class="k">applies after restart</span></div></form></div>
+   <div class="card"><h2>Admin login</h2>
+    <form data-f="admin"><label>User</label><input name="user" required autocomplete="username"><label>New password (8+ characters)</label><input name="pass" type="password" required minlength="8" autocomplete="new-password">
+     <div class="row mt"><button class="btn p">Change</button></div></form></div>
+   <div class="card"><h2>Device name</h2>
+    <form data-f="hostname"><label>Hostname</label><div class="row"><input name="hostname" required><span class="mu">.local</span></div><div class="row mt"><button class="btn p">Save</button><span class="k">applies after restart</span></div></form></div>
+  </div>
+ </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $=s=>document.querySelector(s),$$=s=>document.querySelectorAll(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
+const n=x=>Number(x||0).toLocaleString();
+const ago=s=>s<0?'never':s<60?s+'s':s<3600?(s/60|0)+'m':s<86400?(s/3600|0)+'h':(s/86400|0)+'d';
+const T={dash:'Overview',lists:'Filters',devices:'Devices',wake:'Wake-on-LAN',system:'Updates',settings:'Settings'};
+let tab='dash',S=null,hist=[],prev=null,feed=[],feedMode='all',ltab='block',L={block:[],allow:[]},nets=[];
+
+function toast(m,err){const t=$('#toast');t.textContent=m;t.className='toast'+(err?' e':'');t.style.display='block';clearTimeout(toast.h);toast.h=setTimeout(()=>t.style.display='none',3500)}
+async function api(u,data){
+ const o={headers:{}};
+ if(data!==undefined){o.method='POST';o.headers['X-Requested-With']='sinkhole';o.body=new URLSearchParams(data)}
+ const r=await fetch(u,o);let j={};try{j=await r.json()}catch(e){}
+ if(!r.ok)throw new Error(j.message||'HTTP '+r.status);return j}
+async function act(u,data,after){try{const j=await api(u,data);toast(j.message&&j.message!='ok'?j.message:'Saved');(after||refresh)()}catch(e){toast(e.message,1)}}
+const fill=(f,o)=>{for(const el of $(`form[data-f="${f}"]`).elements)if(el.name&&o[el.name]!==undefined&&el.type!='password')el.value=o[el.name]};
+
+// ---------- rendering
+function renderStatus(s){
+ const d=s.dns,w=s.wifi,b=s.blocklist,total=d.blocked+d.allowed,pct=total?d.blocked/total*100:0;
+ $('#ver').textContent='v'+s.version+' · up '+ago(s.uptime);
+ const st=d.blocking?['Protecting','ok']:d.resumeIn?['Paused','wa']:['Off','bad'];
+ $('#pill').textContent=st[0];$('#pill').className='pill '+st[1];
+ $('#pct').textContent=pct.toFixed(pct<10?1:0)+'%';
+ $('#ringv').setAttribute('stroke-dasharray',(pct/100*339.3).toFixed(1)+' 400');$('#ringv').style.opacity=pct>0?1:0;
+ $('#headline').textContent=d.blocking?'Your network is protected':d.resumeIn?'Blocking is paused':'Blocking is off';
+ $('#subline').textContent=d.blocking?n(d.blocked)+' of '+n(total)+' queries blocked since start':d.resumeIn?'Resumes automatically in '+ago(d.resumeIn):'All queries are forwarded unfiltered';
+ const cur=d.blocking?'on':d.resumeIn?'':'off';$$('#modes button').forEach(x=>x.classList.toggle('on',x.dataset.v==cur));
+ $('#s-q').textContent=n(total);$('#s-b').textContent=n(d.blocked);
+ const ch=d.cacheHits+d.cacheMisses;$('#s-c').textContent=ch?Math.round(d.cacheHits/ch*100)+'%':'–';$('#s-l').textContent=n(b.count);
+ // activity: queries/min from counter deltas between polls
+ const now=Date.now();
+ if(prev&&total>=prev.t){hist.push((total-prev.t)/((now-prev.at)/60000));if(hist.length>75)hist.shift()}
+ prev={t:total,at:now};drawSpark();
+ $('#net').innerHTML=[
+  ['Wi-Fi',w.connected?esc(w.ssid)+' <span class="mu">'+w.rssi+' dBm</span>':'<span class="wa">'+esc(w.state)+(w.reason?' · '+esc(w.reason):'')+'</span>'],
+  ['Address',w.connected?w.ip+' <span class="mu">· '+esc(s.hostname)+'.local</span>':'–'],
+  ['Upstream',d.upstream+' <span class="mu">('+d.upstreamMode+')</span>'],
+  ['Cache',n(d.cacheSize)+' answers · '+(d.cachePsram?'PSRAM':'internal RAM')],
+  ['Setup AP',w.apOn?esc(w.apSsid)+' · '+w.apClients+' connected':'off'],
+  ['Memory',n(s.memory.internalFree/1024|0)+' KB free'+(s.memory.psram?' · PSRAM '+n(s.memory.psramFree/1048576|0)+' MB':'')]
+ ].map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('');
+ const no=[];
+ if(w.state=='not configured')no.push('Not connected to your network yet. <a href="#settings">Set up Wi-Fi</a>');
+ else if(!w.connected)no.push('Wi-Fi "'+esc(w.ssid)+'" '+esc(w.state)+(w.reason?' ('+esc(w.reason)+')':'')+'. Retrying automatically.');
+ if(s.defaultPassword)no.push('You are using the default admin password. <a href="#settings">Change it</a>');
+ if(s.firmwarePendingVerify)no.push('New firmware is on probation and will be confirmed in a minute.');
+ if(!b.count&&!b.writing)no.push('No blocklist loaded yet: everything is forwarded. <a href="#system">Get one</a>');
+ $('#notices').innerHTML=no.map(x=>`<div class="notice">${x}</div>`).join('');
+ // updates view
+ const u=s.update;
+ $('#blinfo').innerHTML=[['Domains',n(b.count)+' <span class="mu">of '+n(b.capacity)+' · slot '+b.slot+'</span>'],['Custom / allowed',b.custom+' / '+b.allow],
+  ['Loaded',b.count?ago(b.activeFor)+' ago':'–'],
+  ['Last update',u.running||b.writing?'<span class="wa">in progress…</span>':u.lastAgo<0?'none since restart':ago(u.lastAgo)+' ago · <span class="'+(u.lastOk?'ok':'bad')+'">'+esc(u.message)+'</span>']].map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('');
+ $('#blbar').style.width=(b.capacity?b.count/b.capacity*100:0)+'%';
+ $('#fwinfo').innerHTML=[['Version',esc(s.version)],['Uptime',ago(s.uptime)],['Internal RAM free',n(s.memory.internalFree/1024|0)+' KB'],['PSRAM free',s.memory.psram?n(s.memory.psramFree/1048576|0)+' MB':'none']].map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('');
+ // settings status lines
+ $('#wst').innerHTML=w.connected?'<span class="ok">Connected</span> to '+esc(w.ssid)+' · '+w.ip+' · '+w.rssi+' dBm':w.state=='not configured'?'Not configured':
+  '<span class="wa">'+esc(w.state)+'</span>'+(w.reason?' · '+esc(w.reason):'')+' · '+w.attempts+' attempts'+(w.nextRetry?' · next in '+w.nextRetry+'s':'');
+ $('#ast').innerHTML='Now '+(w.apOn?'<span class="ok">on</span> · '+w.apClients+' connected':'off')+(w.apForcedFor?' · forced for '+ago(w.apForcedFor):'');
+ $('#mstate').innerHTML=s.mqtt.configured?(s.mqtt.connected?'<span class="ok">Broker connected.</span>':'<span class="wa">Broker not connected.</span>'):'Set up a broker in <a href="#settings">Settings</a>.';
+}
+function drawSpark(){
+ if(hist.length<2)return;const mx=Math.max(...hist,1),W=300,H=70,st=W/(hist.length-1);
+ const pts=hist.map((v,i)=>[i*st,H-4-(v/mx)*(H-10)]);
+ const d='M'+pts.map(p=>p[0].toFixed(1)+' '+p[1].toFixed(1)).join('L');
+ $('#line').setAttribute('d',d);$('#area').setAttribute('d',d+`L${W} ${H}L0 ${H}Z`);
+ $('#rate').textContent=hist[hist.length-1].toFixed(0)+' / min now · peak '+mx.toFixed(0);
+}
+function renderFeed(){
+ const f=$('#ff').value.trim().toLowerCase();
+ const rows=feed.filter(e=>(feedMode=='all'||e.blocked)&&(!f||e.domain.includes(f)||e.ip==f));
+ $('#feed').innerHTML=rows.length?rows.map(e=>`<div><span class="dot${e.blocked?' x':''}"></span><span class="g">${esc(e.domain)}</span><span class="k">${e.ip}</span><span class="k" style="width:40px;text-align:right">${ago(e.ago)}</span></div>`).join(''):'<div class="mu">No queries yet</div>';
+}
+function renderLists(){
+ $$('#ltabs button').forEach(x=>x.classList.toggle('on',x.dataset.v==ltab));
+ $('#lhelp').textContent=ltab=='block'?'Blocked in addition to the blocklist, subdomains included.':'Never blocked, even if the blocklist or a parent domain matches.';
+ const a=L[ltab];$('#chips').innerHTML=a.length?a.map(d=>`<span class="chip">${esc(d)}<button data-a="rm" data-v="${esc(d)}" title="Remove">×</button></span>`).join(''):'<span class="mu">Nothing here yet</span>';
+}
+
+// ---------- loaders
+async function loadDash(){feed=await api('/api/queries');renderFeed()}
+async function loadLists(){L=await api('/api/lists');renderLists()}
+async function loadClients(){
+ const c=await api('/api/clients');c.sort((a,b)=>b.blocked+b.allowed-a.blocked-a.allowed);
+ $('#clients').innerHTML=c.length?c.map(x=>{const t=x.blocked+x.allowed||1;return `<div><span class="dot${x.banned?' x':''}"></span>
+  <div class="g"><b>${x.ip}</b> <span class="k">${x.mac}</span><div class="bar" style="margin-top:6px;max-width:320px"><i style="width:${x.blocked/t*100}%"></i><u style="width:${x.allowed/t*100}%"></u></div>
+  <span class="k">${n(x.blocked)} blocked · ${n(x.allowed)} allowed · seen ${ago(x.seenAgo)} ago</span></div>
+  <button class="btn s" data-a="feedip" data-v="${x.ip}">Queries</button><button class="btn s ${x.banned?'':'d'}" data-a="ban" data-v="${x.ip}" data-b="${x.banned?0:1}">${x.banned?'Unblock':'Block all'}</button></div>`}).join(''):'<div class="mu">No devices have used this resolver yet</div>';
+}
+async function loadWol(){
+ const h=await api('/api/wol');
+ $('#hosts').innerHTML=h.length?h.map(x=>`<div class="host"><div class="row"><span class="dot${x.ip?(x.online?'':' off'):' off'}"></span><b class="g" style="flex:1">${esc(x.name)}</b>
+  <span class="k">${x.ip?(x.online?'online':'offline'):''}</span></div><div class="k mt">${x.mac}${x.ip?' · '+x.ip:''}</div>
+  <div class="row mt"><button class="btn p s" data-a="wake" data-v="${esc(x.name)}">Wake</button><button class="btn s d" data-a="wolrm" data-v="${esc(x.name)}">Remove</button>
+  ${x.wokeAgo>=0?'<span class="k">woken '+ago(x.wokeAgo)+' ago</span>':''}</div></div>`).join(''):'<div class="card mu">No computers yet. Add one below.</div>';
+}
+async function loadSettings(){
+ const s=await api('/api/settings');
+ fill('wifi',{ssid:s.staSsid});fill('ap',{ssid:s.apSsid,always:s.apAlways?'1':'0'});fill('dns',{mode:s.upstreamMode,ip:s.upstreamIp});
+ fill('mqtt',{uri:s.mqttUri,user:s.mqttUser,prefix:s.mqttPrefix});fill('admin',{user:s.adminUser});fill('hostname',{hostname:s.hostname});
+ fill('upd',{url:s.blocklistUrl,hours:s.updateHours});$('#mtopic').textContent=(s.mqttPrefix||'sinkhole')+'/wol/<name>/set';
+}
+const extra={dash:loadDash,lists:loadLists,devices:loadClients,wake:loadWol,system:()=>{},settings:()=>{}};
+async function refresh(){try{S=await api('/api/status');renderStatus(S);await extra[tab]()}catch(e){toast('Device unreachable: '+e.message,1)}}
+
+// ---------- actions
+function upload(kind){
+ const inp=kind=='fw'?$('#fwf'):$('#blf'),bar=kind=='fw'?$('#fwp'):$('#blp'),f=inp.files[0];
+ if(!f)return toast('Choose a file first',1);
+ if(kind=='fw'&&!confirm('Install '+f.name+' and restart?'))return;
+ const x=new XMLHttpRequest();x.open('POST',kind=='fw'?'/api/firmware/upload':'/api/blocklist/upload');x.setRequestHeader('X-Requested-With','sinkhole');
+ x.upload.onprogress=e=>bar.style.width=(e.loaded/e.total*100)+'%';
+ x.onload=()=>{let j={};try{j=JSON.parse(x.responseText)}catch(e){}toast(j.message||'HTTP '+x.status,x.status>=300);bar.style.width=0;inp.value='';refresh()};
+ x.onerror=()=>{toast('Upload failed',1);bar.style.width=0};x.send(f);
+}
+async function scan(){
+ const b=$('#scanb');b.disabled=true;$('#scanm').textContent='Scanning…';
+ try{nets=await api('/api/wifi/scan');$('#scanm').textContent=nets.length+' networks · tap to choose';
+  $('#nets').innerHTML=nets.map((x,i)=>{const q=x.rssi>=-55?4:x.rssi>=-67?3:x.rssi>=-75?2:1;
+   return `<div data-a="pick" data-v="${i}" style="cursor:pointer"><svg width="18" height="14" viewBox="0 0 18 14">${[0,1,2,3].map(k=>`<rect x="${k*5}" y="${10-k*3}" width="3" height="${4+k*3}" rx="1" fill="${k<q?'var(--ac)':'var(--ln)'}"/>`).join('')}</svg>
+   <span class="g">${esc(x.ssid)}${x.current?' <span class="ok">· current</span>':''}</span><span class="k">${x.secure?x.auth:'open'} · ch ${x.channel}</span></div>`}).join('')}
+ catch(e){$('#scanm').textContent='Scan failed: '+e.message}
+ b.disabled=false;
+}
+const A={
+ mode:v=>act('/api/blocking',v=='on'||v=='off'?{mode:v}:{mode:'pause',minutes:v}),
+ feedmode:(v,el)=>{feedMode=v;$$('[data-a=feedmode]').forEach(x=>x.classList.toggle('on',x==el));renderFeed()},
+ feedip:v=>{location.hash='dash';$('#ff').value=v;feedMode='all';setTimeout(renderFeed,300)},
+ ltab:v=>{ltab=v;renderLists()},
+ rm:v=>act('/api/lists',{action:'remove',list:ltab,domain:v},loadLists),
+ ban:(v,el)=>act('/api/ban',{ip:v,banned:el.dataset.b},loadClients),
+ wake:v=>act('/api/wol',{action:'wake',name:v},loadWol),
+ wolrm:v=>confirm('Remove '+v+'?')&&act('/api/wol',{action:'remove',name:v},loadWol),
+ fetch:()=>act('/api/blocklist/fetch',{}),
+ upload:upload,
+ reboot:()=>confirm('Restart the device now?')&&act('/api/reboot',{}),
+ scan:scan,
+ pick:v=>{const x=nets[v],f=$('form[data-f="wifi"]');f.ssid.value=x.ssid;f.pass.value='';x.secure?f.pass.focus():toast('Open network: no password needed')},
+ reconnect:()=>act('/api/wifi',{action:'reconnect'}),
+ forget:()=>confirm('Forget this Wi-Fi? The setup access point will turn on.')&&act('/api/wifi',{action:'forget'},()=>{refresh();loadSettings()}),
+};
+const F={
+ adddomain:(d,f)=>act('/api/lists',{action:'add',list:ltab,domain:d.domain},()=>{f.reset();loadLists()}),
+ woladd:(d,f)=>act('/api/wol',{action:'add',...d},()=>{f.reset();loadWol()}),
+ wifi:d=>act('/api/settings',{section:'wifi',...d}),
+ ap:(d,f)=>act('/api/settings',{section:'ap',...d},()=>{f.pass.value='';refresh()}),
+ dns:d=>act('/api/settings',{section:'dns',...d}),
+ mqtt:(d,f)=>act('/api/settings',{section:'mqtt',...d},()=>f.pass.value=''),
+ admin:d=>act('/api/settings',{section:'admin',...d}),
+ hostname:d=>act('/api/settings',{section:'hostname',...d}),
+ upd:d=>act('/api/settings',{section:'update',...d}),
+};
+document.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(el&&A[el.dataset.a]){e.preventDefault();A[el.dataset.a](el.dataset.v,el)}});
+document.addEventListener('submit',e=>{const f=e.target;if(F[f.dataset.f]){e.preventDefault();F[f.dataset.f](Object.fromEntries(new FormData(f)),f)}});
+$('#ff').addEventListener('input',renderFeed);
+
+function route(){
+ const t=location.hash.slice(1);tab=T[t]?t:'dash';
+ $$('nav a').forEach(a=>a.classList.toggle('on',a.hash=='#'+tab));
+ $$('main section').forEach(s=>s.hidden=s.id!=tab);
+ $('#title').textContent=T[tab];
+ refresh();if(tab=='settings'||tab=='system')loadSettings().catch(()=>{});
+}
+addEventListener('hashchange',route);
+route();
+setInterval(()=>{if(!document.hidden)refresh()},4000);
+</script>
+</body>
+</html>

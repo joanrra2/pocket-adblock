@@ -1,0 +1,14 @@
+build/
+build-*/
+managed_components/
+dependencies.lock
+sdkconfig
+sdkconfig.old
+*.log
+*.bin
+!docs/**/*.bin
+.vscode/
+.idea/
+__pycache__/
+test_logic
+test_logic.exe
