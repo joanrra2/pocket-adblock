@@ -39,6 +39,11 @@ PSRAM, and takes advantage of PSRAM when the board has it.
 
 Power it from a stable USB supply. Many routers have a spare USB port that is enough.
 
+## Install from the browser
+
+Open the **[web installer](https://OWNER.github.io/esp-dns-sinkhole/)** in Chrome or Edge,
+pick your board and press *Connect and install*. No toolchain needed.
+
 ## Build & flash
 
 Requires [ESP-IDF v6.1](https://docs.espressif.com/projects/esp-idf/en/v6.1/).

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Sinkhole Installer</title>
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+<style>
+:root{--bg:#0b0f15;--s1:#121822;--s2:#19212d;--ln:#232d3b;--tx:#e7edf5;--mu:#8a97a8;--ac:#7c8cff;--wa:#fbbf24}
+@media (prefers-color-scheme:light){:root{--bg:#f3f5f9;--s1:#fff;--s2:#eef1f6;--ln:#e0e5ed;--tx:#0f172a;--mu:#64748b;--ac:#5a5ff0;--wa:#b45309}}
+*{box-sizing:border-box;margin:0}
+body{font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--tx);display:grid;place-items:center;min-height:100vh;padding:24px 16px}
+main{max-width:560px;width:100%}
+.brand{display:flex;align-items:center;gap:12px;font-size:22px;font-weight:700;margin-bottom:6px}
+p{color:var(--mu)}
+.card{background:var(--s1);border:1px solid var(--ln);border-radius:16px;padding:20px;margin-top:20px}
+label{display:block;font-size:13px;color:var(--mu);margin-bottom:6px}
+select{width:100%;font:inherit;padding:10px 12px;border-radius:10px;border:1px solid var(--ln);background:var(--bg);color:var(--tx)}
+esp-web-install-button{display:block;margin-top:16px}
+button.go{font:inherit;font-weight:650;padding:11px 18px;border-radius:11px;border:0;background:var(--ac);color:#fff;cursor:pointer;width:100%}
+ol{padding-left:20px;color:var(--mu)}li{margin:4px 0}
+.note{color:var(--wa);font-size:14px;margin-top:12px}
+a{color:var(--ac)}
+#ver{font-size:13px;color:var(--mu)}
+</style>
+</head>
+<body>
+<main>
+ <div class="brand"><svg width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="15" fill="var(--ac)" opacity=".18"/><circle cx="16" cy="16" r="10" fill="var(--ac)" opacity=".4"/><circle cx="16" cy="16" r="5" fill="var(--ac)"/></svg>Sinkhole installer</div>
+ <p>Flash the DNS sinkhole firmware from your browser. Works in Chrome and Edge on desktop (Web Serial). <span id="ver"></span></p>
+ <div class="card">
+  <label for="board">Your board</label>
+  <select id="board">
+   <option value="esp32c3">ESP32-C3 (SuperMini and other 4 MB boards)</option>
+   <option value="esp32s3">ESP32-S3, quad flash (DevKitC N8/N16, N8R2, N16R8…)</option>
+   <option value="esp32s3-octal-flash">ESP32-S3, octal flash (WROOM-2 N16R8V / N32R16V)</option>
+   <option value="esp32">ESP32 (classic DevKit / WROOM / WROVER, 4 MB)</option>
+   <option value="esp32c6">ESP32-C6</option>
+  </select>
+  <esp-web-install-button id="install">
+   <button slot="activate" class="go">Connect and install</button>
+   <span slot="unsupported">Your browser can't do this. Use Chrome or Edge on a computer.</span>
+   <span slot="not-allowed">Open this page over HTTPS.</span>
+  </esp-web-install-button>
+  <p class="note">Not sure about octal flash? The module name ends in "V" (1.8 V), e.g. ESP32-S3-WROOM-2-N32R16V. A wrong choice simply won't boot; flash again with the other option.</p>
+ </div>
+ <div class="card">
+  <ol>
+   <li>Plug the board in with a data USB cable and press <b>Connect and install</b>.</li>
+   <li>Pick the serial port. If none shows up, hold BOOT while plugging the board in.</li>
+   <li>After flashing, join the Wi-Fi <b>Sinkhole-XXXX</b> (password <code>sinkhole-setup</code>); the setup page opens by itself.</li>
+  </ol>
+  <p style="margin-top:12px">Source and docs: <a href="{{REPO}}">{{REPO}}</a></p>
+ </div>
+</main>
+<script>
+const sel=document.getElementById('board'),btn=document.getElementById('install');
+const saved=(()=>{try{return localStorage.getItem('board')}catch(e){return null}})();
+if(saved&&[...sel.options].some(o=>o.value==saved))sel.value=saved;
+function apply(){btn.manifest='manifests/'+sel.value+'.json';try{localStorage.setItem('board',sel.value)}catch(e){}}
+sel.addEventListener('change',apply);apply();
+fetch('manifests/'+sel.value+'.json').then(r=>r.json()).then(m=>document.getElementById('ver').textContent='Version '+m.version+'.').catch(()=>{});
+</script>
+</body>
+</html>
