@@ -59,6 +59,7 @@ public:
     esp_err_t setStation(const char* ssid, const char* pass);  // save + connect
     esp_err_t forgetStation();                                 // clear creds, AP on
     void reconnect();                                          // retry now
+    void applyIpSettings();                                    // DHCP/static changed: apply + reconnect
     esp_err_t applyAccessPoint();                              // after AP settings change
     void forceAp(uint32_t minutes);                            // BOOT button
 
@@ -85,9 +86,11 @@ private:
     static void onEvent(void* arg, esp_event_base_t base, int32_t id, void* data);
     static void onRetryTimer(void* arg);
     static void onApTimer(void* arg);
+    static void onIpTimer(void* arg);
     void handleEvent(esp_event_base_t base, int32_t id, void* data);
     void configureAp(const Settings& s);
     void applyStaConfig(const char* ssid, const char* pass);
+    void applyIpConfig(const Settings& s);
     void scheduleRetry();
     void connectSoon();
     bool apWanted();
@@ -99,6 +102,7 @@ private:
     esp_netif_t* ap_ = nullptr;
     esp_timer_handle_t retryTimer_ = nullptr;
     esp_timer_handle_t apTimer_ = nullptr;
+    esp_timer_handle_t ipTimer_ = nullptr;
     Listener listener_ = nullptr;
     void* listenerCtx_ = nullptr;
 

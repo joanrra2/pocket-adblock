@@ -1,5 +1,6 @@
 #include "sinkhole/config.hpp"
 
+#include <cstddef>
 #include <cstring>
 
 #include "esp_log.h"
@@ -114,15 +115,37 @@ void Config::applyDefaults(Settings& s)
     copyStr(s.mqttPrefix, "sinkhole");
 }
 
+// Bytes of Settings that were meaningful in a given stored version. Fields are
+// only ever appended, so an older blob is a valid prefix of the current struct.
+size_t Config::validBytes(uint16_t version)
+{
+    switch (version) {
+        case 2: return offsetof(Settings, staticIp);
+        case kVersion: return sizeof(Settings);
+        default: return 0;  // unknown / too old: start from defaults
+    }
+}
+
 esp_err_t Config::load()
 {
     LockGuard g(mu_);
+    static Settings stored;  // only used here, under mu_; keeps 1 KB off the stack
+    memset(&stored, 0, sizeof(stored));
     size_t n = 0;
-    esp_err_t err = nvs::loadBlob(kSettingsKey, &s_, sizeof(s_), &n);
-    if (err != ESP_OK || n != sizeof(s_) || s_.version != kVersion) {
-        ESP_LOGI(TAG, "no stored settings (%s), using defaults", esp_err_to_name(err));
-        applyDefaults(s_);
+    esp_err_t err = nvs::loadBlob(kSettingsKey, &stored, sizeof(stored), &n);
+    const size_t valid = (err == ESP_OK && n >= sizeof(uint16_t)) ? validBytes(stored.version) : 0;
+    applyDefaults(s_);
+    if (!valid || n < valid) {
+        ESP_LOGI(TAG, "no usable stored settings (%s), using defaults", esp_err_to_name(err));
         return saveLocked();
+    }
+    if (stored.version != kVersion) {
+        memcpy(&s_, &stored, valid);  // keep everything the old version knew
+        s_.version = kVersion;
+        ESP_LOGI(TAG, "settings migrated from v%u to v%u", stored.version, kVersion);
+        saveLocked();
+    } else {
+        s_ = stored;
     }
     // Defensive: blobs from a buggy build could miss terminators.
     s_.hostname[sizeof(s_.hostname) - 1] = '\0';

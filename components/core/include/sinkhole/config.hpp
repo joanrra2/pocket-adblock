@@ -44,11 +44,17 @@ struct Settings {
     char mqttUser[64];
     char mqttPass[64];
     char mqttPrefix[48];
+
+    // ---- v3 (append-only from here on: older blobs are migrated in place) ----
+    bool staticIp;  // false = DHCP
+    uint32_t ipAddr, ipMask, ipGw, ipDns;  // network byte order
 };
 
 class Config {
 public:
-    static constexpr uint16_t kVersion = 2;  // bump when Settings changes layout or defaults
+    // Bump when fields are appended to Settings, and add the previous version's
+    // byte length to Config::validBytes() so stored settings migrate.
+    static constexpr uint16_t kVersion = 3;
 
     esp_err_t load();  // defaults if missing / older version
     Settings get();    // copy, thread-safe
@@ -68,6 +74,7 @@ public:
 
 private:
     esp_err_t saveLocked();
+    static size_t validBytes(uint16_t version);
 
     Mutex mu_;
     Settings s_{};

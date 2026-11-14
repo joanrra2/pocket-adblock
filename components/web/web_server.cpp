@@ -7,6 +7,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "lwip/inet.h"
 #include "sinkhole/json_writer.hpp"
 #include "sinkhole/memory.hpp"
 #include "sinkhole/text.hpp"
@@ -427,6 +428,12 @@ esp_err_t WebServer::getSettings(httpd_req_t* req)
         .str("mqttUri", s.mqttUri)
         .str("mqttUser", s.mqttUser)
         .str("mqttPrefix", s.mqttPrefix)
+        .str("ipMode", s.staticIp ? "static" : "dhcp")
+        // Static values when set, otherwise what DHCP handed out (handy defaults).
+        .ip("ipAddr", s.staticIp ? s.ipAddr : d_.wifi.staIp())
+        .ip("ipMask", s.staticIp ? s.ipMask : d_.wifi.staNetmask())
+        .ip("ipGw", s.staticIp ? s.ipGw : d_.wifi.gateway())
+        .ip("ipDns", s.staticIp ? s.ipDns : d_.wifi.staDns())
         .endObject();
     return j.finish();
 }
@@ -508,6 +515,40 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
             copyStr(s.mqttPrefix, e[0] ? e : "sinkhole");
         });
         return sendOk(req, "saved; reboot to apply");
+    }
+    if (strcmp(section, "ip") == 0) {
+        field(form, "mode", a, 16);
+        if (strcmp(a, "static") != 0) {
+            d_.cfg.modify([](Settings& s) { s.staticIp = false; });
+            d_.wifi.applyIpSettings();
+            return sendOk(req, "switched to DHCP; the address may change");
+        }
+        char ipS[20] = "", maskS[20] = "", gwS[20] = "", dnsS[20] = "";
+        field(form, "ip", ipS, sizeof(ipS));
+        field(form, "mask", maskS, sizeof(maskS));
+        field(form, "gw", gwS, sizeof(gwS));
+        field(form, "dns", dnsS, sizeof(dnsS));
+        uint32_t ip = 0, mask = 0, gw = 0, dns = 0;
+        if (!parseIp4(ipS, ip) || !parseIp4(gwS, gw)) return sendError(req, "400 Bad Request", "valid IP address and gateway are required");
+        in_addr m{};
+        if (inet_aton(maskS, &m) == 0) return sendError(req, "400 Bad Request", "invalid netmask");
+        mask = m.s_addr;
+        const uint32_t hm = ntohl(mask);
+        if (hm == 0 || (~hm & (~hm + 1)) != 0) return sendError(req, "400 Bad Request", "invalid netmask");
+        if ((ip & mask) != (gw & mask)) return sendError(req, "400 Bad Request", "gateway is not in the same subnet");
+        if (dnsS[0] && !parseIp4(dnsS, dns)) return sendError(req, "400 Bad Request", "invalid DNS server");
+        if (!dns) dns = gw;  // the device itself still needs a resolver (blocklist downloads)
+        d_.cfg.modify([&](Settings& s) {
+            s.staticIp = true;
+            s.ipAddr = ip;
+            s.ipMask = mask;
+            s.ipGw = gw;
+            s.ipDns = dns;
+        });
+        d_.wifi.applyIpSettings();
+        char msg[64];
+        snprintf(msg, sizeof(msg), "static IP set; reconnecting at http://%s/", ipS);
+        return sendOk(req, msg);
     }
     if (strcmp(section, "hostname") == 0) {
         if (!field(form, "hostname", a, 32) || !a[0]) return sendError(req, "400 Bad Request", "hostname is required");

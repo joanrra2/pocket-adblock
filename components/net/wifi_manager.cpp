@@ -48,11 +48,18 @@ esp_err_t WifiManager::begin()
     apT.name = "ap_policy";
     esp_timer_create(&apT, &apTimer_);
 
+    esp_timer_create_args_t ipT{};
+    ipT.callback = &WifiManager::onIpTimer;
+    ipT.arg = this;
+    ipT.name = "ip_apply";
+    esp_timer_create(&ipT, &ipTimer_);
+
     const Settings s = cfg_.get();
     configured_ = s.staSsid[0] != '\0';
     esp_wifi_set_mode(WIFI_MODE_APSTA);  // AP starts on; policy may turn it off later
     configureAp(s);
     applyStaConfig(s.staSsid, s.staPass);
+    applyIpConfig(s);
 
     err = esp_wifi_start();
     if (err != ESP_OK) return err;
@@ -117,6 +124,52 @@ void WifiManager::applyStaConfig(const char* ssid, const char* pass)
     sta.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;  // strongest AP of a mesh, not the first seen
     sta.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
     esp_wifi_set_config(WIFI_IF_STA, &sta);
+}
+
+// Static IP: stop the DHCP client and set the address before (re)connecting;
+// esp_netif then reports IP_EVENT_STA_GOT_IP on link-up as usual.
+void WifiManager::applyIpConfig(const Settings& s)
+{
+    if (s.staticIp && s.ipAddr && s.ipMask) {
+        esp_netif_dhcpc_stop(sta_);
+        esp_netif_ip_info_t info{};
+        info.ip.addr = s.ipAddr;
+        info.netmask.addr = s.ipMask;
+        info.gw.addr = s.ipGw;
+        esp_netif_set_ip_info(sta_, &info);
+        if (s.ipDns) {
+            esp_netif_dns_info_t dns{};
+            dns.ip.type = ESP_IPADDR_TYPE_V4;
+            dns.ip.u_addr.ip4.addr = s.ipDns;
+            esp_netif_set_dns_info(sta_, ESP_NETIF_DNS_MAIN, &dns);
+        }
+        char ip[16];
+        formatIp4(s.ipAddr, ip);
+        ESP_LOGI(TAG, "static IP %s", ip);
+    } else {
+        esp_netif_dhcpc_start(sta_);  // no-op error if already running
+    }
+}
+
+// Deferred by 500 ms so the HTTP reply that triggered it still goes out on the
+// old address before the link drops.
+void WifiManager::applyIpSettings()
+{
+    esp_timer_stop(ipTimer_);
+    esp_timer_start_once(ipTimer_, 500 * 1000);
+}
+
+void WifiManager::onIpTimer(void* arg)
+{
+    auto* self = static_cast<WifiManager*>(arg);
+    self->applyIpConfig(self->cfg_.get());
+    if (self->configured_) {
+        if (self->connected_) {
+            self->selfDisconnect_ = true;
+            esp_wifi_disconnect();
+        }
+        self->connectSoon();
+    }
 }
 
 // ------------------------------------------------------------------ AP policy
