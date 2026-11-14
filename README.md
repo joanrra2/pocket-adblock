@@ -187,6 +187,22 @@ Plain HTTP on the LAN, the same trust model as the original project. Every API c
 needs HTTP Basic auth, and every change also needs an `X-Requested-With` header, which
 blocks CSRF via cached credentials. Change the default passwords. The setup AP uses WPA2.
 
+## Benchmark vs esp32-c3-adblock
+
+Same ESP32-S3 board (WROOM-2 N32R16V), same 138,896-domain list, same Wi-Fi, measured
+from a wired PC with `tools/dns_bench.py`. The original (Arduino, commit at the time of
+writing) was built for the S3 with an added PlatformIO env; ours is the default build
+(no bloom filter).
+
+| | esp32-c3-adblock | esp-dns-sinkhole |
+|---|---|---|
+| Blocked query, p50 / p99 | 5.05 / 10.96 ms | **1.87 / 5.90 ms** |
+| Same allowed name again, p50 | 18.99 ms (forwarded every time) | **1.87 ms** (answer cache) |
+| Throughput, 16 parallel clients | 347 queries/s | **697 queries/s** |
+| Blocked queries while uncached names wait on the upstream, p50 / max | 47 / 315 ms (stuck behind each lookup) | **1.9 / 5.9 ms** |
+| Firmware image | 1,222,688 B | **1,021,808 B** |
+| Free internal heap at runtime | 210 KB | 198 KB (+ cache and history in PSRAM) |
+
 ## Architecture
 
 ```
