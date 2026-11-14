@@ -89,8 +89,10 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+        # --latest: devices fetch releases/latest/download/manifest.json, so a
+        # firmware release must always be "Latest", never the blocklist one.
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --generate-notes \
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --generate-notes --latest \
             --notes "Flash *-full.bin at 0x0 for a first install (or use the browser installer); upload *-ota.bin from the web UI afterwards."
 
   # Browser installer (ESP Web Tools) on GitHub Pages, refreshed on every release.
