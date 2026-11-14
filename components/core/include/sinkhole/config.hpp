@@ -70,6 +70,10 @@ struct Settings {
 
     // ---- v10 ----
     uint8_t safeSearch;  // safe::kGoogle | kBing | kYoutubeModerate | kYoutubeStrict
+
+    // ---- v11 ----
+    bool dot;           // DNS over TLS upstream (CONFIG_SINKHOLE_DNS_OVER_TLS builds)
+    char dotHost[64];   // e.g. dns.quad9.net
 };
 
 enum TxPower : uint8_t { TxAuto = 0, TxFull = 1, TxReduced = 2 };
@@ -78,7 +82,7 @@ class Config {
 public:
     // Bump when fields are appended to Settings, and add the previous version's
     // byte length to Config::validBytes() so stored settings migrate.
-    static constexpr uint16_t kVersion = 10;
+    static constexpr uint16_t kVersion = 11;
 
     esp_err_t load();  // defaults if missing / older version
     Settings get();    // copy, thread-safe (~1 KB: avoid on small stacks)

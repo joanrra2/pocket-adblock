@@ -14,6 +14,7 @@
 #include "sdkconfig.h"
 #include "sinkhole/dns_cache.hpp"
 #include "sinkhole/domain_filter.hpp"
+#include "sinkhole/dot_proxy.hpp"
 #include "sinkhole/local_records.hpp"
 #include "sinkhole/safe_search.hpp"
 #include "sinkhole/rtos.hpp"
@@ -36,9 +37,11 @@ public:
     esp_err_t start();
     // With a backup set, every forwarded query is sent to both and the first
     // matching answer wins: a dead or slow resolver costs no latency.
-    void setUpstream(uint32_t primary, uint32_t backup = 0)
+    // port: 53, or the local DNS-over-TLS proxy's loopback port.
+    void setUpstream(uint32_t primary, uint32_t backup = 0, uint16_t port = 53)
     {
-        if (primary != upstream_) safeRefreshAt_ = 0;  // re-learn SafeSearch endpoints from it
+        if (primary != upstream_ || port != upstreamPort_) safeRefreshAt_ = 0;  // re-learn SafeSearch endpoints
+        upstreamPort_ = port;
         upstream_ = primary;
         upstream2_ = backup != primary ? backup : 0;
     }
@@ -64,6 +67,7 @@ public:
     bool running() const { return running_; }
     const DnsCache& cache() const { return cache_; }
     LocalRecords& records() { return records_; }
+    DotProxy& dot() { return dot_; }
     // Drop cached answers (e.g. after a forward rule changed). Done by the DNS task.
     void flushCache() { flushCache_ = true; }
     // safe::kGoogle | kBing | kYoutubeModerate | kYoutubeStrict (0 = off).
@@ -111,6 +115,7 @@ private:
     int upstreamSock_ = -1;
     std::atomic<uint32_t> upstream_{0};
     std::atomic<uint32_t> upstream2_{0};
+    std::atomic<uint16_t> upstreamPort_{53};
     std::atomic<uint32_t> wins_[2] = {0, 0};  // first answers: primary / backup
     std::atomic<uint32_t> filterAvgUs10_{0};
     uint32_t filterSumUs_ = 0;
@@ -131,6 +136,7 @@ private:
 
     DnsCache cache_;
     LocalRecords records_;
+    DotProxy dot_;
     Pending pending_[CONFIG_SINKHOLE_DNS_MAX_PENDING]{};
     uint8_t buf_[1536];  // any non-fragmented UDP datagram
     uint8_t out_[DnsCache::kMaxResponse];

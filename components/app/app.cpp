@@ -93,7 +93,14 @@ void App::applyUpstream(void* ctx)
             up = gw;
     }
     if (!up) parseIp4(CONFIG_SINKHOLE_UPSTREAM_DNS, up);
-    self->dns_.setUpstream(up, s.upstreamIp2);
+    // DNS over TLS: everything allowed goes through the local TLS proxy, with no
+    // plain-UDP backup (it would leak the queries the user wants encrypted).
+    const bool dot = DotProxy::available() && s.dot && s.dotHost[0];
+    self->dns_.dot().setHost(dot ? s.dotHost : "");
+    if (dot)
+        self->dns_.setUpstream(htonl(INADDR_LOOPBACK), 0, DotProxy::kPort);
+    else
+        self->dns_.setUpstream(up, s.upstreamIp2);
     self->dns_.setGuard(s.bypassGuard);
     self->dns_.setCnameCheck(s.cnameCheck);
     self->dns_.setSafeSearch(s.safeSearch);
@@ -101,7 +108,10 @@ void App::applyUpstream(void* ctx)
     char ip[16], ip2[16] = "none";
     formatIp4(up, ip);
     if (self->dns_.backupUpstream()) formatIp4(self->dns_.backupUpstream(), ip2);
-    ESP_LOGI(TAG, "upstream DNS %s, backup %s", ip, ip2);
+    if (dot)
+        ESP_LOGI(TAG, "upstream DNS over TLS: %s:853", s.dotHost);
+    else
+        ESP_LOGI(TAG, "upstream DNS %s, backup %s", ip, ip2);
 }
 
 // What the MQTT bridge may read / control (Home Assistant entities).

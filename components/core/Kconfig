@@ -140,6 +140,17 @@ menu "DNS Sinkhole"
         default 2048
         range 64 32768
 
+    config SINKHOLE_DNS_OVER_TLS
+        bool "Encrypted upstream: DNS over TLS (uses ~40 KB RAM)"
+        default n
+        help
+            Adds Settings -> Upstream DNS -> "Encrypt with DNS over TLS": allowed
+            queries go to the provider over one TLS connection (port 853), so the
+            ISP can't read or change them. Costs ~40 KB of RAM for the TLS session
+            while connected, plus a 6 KB task stack.
+            Recommended: boards with PSRAM (ESP32-S3 / WROVER). Not recommended on
+            the ESP32-C3: it needs that RAM for HTTPS updates.
+
     config SINKHOLE_BLOOM_FILTER
         bool "RAM bloom filter in front of the flash blocklist (uses extra RAM)"
         default n

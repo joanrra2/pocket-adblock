@@ -9,6 +9,7 @@
 #include "esp_timer.h"
 #include "sinkhole/bypass_guard.hpp"
 #include "sinkhole/dns_packet.hpp"
+#include "sinkhole/dot_proxy.hpp"
 
 namespace sinkhole {
 
@@ -58,6 +59,7 @@ esp_err_t DnsServer::start()
 {
     cache_.begin();
     records_.load();
+    dot_.start();
     serverSock_ = openUdp(kDnsPort);
     upstreamSock_ = openUdp(0);  // ephemeral source port
     server6Sock_ = openUdp6(kDnsPort);
@@ -255,10 +257,11 @@ void DnsServer::onClientPacket(int sock)
     dns::wr16(buf_, id);
     sockaddr_in to{};
     to.sin_family = AF_INET;
-    to.sin_port = htons(kDnsPort);
     int sent = 0;
     for (uint32_t target : {p->upstreamIp, p->upstreamIp2}) {
         if (!target) continue;
+        // Primary may be the local DNS-over-TLS proxy; forward rules and the backup use 53.
+        to.sin_port = htons(target == p->upstreamIp && !forwardTo ? upstreamPort_.load() : kDnsPort);
         to.sin_addr.s_addr = target;
         if (sendto(upstreamSock_, buf_, static_cast<size_t>(len), 0,
                    reinterpret_cast<sockaddr*>(&to), sizeof(to)) >= 0)
@@ -277,7 +280,7 @@ void DnsServer::onUpstreamPacket()
     int len = recvfrom(upstreamSock_, buf_, sizeof(buf_), 0, reinterpret_cast<sockaddr*>(&from),
                        &fromLen);
     if (len < static_cast<int>(dns::kHeaderLen)) return;
-    if (from.sin_port != htons(kDnsPort)) return;
+    if (from.sin_port != htons(kDnsPort) && from.sin_port != htons(upstreamPort_.load())) return;
 
     const uint16_t id = dns::rd16(buf_);
     const size_t qend = dns::questionEnd(buf_, static_cast<size_t>(len));
@@ -400,7 +403,7 @@ void DnsServer::refreshSafeTargets()
         pendingInUse_++;
         sockaddr_in to{};
         to.sin_family = AF_INET;
-        to.sin_port = htons(kDnsPort);
+        to.sin_port = htons(upstreamPort_.load());
         to.sin_addr.s_addr = up;
         sendto(upstreamSock_, pkt, n, 0, reinterpret_cast<sockaddr*>(&to), sizeof(to));
     }

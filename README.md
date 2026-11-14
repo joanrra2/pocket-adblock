@@ -80,6 +80,7 @@ profiles in `boards/` turn on what suits that hardware.
 | Option | Default | RAM | Recommended for |
 |---|---|---|---|
 | `SINKHOLE_QUERY_HISTORY_EXTENDED` (+ `_ENTRIES`, 2048) | off (32 queries) | 76 B per entry, PSRAM | boards with PSRAM (on in the octal S3 profile, 4096) |
+| `SINKHOLE_DNS_OVER_TLS` | off (on in the octal S3 profile) | ~26 KB internal while connected (closes after 2 min idle) + 6 KB task | boards with PSRAM; not the C3. Encrypted upstream (port 853); on the S3 uncached lookups were no slower than plain UDP |
 | `SINKHOLE_BLOOM_FILTER` (+ `_BITS_PER_ENTRY`, 10) | off | ~1.25 B per slot entry: ~270 KB (4 MB layout), ~1 MB (8 MB layout) | boards with PSRAM; not the C3 (it needs that RAM for HTTPS). On an S3: not-listed lookups 80.8 → 54.7 µs |
 
 Prebuilt images for every board are attached to each

@@ -1,4 +1,4 @@
-idf_component_register(SRCS "dns_server.cpp" "dns_cache.cpp" "local_records.cpp"
+idf_component_register(SRCS "dns_server.cpp" "dns_cache.cpp" "local_records.cpp" "dot_proxy.cpp"
                        INCLUDE_DIRS "include"
                        REQUIRES core blocklist stats lwip
-                       PRIV_REQUIRES log esp_hw_support esp_timer)
+                       PRIV_REQUIRES log esp_hw_support esp_timer esp-tls mbedtls)

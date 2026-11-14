@@ -276,6 +276,10 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
         .num("dropped", d_.counters.dropped.load())
         .num("bypassBlocked", d_.counters.bypassBlocked.load())
         .num("cnameBlocked", d_.counters.cnameBlocked.load())
+        .boolean("dotOn", s.dot && DotProxy::available())
+        .boolean("dotConnected", d_.dns.dot().connected())
+        .num("dotQueries", d_.dns.dot().queries())
+        .num("dotConnects", d_.dns.dot().connects())
         .num("pending", d_.dns.pendingCount())
         .ip("upstream", d_.dns.upstream())
         .ip("backup", d_.dns.backupUpstream())
@@ -534,6 +538,9 @@ esp_err_t WebServer::getSettings(httpd_req_t* req)
         .str("upstreamMode", upstreamModeName(s.upstreamMode))
         .ip("upstreamIp", s.upstreamIp)
         .ip("backupIp", s.upstreamIp2)
+        .boolean("dotAvailable", DotProxy::available())
+        .boolean("dot", s.dot)
+        .str("dotHost", s.dotHost)
         .boolean("guardCanary", s.bypassGuard & 1)
         .boolean("guardEncrypted", s.bypassGuard & 2)
         .boolean("cnameCheck", s.cnameCheck)
@@ -607,10 +614,22 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
             return sendError(req, "400 Bad Request", "custom mode needs a valid IPv4 address");
         if (field(form, "backup", c, 20) && c[0] && !parseIp4(c, backup))
             return sendError(req, "400 Bad Request", "invalid backup address");
+        char dot[4] = "", dotHost[64] = "";
+        field(form, "dot", dot, sizeof(dot));
+        field(form, "dotHost", dotHost, sizeof(dotHost));
+        const bool dotOn = dot[0] == '1' && DotProxy::available();
+        if (dotOn) {
+            bool okHost = dotHost[0] != '\0' && strchr(dotHost, '.') != nullptr;
+            for (const char* h = dotHost; *h && okHost; h++)
+                okHost = isalnum(static_cast<unsigned char>(*h)) || *h == '.' || *h == '-';
+            if (!okHost) return sendError(req, "400 Bad Request", "DNS over TLS needs a server name, e.g. dns.quad9.net");
+        }
         d_.cfg.modify([&](Settings& s) {
             s.upstreamMode = mode;
             if (ip) s.upstreamIp = ip;
             s.upstreamIp2 = backup;  // empty field = no backup
+            s.dot = dotOn;
+            if (dotHost[0]) copyStr(s.dotHost, dotHost);
         });
         if (d_.applyUpstream) d_.applyUpstream(d_.appCtx);
         return sendOk(req);

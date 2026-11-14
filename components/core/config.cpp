@@ -117,6 +117,7 @@ void Config::applyDefaults(Settings& s)
     s.bypassGuard = 1;  // canary domains on, encrypted-DNS list off (see bypass_guard.hpp)
     s.cnameCheck = true;
     s.haDiscovery = true;
+    copyStr(s.dotHost, "dns.quad9.net");
 }
 
 // Bytes of Settings that were meaningful in a given stored version. Fields are
@@ -132,6 +133,7 @@ size_t Config::validBytes(uint16_t version)
         case 7: return offsetof(Settings, cnameCheck);
         case 8: return offsetof(Settings, haDiscovery);
         case 9: return offsetof(Settings, safeSearch);
+        case 10: return offsetof(Settings, dot);
         case kVersion: return sizeof(Settings);
         default:
             // Newer firmware wrote it (rollback / downgrade): fields are only ever
@@ -182,6 +184,7 @@ esp_err_t Config::load()
     s_.mqttUser[sizeof(s_.mqttUser) - 1] = '\0';
     s_.mqttPass[sizeof(s_.mqttPass) - 1] = '\0';
     s_.mqttPrefix[sizeof(s_.mqttPrefix) - 1] = '\0';
+    s_.dotHost[sizeof(s_.dotHost) - 1] = '\0';
     return ESP_OK;
 }
 
