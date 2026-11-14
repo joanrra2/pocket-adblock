@@ -78,6 +78,8 @@ public:
     uint32_t staDns() const;                   // DHCP-provided DNS, 0 if none
     uint32_t gateway() const { return gateway_; }
     uint32_t apIp() const;
+    // IPv6 addresses of the uplink as text; hasGlobal = the network routes IPv6.
+    size_t ip6Addresses(char out[][46], size_t max, bool* hasGlobal) const;
     uint32_t apNetmask() const;
     int rssi() const;
     void apSsid(char out[33]) const;

@@ -8,9 +8,18 @@
 #include "sinkhole/memory.hpp"
 #include "lwip/etharp.h"
 #include "lwip/netif.h"
+#include "lwip/sockets.h"
 #include "sinkhole/config.hpp"
 
 namespace sinkhole {
+
+void ClientAddr::format(char out[46]) const
+{
+    if (v6)
+        inet_ntop(AF_INET6, a, out, 46);
+    else
+        inet_ntop(AF_INET, a, out, 46);
+}
 
 namespace {
 constexpr const char* kBannedKey = "banned";
@@ -27,9 +36,9 @@ esp_err_t resolveMacs(void* ctx)
     static const uint8_t zero[6] = {};
     for (size_t i = 0; i < job->count; i++) {
         ClientInfo& c = job->clients[i];
-        if (memcmp(c.mac, zero, 6) != 0) continue;
+        if (c.addr.v6 || memcmp(c.mac, zero, 6) != 0) continue;  // ARP is IPv4 only
         ip4_addr_t ip;
-        ip.addr = c.ip;
+        ip.addr = c.addr.v4();
         for (struct netif* nif = netif_list; nif; nif = nif->next) {
             struct eth_addr* eth = nullptr;
             const ip4_addr_t* found = nullptr;
@@ -54,17 +63,17 @@ esp_err_t ClientTable::load()
     return ESP_OK;
 }
 
-ClientInfo* ClientTable::findLocked(uint32_t ip)
+ClientInfo* ClientTable::findLocked(const ClientAddr& addr)
 {
     for (size_t i = 0; i < count_; i++)
-        if (clients_[i].ip == ip) return &clients_[i];
+        if (clients_[i].addr == addr) return &clients_[i];
     return nullptr;
 }
 
-bool ClientTable::record(uint32_t ip, bool blocked)
+bool ClientTable::record(const ClientAddr& addr, bool blocked)
 {
     LockGuard g(mu_);
-    ClientInfo* c = findLocked(ip);
+    ClientInfo* c = findLocked(addr);
     if (!c) {
         if (count_ < kCapacity) {
             c = &clients_[count_++];
@@ -75,8 +84,9 @@ bool ClientTable::record(uint32_t ip, bool blocked)
                 if (clients_[i].lastSeen < c->lastSeen) c = &clients_[i];
         }
         memset(c, 0, sizeof(*c));
-        c->ip = ip;
-        for (size_t i = 0; i < bannedCount_; i++)
+        c->addr = addr;
+        const uint32_t ip = addr.v4();
+        for (size_t i = 0; ip && i < bannedCount_; i++)
             if (banned_[i] == ip) c->banned = true;
     }
     c->lastSeen = uptimeSeconds();
@@ -98,7 +108,7 @@ bool ClientTable::isBanned(uint32_t ip)
 esp_err_t ClientTable::setBanned(uint32_t ip, bool banned)
 {
     LockGuard g(mu_);
-    if (ClientInfo* c = findLocked(ip)) c->banned = banned;
+    if (ClientInfo* c = findLocked(ClientAddr::fromV4(ip))) c->banned = banned;
     size_t idx = bannedCount_;
     for (size_t i = 0; i < bannedCount_; i++)
         if (banned_[i] == ip) idx = i;
@@ -151,12 +161,12 @@ void QueryLog::begin()
 #endif
 }
 
-void QueryLog::add(uint32_t ip, const char* domain, bool blocked)
+void QueryLog::add(const ClientAddr& addr, const char* domain, bool blocked)
 {
     LockGuard g(mu_);
     QueryEntry& e = ring_[head_];
     e.uptime = uptimeSeconds();
-    e.ip = ip;
+    e.addr = addr;
     e.blocked = blocked;
     strncpy(e.domain, domain, sizeof(e.domain) - 1);
     e.domain[sizeof(e.domain) - 1] = '\0';
@@ -171,7 +181,7 @@ size_t QueryLog::page(size_t& cursor, const QueryFilter& f, QueryEntry* out, siz
     while (cursor < count_ && n < max) {
         const QueryEntry& e = ring_[(head_ + cap_ - 1 - cursor) % cap_];
         cursor++;
-        if (f.ip && e.ip != f.ip) continue;
+        if (f.ip && e.addr.v4() != f.ip) continue;
         if (f.blockedOnly && !e.blocked) continue;
         if (f.text && !strstr(e.domain, f.text)) continue;
         out[n++] = e;

@@ -19,6 +19,11 @@
 
 namespace sinkhole {
 
+union ClientSockAddr {
+    sockaddr_in v4;
+    sockaddr_in6 v6;
+};
+
 class DnsServer {
 public:
     DnsServer(DomainFilter& filter, ClientTable& clients, QueryLog& log, Counters& counters)
@@ -60,17 +65,18 @@ private:
         uint32_t upstreamIp;
         uint32_t upstreamIp2;  // 0 = no backup for this query
         uint8_t failedMask;    // which upstreams answered with an error
-        sockaddr_in client;
+        bool clientV6;
+        ClientSockAddr client;
         TickType_t deadline;
     };
 
     static void taskEntry(void* arg);
     void run();
-    void onClientPacket();
+    void onClientPacket(int sock);
     void onUpstreamPacket();
     void expirePending();
     Pending* allocPending();
-    void reply(const sockaddr_in& to, const uint8_t* data, size_t len);
+    void reply(const ClientSockAddr& to, bool v6, const uint8_t* data, size_t len);
 
     DomainFilter& filter_;
     ClientTable& clients_;
@@ -78,6 +84,7 @@ private:
     Counters& counters_;
 
     int serverSock_ = -1;
+    int server6Sock_ = -1;  // IPv6 clients (IPV6_V6ONLY), -1 if unavailable
     int upstreamSock_ = -1;
     std::atomic<uint32_t> upstream_{0};
     std::atomic<uint32_t> upstream2_{0};

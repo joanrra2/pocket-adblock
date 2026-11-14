@@ -236,6 +236,9 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
     j.boolean("firmwarePendingVerify", FirmwareUpdater::pendingVerify());
 
     const WifiStatus ws = d_.wifi.status();
+    char ip6[3][46];
+    bool ip6Global = false;
+    const size_t n6 = d_.wifi.ip6Addresses(ip6, 3, &ip6Global);
     j.beginObject("wifi")
         .boolean("connected", d_.wifi.connected())
         .str("state", WifiManager::stateText(ws.state))
@@ -254,7 +257,10 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
         .boolean("captive", d_.dns.captive())
         .num("txDbm10", static_cast<int64_t>(d_.wifi.txPowerDbm() * 10))
         .boolean("txReduced", d_.wifi.txReduced())
-        .endObject();
+        .boolean("ip6Global", ip6Global)
+        .beginArray("ip6");
+    for (size_t i = 0; i < n6; i++) j.str(nullptr, ip6[i]);
+    j.endArray().endObject();
 
     const uint32_t resumeAt = d_.filter.resumeAt();
     j.beginObject("dns")
@@ -313,13 +319,15 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
 esp_err_t WebServer::getClients(httpd_req_t* req)
 {
     static ClientInfo snap[ClientTable::kCapacity];  // httpd task only
+    char addr[46];
     const size_t n = d_.clients.snapshot(snap, ClientTable::kCapacity);
     const uint32_t now = uptimeSeconds();
     JsonWriter j(req);
     j.beginArray();
     for (size_t i = 0; i < n; i++) {
         j.beginObject()
-            .ip("ip", snap[i].ip)
+            .str("ip", (snap[i].addr.format(addr), addr))
+            .boolean("v6", snap[i].addr.v6)
             .mac("mac", snap[i].mac)
             .num("blocked", snap[i].blocked)
             .num("allowed", snap[i].allowed)
@@ -351,6 +359,7 @@ esp_err_t WebServer::getQueries(httpd_req_t* req)
     }
 
     static QueryEntry page[16];  // httpd task only; small pages keep the lock short
+    char addr[46];
     const uint32_t now = uptimeSeconds();
     size_t cursor = 0, sent = 0;
     JsonWriter j(req);
@@ -362,7 +371,7 @@ esp_err_t WebServer::getQueries(httpd_req_t* req)
         for (size_t i = 0; i < n; i++) {
             j.beginObject()
                 .num("ago", now - page[i].uptime)
-                .ip("ip", page[i].ip)
+                .str("ip", (page[i].addr.format(addr), addr))
                 .str("domain", page[i].domain)
                 .boolean("blocked", page[i].blocked)
                 .endObject();

@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #include "esp_err.h"
 #include "sdkconfig.h"
@@ -12,8 +13,36 @@
 
 namespace sinkhole {
 
+// A DNS client: IPv4 (address in a[0..3], network order) or IPv6.
+struct ClientAddr {
+    uint8_t v6;
+    uint8_t a[16];
+
+    static ClientAddr fromV4(uint32_t ip)
+    {
+        ClientAddr c{};
+        memcpy(c.a, &ip, 4);
+        return c;
+    }
+    static ClientAddr fromV6(const uint8_t addr[16])
+    {
+        ClientAddr c{};
+        c.v6 = 1;
+        memcpy(c.a, addr, 16);
+        return c;
+    }
+    uint32_t v4() const
+    {
+        uint32_t ip = 0;
+        if (!v6) memcpy(&ip, a, 4);
+        return ip;
+    }
+    bool operator==(const ClientAddr& o) const { return v6 == o.v6 && memcmp(a, o.a, v6 ? 16 : 4) == 0; }
+    void format(char out[46]) const;
+};
+
 struct ClientInfo {
-    uint32_t ip;  // network byte order
+    ClientAddr addr;
     uint8_t mac[6];
     uint32_t blocked;
     uint32_t allowed;
@@ -28,8 +57,8 @@ public:
 
     esp_err_t load();  // ban list from NVS
 
-    // Counts one query; returns true if the client is banned.
-    bool record(uint32_t ip, bool blocked);
+    // Counts one query; returns true if the client is banned (IPv4 clients only).
+    bool record(const ClientAddr& addr, bool blocked);
     bool isBanned(uint32_t ip);
     esp_err_t setBanned(uint32_t ip, bool banned);
 
@@ -37,7 +66,7 @@ public:
     size_t snapshot(ClientInfo* out, size_t max);
 
 private:
-    ClientInfo* findLocked(uint32_t ip);
+    ClientInfo* findLocked(const ClientAddr& addr);
     esp_err_t saveBannedLocked();
 
     Mutex mu_;
@@ -49,13 +78,13 @@ private:
 
 struct QueryEntry {
     uint32_t uptime;
-    uint32_t ip;
+    ClientAddr addr;
     bool blocked;
     char domain[64];
 };
 
 struct QueryFilter {
-    uint32_t ip = 0;          // 0 = any client
+    uint32_t ip = 0;          // IPv4 client, 0 = any client
     bool blockedOnly = false;
     const char* text = nullptr;  // substring of the domain, nullptr = any
 };
@@ -66,7 +95,7 @@ public:
 
     // Allocates the long history when CONFIG_SINKHOLE_QUERY_HISTORY_EXTENDED.
     void begin();
-    void add(uint32_t ip, const char* domain, bool blocked);
+    void add(const ClientAddr& addr, const char* domain, bool blocked);
 
     // Paged, newest first. `cursor` counts entries already scanned (start at 0);
     // copies up to `max` matches and returns how many. The lock is held only per

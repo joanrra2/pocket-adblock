@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_wifi.h"
+#include "lwip/sockets.h"
 #include "mdns.h"
 #include "sdkconfig.h"
 #include "sinkhole/rtos.hpp"
@@ -39,6 +40,7 @@ esp_err_t WifiManager::begin()
 
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &WifiManager::onEvent, this);
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &WifiManager::onEvent, this);
+    esp_event_handler_register(IP_EVENT, IP_EVENT_GOT_IP6, &WifiManager::onEvent, this);
 
     esp_timer_create_args_t retry{};
     retry.callback = &WifiManager::onRetryTimer;
@@ -440,6 +442,9 @@ void WifiManager::handleEvent(esp_event_base_t base, int32_t id, void* data)
                 break;
             case WIFI_EVENT_STA_CONNECTED:
                 linkUp_ = true;
+                // IPv6: link-local now; SLAAC adds a global address if the router
+                // advertises a prefix (CONFIG_LWIP_IPV6_AUTOCONFIG).
+                esp_netif_create_ip6_linklocal(sta_);
                 break;
             case WIFI_EVENT_STA_DISCONNECTED: {
                 auto* ev = static_cast<wifi_event_sta_disconnected_t*>(data);
@@ -486,6 +491,11 @@ void WifiManager::handleEvent(esp_event_base_t base, int32_t id, void* data)
             default:
                 break;
         }
+    } else if (base == IP_EVENT && id == IP_EVENT_GOT_IP6) {
+        auto* ev = static_cast<ip_event_got_ip6_t*>(data);
+        char a[46];
+        inet_ntop(AF_INET6, ev->ip6_info.ip.addr, a, sizeof(a));
+        ESP_LOGI(TAG, "IPv6 address %s", a);
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         // Setting a static IP raises GOT_IP immediately, even with the radio
         // link down. Only an address on a live link counts as "connected".
@@ -568,6 +578,20 @@ uint32_t WifiManager::staDns() const
     esp_netif_dns_info_t dns{};
     if (esp_netif_get_dns_info(sta_, ESP_NETIF_DNS_MAIN, &dns) != ESP_OK) return 0;
     return dns.ip.type == ESP_IPADDR_TYPE_V4 ? dns.ip.u_addr.ip4.addr : 0;
+}
+
+size_t WifiManager::ip6Addresses(char out[][46], size_t max, bool* hasGlobal) const
+{
+    esp_ip6_addr_t addrs[LWIP_IPV6_NUM_ADDRESSES];
+    const int n = connected_ ? esp_netif_get_all_ip6(sta_, addrs) : 0;
+    size_t count = 0;
+    if (hasGlobal) *hasGlobal = false;
+    for (int i = 0; i < n && count < max; i++) {
+        inet_ntop(AF_INET6, addrs[i].addr, out[count], 46);
+        if (hasGlobal && esp_netif_ip6_get_addr_type(&addrs[i]) == ESP_IP6_ADDR_IS_GLOBAL) *hasGlobal = true;
+        count++;
+    }
+    return count;
 }
 
 uint32_t WifiManager::apIp() const

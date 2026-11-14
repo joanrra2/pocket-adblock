@@ -199,7 +199,8 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
      <p class="k">With a backup, each query goes to both at once and the first answer wins: no waiting when one is down or slow. Both providers then see your queries.</p>
      <div class="row mt"><button class="btn p">Save</button></div></form>
     <details class="mt"><summary class="k" style="cursor:pointer">Ads still showing on some devices?</summary>
-     <p class="mu mt">Devices also get DNS servers over <b>IPv6</b> from the router, and use them instead of this one. In the router, turn off IPv6 DNS advertisement (RDNSS/DHCPv6) or point it at this device. Also switch off "Secure DNS" / "DNS over HTTPS" in browsers, which bypasses every local DNS server.</p></details></div>
+     <p class="mu mt">Devices also get DNS servers over <b>IPv6</b> from the router, and use them instead of this one. In the router, turn off IPv6 DNS advertisement (RDNSS/DHCPv6) or point it at this device. Also switch off "Secure DNS" / "DNS over HTTPS" in browsers, which bypasses every local DNS server.</p>
+     <p class="mu mt">This device also answers DNS over IPv6, at the addresses shown under Network on the overview.</p></details></div>
    <div class="card"><h2>Remote wake (MQTT)</h2>
     <form data-f="mqtt"><label>Broker URI</label><input name="uri" placeholder="mqtts://broker.example.com:8883">
      <div class="row"><div style="flex:1"><label>User</label><input name="user"></div><div style="flex:1"><label>Password (empty = keep)</label><input name="pass" type="password" autocomplete="new-password"></div></div>
@@ -249,7 +250,7 @@ const ES={
 'With a backup, each query goes to both at once and the first answer wins: no waiting when one is down or slow. Both providers then see your queries.':'Con respaldo, cada consulta va a ambos a la vez y gana la primera respuesta: sin esperas si uno falla o va lento. Ambos proveedores verán tus consultas.',
 'Ads still showing on some devices?':'¿Siguen saliendo anuncios en algunos dispositivos?','Devices also get DNS servers over':'Los dispositivos también reciben servidores DNS por',
 'from the router, and use them instead of this one. In the router, turn off IPv6 DNS advertisement (RDNSS/DHCPv6) or point it at this device. Also switch off "Secure DNS" / "DNS over HTTPS" in browsers, which bypasses every local DNS server.':'del router y los usan en lugar de este. En el router, desactiva el anuncio de DNS IPv6 (RDNSS/DHCPv6) o apúntalo a este dispositivo. Desactiva también el "DNS seguro" / "DNS sobre HTTPS" de los navegadores, que se salta cualquier DNS local.',
-'Remote wake (MQTT)':'Encendido remoto (MQTT)','Broker URI':'URI del broker','User':'Usuario','Password (empty = keep)':'Contraseña (vacío = mantener)','Topic prefix':'Prefijo de tema',
+'Remote wake (MQTT)':'Encendido remoto (MQTT)','This device also answers DNS over IPv6, at the addresses shown under Network on the overview.':'Este dispositivo también responde DNS por IPv6, en las direcciones que aparecen en Red, en el resumen.','Broker URI':'URI del broker','User':'Usuario','Password (empty = keep)':'Contraseña (vacío = mantener)','Topic prefix':'Prefijo de tema',
 'applies after restart':'se aplica tras reiniciar','Admin login':'Acceso de administrador','New password (8+ characters)':'Nueva contraseña (8+ caracteres)','Change':'Cambiar',
 'Device name':'Nombre del dispositivo','Hostname':'Nombre de host','Wake-on-LAN':'Wake-on-LAN',
 // dynamic text
@@ -260,7 +261,8 @@ const ES={
 'backup · wins {0} / {1}':'respaldo · gana {0} / {1}','{0} answers · {1}':'{0} respuestas · {1}','internal RAM':'RAM interna','{0} connected':'{0} conectados','off':'apagado','on':'encendido',
 '{0} KB free':'{0} KB libres','Not connected to your network yet.':'Aún no está conectado a tu red.','Set up Wi-Fi':'Configurar Wi-Fi',
 'Wi-Fi "{0}" {1}{2}. Retrying automatically.':'Wi-Fi "{0}" {1}{2}. Reintentando automáticamente.','You are using the default admin password.':'Estás usando la contraseña de administrador por defecto.',
-'Change it':'Cámbiala','New firmware is on probation and will be confirmed in a minute.':'El nuevo firmware está a prueba y se confirmará en un minuto.',
+'Change it':'Cámbiala','How':'Cómo',
+'Your network uses IPv6: make sure the router advertises no other IPv6 DNS, or devices will bypass this one.':'Tu red usa IPv6: asegúrate de que el router no anuncia otro DNS IPv6, o los dispositivos se saltarán este.','New firmware is on probation and will be confirmed in a minute.':'El nuevo firmware está a prueba y se confirmará en un minuto.',
 'No blocklist loaded yet: everything is forwarded.':'Aún no hay lista de bloqueo: se reenvía todo.','Get one':'Conseguir una',
 'not configured':'sin configurar','connecting':'conectando','connected':'conectado','retrying':'reintentando','network not found':'red no encontrada','wrong password?':'¿contraseña incorrecta?',
 'signal lost':'señal perdida','disconnected':'desconectado','network security not supported':'seguridad de red no compatible','signal too weak':'señal demasiado débil',
@@ -336,6 +338,7 @@ function renderStatus(s){
  $('#net').innerHTML=kv([
   ['Wi-Fi',w.connected?esc(w.ssid)+' <span class="mu">'+w.rssi+' dBm</span>':'<span class="wa">'+wst(w)+'</span>'],
   ['Address',w.connected?w.ip+' <span class="mu">· '+esc(s.hostname)+'.local</span>':'–'],
+  ...(w.ip6&&w.ip6.length?[['IPv6',w.ip6.map(esc).join('<br>')]]:[]),
   ['Upstream',d.upstream+' <span class="mu">('+d.upstreamMode+')</span>'+(d.backup?'<br>'+d.backup+' <span class="mu">'+tr('backup · wins {0} / {1}',n(d.winsPrimary),n(d.winsBackup))+'</span>':'')],
   ['Cache',tr('{0} answers · {1}',n(d.cacheSize),d.cachePsram?'PSRAM':tr('internal RAM'))],
   ['Setup AP',w.apOn?esc(w.apSsid)+' · '+tr('{0} connected',w.apClients):tr('off')],
@@ -344,6 +347,7 @@ function renderStatus(s){
  const no=[];
  if(w.state=='not configured')no.push(tr('Not connected to your network yet.')+' <a href="#settings">'+tr('Set up Wi-Fi')+'</a>');
  else if(!w.connected)no.push(esc(tr('Wi-Fi "{0}" {1}{2}. Retrying automatically.',w.ssid,tr(w.state),w.reason?' ('+tr(w.reason)+')':'')));
+ if(w.ip6Global)no.push(tr('Your network uses IPv6: make sure the router advertises no other IPv6 DNS, or devices will bypass this one.')+' <a href="#settings">'+tr('How')+'</a>');
  if(s.defaultPassword)no.push(tr('You are using the default admin password.')+' <a href="#settings">'+tr('Change it')+'</a>');
  if(s.firmwarePendingVerify)no.push(tr('New firmware is on probation and will be confirmed in a minute.'));
  if(!b.count&&!b.writing)no.push(tr('No blocklist loaded yet: everything is forwarded.')+' <a href="#system">'+tr('Get one')+'</a>');
@@ -392,7 +396,7 @@ async function loadClients(){
  $('#clients').innerHTML=c.length?c.map(x=>{const t=x.blocked+x.allowed||1;return `<div><span class="dot${x.banned?' x':''}"></span>
   <div class="g"><b>${x.ip}</b> <span class="k">${x.mac}</span><div class="bar" style="margin-top:6px;max-width:320px"><i style="width:${x.blocked/t*100}%"></i><u style="width:${x.allowed/t*100}%"></u></div>
   <span class="k">${tr('{0} blocked · {1} allowed · seen {2} ago',n(x.blocked),n(x.allowed),ago(x.seenAgo))}</span></div>
-  <button class="btn s" data-a="feedip" data-v="${x.ip}">${tr('Queries')}</button><button class="btn s ${x.banned?'':'d'}" data-a="ban" data-v="${x.ip}" data-b="${x.banned?0:1}">${tr(x.banned?'Unblock':'Block all')}</button></div>`}).join(''):'<div class="mu">'+tr('No devices have used this resolver yet')+'</div>';
+  ${x.v6?'':`<button class="btn s" data-a="feedip" data-v="${x.ip}">${tr('Queries')}</button><button class="btn s ${x.banned?'':'d'}" data-a="ban" data-v="${x.ip}" data-b="${x.banned?0:1}">${tr(x.banned?'Unblock':'Block all')}</button>`}</div>`}).join(''):'<div class="mu">'+tr('No devices have used this resolver yet')+'</div>';
 }
 async function loadWol(){
  const h=await api('/api/wol');
