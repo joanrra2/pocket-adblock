@@ -110,9 +110,15 @@ static void testCompactFormat()
     std::vector<uint8_t> bad = v2;
     bad[kV2CoarseBytes + 1234] ^= 1;  // a bucket count
     CHECK(!HashTable(bad.data(), n, kBlocklistV2).isValid());
+    // Suffix order: swap the first two (whole, 3-byte) suffixes of a bucket
+    // holding at least two; they are distinct and sorted, so this must fail.
     bad = v2;
-    std::swap(bad[kV2IndexBytes], bad[kV2IndexBytes + 3]);  // suffix order
-    CHECK(!HashTable(bad.data(), n, kBlocklistV2).isValid() || v2[kV2IndexBytes] == v2[kV2IndexBytes + 3]);
+    size_t first = 0, bucket = 0;
+    while (bucket < kV2Buckets && v2[kV2CoarseBytes + bucket] < 2) first += v2[kV2CoarseBytes + bucket++];
+    CHECK(bucket < kV2Buckets);
+    uint8_t* s0 = bad.data() + kV2IndexBytes + first * 3;
+    std::swap_ranges(s0, s0 + 3, s0 + 3);
+    CHECK(!HashTable(bad.data(), n, kBlocklistV2).isValid());
 
     CHECK(capacityFor(kBlocklistV1, 0xD0000) == 170380);
     CHECK(capacityFor(kBlocklistV2, 0xD0000) == 261781);
