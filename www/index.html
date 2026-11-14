@@ -101,7 +101,7 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
   <a href="#system"><svg class="i"><use href="#i-system"/></svg>Updates</a>
   <a href="#settings"><svg class="i"><use href="#i-settings"/></svg>Settings</a>
  </nav>
- <div class="side-foot"><div id="ver"></div><a href="https://github.com/M-Abozaid/esp32-c3-adblock" target="_blank" rel="noopener">based on esp32-c3-adblock</a></div>
+ <div class="side-foot"><div class="seg" style="margin-bottom:10px"><button data-a="lang" data-v="en">EN</button><button data-a="lang" data-v="es">ES</button></div><div id="ver"></div><a href="https://github.com/M-Abozaid/esp32-c3-adblock" target="_blank" rel="noopener">based on esp32-c3-adblock</a></div>
 </aside>
 
 <main>
@@ -207,6 +207,7 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
    <div class="card"><h2>Admin login</h2>
     <form data-f="admin"><label>User</label><input name="user" required autocomplete="username"><label>New password (8+ characters)</label><input name="pass" type="password" required minlength="8" autocomplete="new-password">
      <div class="row mt"><button class="btn p">Change</button></div></form></div>
+   <div class="card"><h2>Language</h2><div class="seg"><button data-a="lang" data-v="en">English</button><button data-a="lang" data-v="es">Español</button></div></div>
    <div class="card"><h2>Device name</h2>
     <form data-f="hostname"><label>Hostname</label><div class="row"><input name="hostname" required><span class="mu">.local</span></div><div class="row mt"><button class="btn p">Save</button><span class="k">applies after restart</span></div></form></div>
   </div>
@@ -218,7 +219,89 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
 const $=s=>document.querySelector(s),$$=s=>document.querySelectorAll(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
 const n=x=>Number(x||0).toLocaleString();
-const ago=s=>s<0?'never':s<60?s+'s':s<3600?(s/60|0)+'m':s<86400?(s/3600|0)+'h':(s/86400|0)+'d';
+
+// ---------- i18n: English is the source text; other languages map it.
+const ES={
+// navigation, headings, static text
+'Overview':'Resumen','Filters':'Filtros','Devices':'Dispositivos','Wake':'Encender','Updates':'Actualizaciones','Settings':'Ajustes','Language':'Idioma',
+'based on esp32-c3-adblock':'basado en esp32-c3-adblock','blocked':'bloqueado','On':'Activo','Pause 5 min':'Pausa 5 min','1 hour':'1 hora','Off':'Desactivado',
+'Queries':'Consultas','Blocked':'Bloqueadas','Answered from cache':'Respondidas desde caché','Domains on blocklist':'Dominios en la lista',
+'Activity':'Actividad','queries / min':'consultas / min','collecting…':'recopilando…','last 5 min':'últimos 5 min','Network':'Red','Live queries':'Consultas en directo',
+'Filter by domain or client IP':'Filtrar por dominio o IP del cliente','All':'Todas','Blocked domains':'Dominios bloqueados','Always allowed':'Siempre permitidos','Add':'Añadir',
+'Devices using this resolver':'Dispositivos que usan este resolvedor','Add a computer':'Añadir un ordenador','Name, e.g. office-pc':'Nombre, p. ej. pc-oficina',
+'IP (optional, shows online state)':'IP (opcional, muestra si está encendido)','Save':'Guardar',
+'The PC needs wired Ethernet with Wake-on-LAN enabled in BIOS/UEFI and on its network adapter. Wake it, then connect with AnyDesk, RustDesk or RDP.':'El PC necesita Ethernet por cable con Wake-on-LAN activado en la BIOS/UEFI y en su adaptador de red. Enciéndelo y conéctate con AnyDesk, RustDesk o RDP.',
+'Wake from anywhere':'Encender desde cualquier lugar','Publish any message to':'Publica cualquier mensaje en','on your MQTT broker. No open ports needed.':'en tu broker MQTT. No hace falta abrir puertos.',
+'Blocklist':'Lista de bloqueo','Update URL':'URL de actualización','Check every (hours, 0 = never)':'Comprobar cada (horas, 0 = nunca)','Download now':'Descargar ahora',
+'Or upload a .bin built with tools/build_blocklist.py':'O sube un .bin creado con tools/build_blocklist.py','Upload':'Subir',
+'Upload a firmware image (esp-dns-sinkhole.bin)':'Sube una imagen de firmware (esp-dns-sinkhole.bin)','Install':'Instalar',
+"The device restarts into the new image and goes back to the previous one automatically if it doesn't come up healthy within a minute.":'El dispositivo se reinicia con la nueva imagen y vuelve a la anterior automáticamente si no arranca bien en un minuto.',
+'Restart device':'Reiniciar dispositivo','Your Wi-Fi':'Tu Wi-Fi','Scan networks':'Buscar redes','Password':'Contraseña','Connect':'Conectar','Reconnect':'Reconectar','Forget':'Olvidar',
+'Transmit power':'Potencia de transmisión','Auto (drops to 8.5 dBm if the link keeps failing)':'Automática (baja a 8,5 dBm si la conexión sigue fallando)','Full':'Máxima','Reduced, 8.5 dBm':'Reducida, 8,5 dBm',
+'Setup access point':'Punto de acceso de configuración','Name (empty = Sinkhole-XXXX)':'Nombre (vacío = Sinkhole-XXXX)','New password (8+ characters, empty = keep)':'Nueva contraseña (8+ caracteres, vacío = mantener)',
+'Turn on':'Encender','When your Wi-Fi is down (recommended)':'Cuando tu Wi-Fi no está disponible (recomendado)','Always':'Siempre',
+'Holding BOOT for 3 s also turns it on for 15 minutes; 10 s resets all settings.':'Mantener BOOT 3 s también lo enciende durante 15 minutos; 10 s restablece todos los ajustes.',
+'IP address':'Dirección IP','Mode':'Modo','Automatic (DHCP)':'Automática (DHCP)','Static':'Estática','Address':'Dirección','Netmask':'Máscara de red','Gateway':'Puerta de enlace',
+'DNS for the device itself':'DNS para el propio dispositivo','= gateway':'= puerta de enlace','Apply':'Aplicar',
+'Prefer a DHCP reservation in your router if it has one. A wrong static address makes the device unreachable: hold BOOT for 3 s to get the setup access point back.':'Mejor una reserva DHCP en tu router si la tiene. Una dirección estática incorrecta deja el dispositivo inaccesible: mantén BOOT 3 s para recuperar el punto de acceso de configuración.',
+'Upstream DNS':'DNS de reenvío','Forward allowed queries to':'Reenviar las consultas permitidas a','Quad9 (built-in)':'Quad9 (integrado)','My router (DHCP)':'Mi router (DHCP)','Custom address':'Dirección personalizada',
+'Custom IPv4':'IPv4 personalizada','Backup resolver (optional)':'Resolvedor de respaldo (opcional)','e.g. 1.1.1.1, empty = none':'p. ej. 1.1.1.1, vacío = ninguno',
+'With a backup, each query goes to both at once and the first answer wins: no waiting when one is down or slow. Both providers then see your queries.':'Con respaldo, cada consulta va a ambos a la vez y gana la primera respuesta: sin esperas si uno falla o va lento. Ambos proveedores verán tus consultas.',
+'Ads still showing on some devices?':'¿Siguen saliendo anuncios en algunos dispositivos?','Devices also get DNS servers over':'Los dispositivos también reciben servidores DNS por',
+'from the router, and use them instead of this one. In the router, turn off IPv6 DNS advertisement (RDNSS/DHCPv6) or point it at this device. Also switch off "Secure DNS" / "DNS over HTTPS" in browsers, which bypasses every local DNS server.':'del router y los usan en lugar de este. En el router, desactiva el anuncio de DNS IPv6 (RDNSS/DHCPv6) o apúntalo a este dispositivo. Desactiva también el "DNS seguro" / "DNS sobre HTTPS" de los navegadores, que se salta cualquier DNS local.',
+'Remote wake (MQTT)':'Encendido remoto (MQTT)','Broker URI':'URI del broker','User':'Usuario','Password (empty = keep)':'Contraseña (vacío = mantener)','Topic prefix':'Prefijo de tema',
+'applies after restart':'se aplica tras reiniciar','Admin login':'Acceso de administrador','New password (8+ characters)':'Nueva contraseña (8+ caracteres)','Change':'Cambiar',
+'Device name':'Nombre del dispositivo','Hostname':'Nombre de host','Wake-on-LAN':'Wake-on-LAN',
+// dynamic text
+'never':'nunca','v{0} · up {1}':'v{0} · activo {1}','Protecting':'Protegiendo','Paused':'En pausa',
+'Your network is protected':'Tu red está protegida','Blocking is paused':'El bloqueo está en pausa','Blocking is off':'El bloqueo está desactivado',
+'{0} of {1} queries blocked since start':'{0} de {1} consultas bloqueadas desde el arranque','Resumes automatically in {0}':'Se reanuda automáticamente en {0}',
+'All queries are forwarded unfiltered':'Todas las consultas se reenvían sin filtrar','Upstream':'Reenvío','Cache':'Caché','Setup AP':'AP de configuración','Memory':'Memoria',
+'backup · wins {0} / {1}':'respaldo · gana {0} / {1}','{0} answers · {1}':'{0} respuestas · {1}','internal RAM':'RAM interna','{0} connected':'{0} conectados','off':'apagado','on':'encendido',
+'{0} KB free':'{0} KB libres','Not connected to your network yet.':'Aún no está conectado a tu red.','Set up Wi-Fi':'Configurar Wi-Fi',
+'Wi-Fi "{0}" {1}{2}. Retrying automatically.':'Wi-Fi "{0}" {1}{2}. Reintentando automáticamente.','You are using the default admin password.':'Estás usando la contraseña de administrador por defecto.',
+'Change it':'Cámbiala','New firmware is on probation and will be confirmed in a minute.':'El nuevo firmware está a prueba y se confirmará en un minuto.',
+'No blocklist loaded yet: everything is forwarded.':'Aún no hay lista de bloqueo: se reenvía todo.','Get one':'Conseguir una',
+'not configured':'sin configurar','connecting':'conectando','connected':'conectado','retrying':'reintentando','network not found':'red no encontrada','wrong password?':'¿contraseña incorrecta?',
+'signal lost':'señal perdida','disconnected':'desconectado','network security not supported':'seguridad de red no compatible','signal too weak':'señal demasiado débil',
+'authentication expired':'autenticación caducada','connection failed':'conexión fallida','connection error':'error de conexión',
+'Domains':'Dominios','of {0} · slot {1}':'de {0} · ranura {1}','Custom / allowed':'Propios / permitidos','Loaded':'Cargada','{0} ago':'hace {0}','Last update':'Última actualización',
+'in progress…':'en curso…','none since restart':'ninguna desde el reinicio','Version':'Versión','Uptime':'Tiempo encendido','Internal RAM free':'RAM interna libre','PSRAM free':'PSRAM libre','none':'ninguna',
+'Connected':'Conectado','to {0}':'a {0}','Not configured':'Sin configurar','{0} attempts':'{0} intentos','next in {0}s':'siguiente en {0} s','· now {0} dBm':'· ahora {0} dBm',
+'Now':'Ahora','forced for {0}':'forzado durante {0}','Broker connected.':'Broker conectado.','Broker not connected.':'Broker no conectado.','Set up a broker in':'Configura un broker en',
+'{0} / min now · peak {1}':'{0} / min ahora · pico {1}','No matching queries':'Sin consultas que coincidan','Searching the last {0} queries':'Buscando en las últimas {0} consultas',
+' · showing the newest 100':' · mostrando las 100 más recientes','Blocked in addition to the blocklist, subdomains included.':'Bloqueados además de la lista, subdominios incluidos.',
+'Never blocked, even if the blocklist or a parent domain matches.':'Nunca se bloquean, aunque coincida la lista o un dominio padre.','Nothing here yet':'Aún no hay nada','Remove':'Quitar',
+'{0} blocked · {1} allowed · seen {2} ago':'{0} bloqueadas · {1} permitidas · visto hace {2}','Unblock':'Desbloquear','Block all':'Bloquear todo',
+'No devices have used this resolver yet':'Ningún dispositivo ha usado aún este resolvedor','online':'encendido','offline':'apagado','woken {0} ago':'encendido hace {0}',
+'No computers yet. Add one below.':'Aún no hay ordenadores. Añade uno abajo.','Choose a file first':'Elige primero un archivo','Install {0} and restart?':'¿Instalar {0} y reiniciar?',
+'Upload failed':'Error al subir','Scanning…':'Buscando…','{0} networks · tap to choose':'{0} redes · toca para elegir','current':'actual','open':'abierta','Scan failed: {0}':'Error al buscar: {0}',
+'Remove {0}?':'¿Quitar {0}?','Restart the device now?':'¿Reiniciar el dispositivo ahora?','Forget this Wi-Fi? The setup access point will turn on.':'¿Olvidar esta Wi-Fi? Se encenderá el punto de acceso de configuración.',
+'Switch the device to {0}? You will need to open it at that address.':'¿Cambiar el dispositivo a {0}? Tendrás que abrirlo en esa dirección.',
+'Open network: no password needed':'Red abierta: no necesita contraseña','Saved':'Guardado','Device unreachable: {0}':'Dispositivo inaccesible: {0}',
+// messages from the device
+'connecting to the new network':'conectando a la nueva red','reconnecting':'reconectando','download started':'descarga iniciada','magic packet sent':'paquete mágico enviado',
+'rebooting':'reiniciando','firmware accepted, rebooting':'firmware aceptado, reiniciando','saved; reboot to apply':'guardado; reinicia para aplicar',
+'credentials changed; log in again':'credenciales cambiadas; vuelve a iniciar sesión','not a valid domain':'no es un dominio válido','already in the list':'ya está en la lista',
+'list is full':'la lista está llena','not in the list':'no está en la lista','unknown host':'equipo desconocido','switched to DHCP; the address may change':'cambiado a DHCP; la dirección puede cambiar',
+'Wi-Fi forgotten; the setup access point stays on':'Wi-Fi olvidada; el punto de acceso de configuración sigue encendido',
+'access point updated; reconnect to it if you were using it':'punto de acceso actualizado; vuelve a conectarte si lo estabas usando',
+};
+const LANGS={es:ES};
+let LANG=(()=>{try{const s=localStorage.getItem('lang');if(s)return s}catch(e){}return (navigator.language||'en').slice(0,2).toLowerCase()})();
+if(LANG!='en'&&!LANGS[LANG])LANG='en';
+const D=LANGS[LANG]||{};
+const tr=(s,...a)=>(D[s]||s).replace(/\{(\d)\}/g,(m,i)=>a[i]);
+function i18nDom(){
+ document.documentElement.lang=LANG;
+ $$('[data-a=lang]').forEach(b=>b.classList.toggle('on',b.dataset.v==LANG));
+ if(LANG=='en')return;
+ const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let x;
+ while((x=w.nextNode())){const t=x.nodeValue.trim();if(t&&D[t])x.nodeValue=x.nodeValue.replace(t,D[t])}
+ for(const el of $$('[placeholder],[title]'))for(const a of['placeholder','title']){const v=el.getAttribute(a);if(v&&D[v])el.setAttribute(a,D[v])}
+}
+
+const ago=s=>s<0?tr('never'):s<60?s+'s':s<3600?(s/60|0)+'m':s<86400?(s/3600|0)+'h':(s/86400|0)+'d';
 const T={dash:'Overview',lists:'Filters',devices:'Devices',wake:'Wake-on-LAN',system:'Updates',settings:'Settings'};
 let tab='dash',S=null,hist=[],prev=null,feed=[],feedCap=0,feedMode='all',ltab='block',L={block:[],allow:[]},nets=[];
 
@@ -227,20 +310,21 @@ async function api(u,data){
  const o={headers:{}};
  if(data!==undefined){o.method='POST';o.headers['X-Requested-With']='sinkhole';o.body=new URLSearchParams(data)}
  const r=await fetch(u,o);let j={};try{j=await r.json()}catch(e){}
- if(!r.ok)throw new Error(j.message||'HTTP '+r.status);return j}
-async function act(u,data,after){try{const j=await api(u,data);toast(j.message&&j.message!='ok'?j.message:'Saved');(after||refresh)()}catch(e){toast(e.message,1)}}
+ if(!r.ok)throw new Error(tr(j.message||'HTTP '+r.status));return j}
+async function act(u,data,after){try{const j=await api(u,data);toast(j.message&&j.message!='ok'?tr(j.message):tr('Saved'));(after||refresh)()}catch(e){toast(e.message,1)}}
 const fill=(f,o)=>{for(const el of $(`form[data-f="${f}"]`).elements)if(el.name&&o[el.name]!==undefined&&el.type!='password')el.value=o[el.name]};
+const kv=rows=>rows.map(([k,v])=>`<dt>${tr(k)}</dt><dd>${v}</dd>`).join('');
 
 // ---------- rendering
 function renderStatus(s){
  const d=s.dns,w=s.wifi,b=s.blocklist,total=d.blocked+d.allowed,pct=total?d.blocked/total*100:0;
- $('#ver').textContent='v'+s.version+' · up '+ago(s.uptime);
+ $('#ver').textContent=tr('v{0} · up {1}',s.version,ago(s.uptime));
  const st=d.blocking?['Protecting','ok']:d.resumeIn?['Paused','wa']:['Off','bad'];
- $('#pill').textContent=st[0];$('#pill').className='pill '+st[1];
+ $('#pill').textContent=tr(st[0]);$('#pill').className='pill '+st[1];
  $('#pct').textContent=pct.toFixed(pct<10?1:0)+'%';
  $('#ringv').setAttribute('stroke-dasharray',(pct/100*339.3).toFixed(1)+' 400');$('#ringv').style.opacity=pct>0?1:0;
- $('#headline').textContent=d.blocking?'Your network is protected':d.resumeIn?'Blocking is paused':'Blocking is off';
- $('#subline').textContent=d.blocking?n(d.blocked)+' of '+n(total)+' queries blocked since start':d.resumeIn?'Resumes automatically in '+ago(d.resumeIn):'All queries are forwarded unfiltered';
+ $('#headline').textContent=tr(d.blocking?'Your network is protected':d.resumeIn?'Blocking is paused':'Blocking is off');
+ $('#subline').textContent=d.blocking?tr('{0} of {1} queries blocked since start',n(d.blocked),n(total)):d.resumeIn?tr('Resumes automatically in {0}',ago(d.resumeIn)):tr('All queries are forwarded unfiltered');
  const cur=d.blocking?'on':d.resumeIn?'':'off';$$('#modes button').forEach(x=>x.classList.toggle('on',x.dataset.v==cur));
  $('#s-q').textContent=n(total);$('#s-b').textContent=n(d.blocked);
  const ch=d.cacheHits+d.cacheMisses;$('#s-c').textContent=ch?Math.round(d.cacheHits/ch*100)+'%':'–';$('#s-l').textContent=n(b.count);
@@ -248,50 +332,51 @@ function renderStatus(s){
  const now=Date.now();
  if(prev&&total>=prev.t){hist.push((total-prev.t)/((now-prev.at)/60000));if(hist.length>75)hist.shift()}
  prev={t:total,at:now};drawSpark();
- $('#net').innerHTML=[
-  ['Wi-Fi',w.connected?esc(w.ssid)+' <span class="mu">'+w.rssi+' dBm</span>':'<span class="wa">'+esc(w.state)+(w.reason?' · '+esc(w.reason):'')+'</span>'],
+ const wst=w2=>esc(tr(w2.state))+(w2.reason?' · '+esc(tr(w2.reason)):'');
+ $('#net').innerHTML=kv([
+  ['Wi-Fi',w.connected?esc(w.ssid)+' <span class="mu">'+w.rssi+' dBm</span>':'<span class="wa">'+wst(w)+'</span>'],
   ['Address',w.connected?w.ip+' <span class="mu">· '+esc(s.hostname)+'.local</span>':'–'],
-  ['Upstream',d.upstream+' <span class="mu">('+d.upstreamMode+')</span>'+(d.backup?'<br>'+d.backup+' <span class="mu">backup · wins '+n(d.winsPrimary)+' / '+n(d.winsBackup)+'</span>':'')],
-  ['Cache',n(d.cacheSize)+' answers · '+(d.cachePsram?'PSRAM':'internal RAM')],
-  ['Setup AP',w.apOn?esc(w.apSsid)+' · '+w.apClients+' connected':'off'],
-  ['Memory',n(s.memory.internalFree/1024|0)+' KB free'+(s.memory.psram?' · PSRAM '+n(s.memory.psramFree/1048576|0)+' MB':'')]
- ].map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('');
+  ['Upstream',d.upstream+' <span class="mu">('+d.upstreamMode+')</span>'+(d.backup?'<br>'+d.backup+' <span class="mu">'+tr('backup · wins {0} / {1}',n(d.winsPrimary),n(d.winsBackup))+'</span>':'')],
+  ['Cache',tr('{0} answers · {1}',n(d.cacheSize),d.cachePsram?'PSRAM':tr('internal RAM'))],
+  ['Setup AP',w.apOn?esc(w.apSsid)+' · '+tr('{0} connected',w.apClients):tr('off')],
+  ['Memory',tr('{0} KB free',n(s.memory.internalFree/1024|0))+(s.memory.psram?' · PSRAM '+n(s.memory.psramFree/1048576|0)+' MB':'')]
+ ]);
  const no=[];
- if(w.state=='not configured')no.push('Not connected to your network yet. <a href="#settings">Set up Wi-Fi</a>');
- else if(!w.connected)no.push('Wi-Fi "'+esc(w.ssid)+'" '+esc(w.state)+(w.reason?' ('+esc(w.reason)+')':'')+'. Retrying automatically.');
- if(s.defaultPassword)no.push('You are using the default admin password. <a href="#settings">Change it</a>');
- if(s.firmwarePendingVerify)no.push('New firmware is on probation and will be confirmed in a minute.');
- if(!b.count&&!b.writing)no.push('No blocklist loaded yet: everything is forwarded. <a href="#system">Get one</a>');
+ if(w.state=='not configured')no.push(tr('Not connected to your network yet.')+' <a href="#settings">'+tr('Set up Wi-Fi')+'</a>');
+ else if(!w.connected)no.push(esc(tr('Wi-Fi "{0}" {1}{2}. Retrying automatically.',w.ssid,tr(w.state),w.reason?' ('+tr(w.reason)+')':'')));
+ if(s.defaultPassword)no.push(tr('You are using the default admin password.')+' <a href="#settings">'+tr('Change it')+'</a>');
+ if(s.firmwarePendingVerify)no.push(tr('New firmware is on probation and will be confirmed in a minute.'));
+ if(!b.count&&!b.writing)no.push(tr('No blocklist loaded yet: everything is forwarded.')+' <a href="#system">'+tr('Get one')+'</a>');
  $('#notices').innerHTML=no.map(x=>`<div class="notice">${x}</div>`).join('');
  // updates view
  const u=s.update;
- $('#blinfo').innerHTML=[['Domains',n(b.count)+' <span class="mu">of '+n(b.capacity)+' · slot '+b.slot+'</span>'],['Custom / allowed',b.custom+' / '+b.allow],
-  ['Loaded',b.count?ago(b.activeFor)+' ago':'–'],
-  ['Last update',u.running||b.writing?'<span class="wa">in progress…</span>':u.lastAgo<0?'none since restart':ago(u.lastAgo)+' ago · <span class="'+(u.lastOk?'ok':'bad')+'">'+esc(u.message)+'</span>']].map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('');
+ $('#blinfo').innerHTML=kv([['Domains',n(b.count)+' <span class="mu">'+tr('of {0} · slot {1}',n(b.capacity),b.slot)+'</span>'],['Custom / allowed',b.custom+' / '+b.allow],
+  ['Loaded',b.count?tr('{0} ago',ago(b.activeFor)):'–'],
+  ['Last update',u.running||b.writing?'<span class="wa">'+tr('in progress…')+'</span>':u.lastAgo<0?tr('none since restart'):tr('{0} ago',ago(u.lastAgo))+' · <span class="'+(u.lastOk?'ok':'bad')+'">'+esc(u.message)+'</span>']]);
  $('#blbar').style.width=(b.capacity?b.count/b.capacity*100:0)+'%';
- $('#fwinfo').innerHTML=[['Version',esc(s.version)],['Uptime',ago(s.uptime)],['Internal RAM free',n(s.memory.internalFree/1024|0)+' KB'],['PSRAM free',s.memory.psram?n(s.memory.psramFree/1048576|0)+' MB':'none']].map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('');
+ $('#fwinfo').innerHTML=kv([['Version',esc(s.version)],['Uptime',ago(s.uptime)],['Internal RAM free',n(s.memory.internalFree/1024|0)+' KB'],['PSRAM free',s.memory.psram?n(s.memory.psramFree/1048576|0)+' MB':tr('none')]]);
  // settings status lines
- $('#wst').innerHTML=w.connected?'<span class="ok">Connected</span> to '+esc(w.ssid)+' · '+w.ip+' · '+w.rssi+' dBm':w.state=='not configured'?'Not configured':
-  '<span class="wa">'+esc(w.state)+'</span>'+(w.reason?' · '+esc(w.reason):'')+' · '+w.attempts+' attempts'+(w.nextRetry?' · next in '+w.nextRetry+'s':'');
- $('#txnow').textContent='· now '+(w.txDbm10/10)+' dBm';
- $('#ast').innerHTML='Now '+(w.apOn?'<span class="ok">on</span> · '+w.apClients+' connected':'off')+(w.apForcedFor?' · forced for '+ago(w.apForcedFor):'');
- $('#mstate').innerHTML=s.mqtt.configured?(s.mqtt.connected?'<span class="ok">Broker connected.</span>':'<span class="wa">Broker not connected.</span>'):'Set up a broker in <a href="#settings">Settings</a>.';
+ $('#wst').innerHTML=w.connected?'<span class="ok">'+tr('Connected')+'</span> '+esc(tr('to {0}',w.ssid))+' · '+w.ip+' · '+w.rssi+' dBm':w.state=='not configured'?tr('Not configured'):
+  '<span class="wa">'+wst(w)+'</span> · '+tr('{0} attempts',w.attempts)+(w.nextRetry?' · '+tr('next in {0}s',w.nextRetry):'');
+ $('#txnow').textContent=tr('· now {0} dBm',w.txDbm10/10);
+ $('#ast').innerHTML=tr('Now')+' '+(w.apOn?'<span class="ok">'+tr('on')+'</span> · '+tr('{0} connected',w.apClients):tr('off'))+(w.apForcedFor?' · '+tr('forced for {0}',ago(w.apForcedFor)):'');
+ $('#mstate').innerHTML=s.mqtt.configured?(s.mqtt.connected?'<span class="ok">'+tr('Broker connected.')+'</span>':'<span class="wa">'+tr('Broker not connected.')+'</span>'):tr('Set up a broker in')+' <a href="#settings">'+tr('Settings')+'</a>.';
 }
 function drawSpark(){
  if(hist.length<2)return;const mx=Math.max(...hist,1),W=300,H=70,st=W/(hist.length-1);
  const pts=hist.map((v,i)=>[i*st,H-4-(v/mx)*(H-10)]);
  const d='M'+pts.map(p=>p[0].toFixed(1)+' '+p[1].toFixed(1)).join('L');
  $('#line').setAttribute('d',d);$('#area').setAttribute('d',d+`L${W} ${H}L0 ${H}Z`);
- $('#rate').textContent=hist[hist.length-1].toFixed(0)+' / min now · peak '+mx.toFixed(0);
+ $('#rate').textContent=tr('{0} / min now · peak {1}',hist[hist.length-1].toFixed(0),mx.toFixed(0));
 }
 function renderFeed(){
- $('#feed').innerHTML=(feed.length?feed.map(e=>`<div><span class="dot${e.blocked?' x':''}"></span><span class="g">${esc(e.domain)}</span><span class="k">${e.ip}</span><span class="k" style="width:40px;text-align:right">${ago(e.ago)}</span></div>`).join(''):'<div class="mu">No matching queries</div>')
-  +`<div class="k" style="border:0">Searching the last ${n(feedCap)} queries${feed.length>=100?' · showing the newest 100':''}</div>`;
+ $('#feed').innerHTML=(feed.length?feed.map(e=>`<div><span class="dot${e.blocked?' x':''}"></span><span class="g">${esc(e.domain)}</span><span class="k">${e.ip}</span><span class="k" style="width:40px;text-align:right">${ago(e.ago)}</span></div>`).join(''):'<div class="mu">'+tr('No matching queries')+'</div>')
+  +`<div class="k" style="border:0">${tr('Searching the last {0} queries',n(feedCap))}${feed.length>=100?tr(' · showing the newest 100'):''}</div>`;
 }
 function renderLists(){
  $$('#ltabs button').forEach(x=>x.classList.toggle('on',x.dataset.v==ltab));
- $('#lhelp').textContent=ltab=='block'?'Blocked in addition to the blocklist, subdomains included.':'Never blocked, even if the blocklist or a parent domain matches.';
- const a=L[ltab];$('#chips').innerHTML=a.length?a.map(d=>`<span class="chip">${esc(d)}<button data-a="rm" data-v="${esc(d)}" title="Remove">×</button></span>`).join(''):'<span class="mu">Nothing here yet</span>';
+ $('#lhelp').textContent=tr(ltab=='block'?'Blocked in addition to the blocklist, subdomains included.':'Never blocked, even if the blocklist or a parent domain matches.');
+ const a=L[ltab];$('#chips').innerHTML=a.length?a.map(d=>`<span class="chip">${esc(d)}<button data-a="rm" data-v="${esc(d)}" title="${tr('Remove')}">×</button></span>`).join(''):'<span class="mu">'+tr('Nothing here yet')+'</span>';
 }
 
 // ---------- loaders
@@ -306,15 +391,15 @@ async function loadClients(){
  const c=await api('/api/clients');c.sort((a,b)=>b.blocked+b.allowed-a.blocked-a.allowed);
  $('#clients').innerHTML=c.length?c.map(x=>{const t=x.blocked+x.allowed||1;return `<div><span class="dot${x.banned?' x':''}"></span>
   <div class="g"><b>${x.ip}</b> <span class="k">${x.mac}</span><div class="bar" style="margin-top:6px;max-width:320px"><i style="width:${x.blocked/t*100}%"></i><u style="width:${x.allowed/t*100}%"></u></div>
-  <span class="k">${n(x.blocked)} blocked · ${n(x.allowed)} allowed · seen ${ago(x.seenAgo)} ago</span></div>
-  <button class="btn s" data-a="feedip" data-v="${x.ip}">Queries</button><button class="btn s ${x.banned?'':'d'}" data-a="ban" data-v="${x.ip}" data-b="${x.banned?0:1}">${x.banned?'Unblock':'Block all'}</button></div>`}).join(''):'<div class="mu">No devices have used this resolver yet</div>';
+  <span class="k">${tr('{0} blocked · {1} allowed · seen {2} ago',n(x.blocked),n(x.allowed),ago(x.seenAgo))}</span></div>
+  <button class="btn s" data-a="feedip" data-v="${x.ip}">${tr('Queries')}</button><button class="btn s ${x.banned?'':'d'}" data-a="ban" data-v="${x.ip}" data-b="${x.banned?0:1}">${tr(x.banned?'Unblock':'Block all')}</button></div>`}).join(''):'<div class="mu">'+tr('No devices have used this resolver yet')+'</div>';
 }
 async function loadWol(){
  const h=await api('/api/wol');
  $('#hosts').innerHTML=h.length?h.map(x=>`<div class="host"><div class="row"><span class="dot${x.ip?(x.online?'':' off'):' off'}"></span><b class="g" style="flex:1">${esc(x.name)}</b>
-  <span class="k">${x.ip?(x.online?'online':'offline'):''}</span></div><div class="k mt">${x.mac}${x.ip?' · '+x.ip:''}</div>
-  <div class="row mt"><button class="btn p s" data-a="wake" data-v="${esc(x.name)}">Wake</button><button class="btn s d" data-a="wolrm" data-v="${esc(x.name)}">Remove</button>
-  ${x.wokeAgo>=0?'<span class="k">woken '+ago(x.wokeAgo)+' ago</span>':''}</div></div>`).join(''):'<div class="card mu">No computers yet. Add one below.</div>';
+  <span class="k">${x.ip?tr(x.online?'online':'offline'):''}</span></div><div class="k mt">${x.mac}${x.ip?' · '+x.ip:''}</div>
+  <div class="row mt"><button class="btn p s" data-a="wake" data-v="${esc(x.name)}">${tr('Wake')}</button><button class="btn s d" data-a="wolrm" data-v="${esc(x.name)}">${tr('Remove')}</button>
+  ${x.wokeAgo>=0?'<span class="k">'+tr('woken {0} ago',ago(x.wokeAgo))+'</span>':''}</div></div>`).join(''):'<div class="card mu">'+tr('No computers yet. Add one below.')+'</div>';
 }
 async function loadSettings(){
  const s=await api('/api/settings');
@@ -323,25 +408,25 @@ async function loadSettings(){
  fill('upd',{url:s.blocklistUrl,hours:s.updateHours});fill('ip',{mode:s.ipMode,ip:s.ipAddr,mask:s.ipMask,gw:s.ipGw,dns:s.ipDns});$('#mtopic').textContent=(s.mqttPrefix||'sinkhole')+'/wol/<name>/set';
 }
 const extra={dash:loadDash,lists:loadLists,devices:loadClients,wake:loadWol,system:()=>{},settings:()=>{}};
-async function refresh(){try{S=await api('/api/status');renderStatus(S);await extra[tab]()}catch(e){toast('Device unreachable: '+e.message,1)}}
+async function refresh(){try{S=await api('/api/status');renderStatus(S);await extra[tab]()}catch(e){toast(tr('Device unreachable: {0}',e.message),1)}}
 
 // ---------- actions
 function upload(kind){
  const inp=kind=='fw'?$('#fwf'):$('#blf'),bar=kind=='fw'?$('#fwp'):$('#blp'),f=inp.files[0];
- if(!f)return toast('Choose a file first',1);
- if(kind=='fw'&&!confirm('Install '+f.name+' and restart?'))return;
+ if(!f)return toast(tr('Choose a file first'),1);
+ if(kind=='fw'&&!confirm(tr('Install {0} and restart?',f.name)))return;
  const x=new XMLHttpRequest();x.open('POST',kind=='fw'?'/api/firmware/upload':'/api/blocklist/upload');x.setRequestHeader('X-Requested-With','sinkhole');
  x.upload.onprogress=e=>bar.style.width=(e.loaded/e.total*100)+'%';
- x.onload=()=>{let j={};try{j=JSON.parse(x.responseText)}catch(e){}toast(j.message||'HTTP '+x.status,x.status>=300);bar.style.width=0;inp.value='';refresh()};
- x.onerror=()=>{toast('Upload failed',1);bar.style.width=0};x.send(f);
+ x.onload=()=>{let j={};try{j=JSON.parse(x.responseText)}catch(e){}toast(tr(j.message||'HTTP '+x.status),x.status>=300);bar.style.width=0;inp.value='';refresh()};
+ x.onerror=()=>{toast(tr('Upload failed'),1);bar.style.width=0};x.send(f);
 }
 async function scan(){
- const b=$('#scanb');b.disabled=true;$('#scanm').textContent='Scanning…';
- try{nets=await api('/api/wifi/scan');$('#scanm').textContent=nets.length+' networks · tap to choose';
+ const b=$('#scanb');b.disabled=true;$('#scanm').textContent=tr('Scanning…');
+ try{nets=await api('/api/wifi/scan');$('#scanm').textContent=tr('{0} networks · tap to choose',nets.length);
   $('#nets').innerHTML=nets.map((x,i)=>{const q=x.rssi>=-55?4:x.rssi>=-67?3:x.rssi>=-75?2:1;
    return `<div data-a="pick" data-v="${i}" style="cursor:pointer"><svg width="18" height="14" viewBox="0 0 18 14">${[0,1,2,3].map(k=>`<rect x="${k*5}" y="${10-k*3}" width="3" height="${4+k*3}" rx="1" fill="${k<q?'var(--ac)':'var(--ln)'}"/>`).join('')}</svg>
-   <span class="g">${esc(x.ssid)}${x.current?' <span class="ok">· current</span>':''}</span><span class="k">${x.secure?x.auth:'open'} · ch ${x.channel}</span></div>`}).join('')}
- catch(e){$('#scanm').textContent='Scan failed: '+e.message}
+   <span class="g">${esc(x.ssid)}${x.current?' <span class="ok">· '+tr('current')+'</span>':''}</span><span class="k">${x.secure?x.auth:tr('open')} · ch ${x.channel}</span></div>`}).join('')}
+ catch(e){$('#scanm').textContent=tr('Scan failed: {0}',e.message)}
  b.disabled=false;
 }
 const A={
@@ -352,14 +437,15 @@ const A={
  rm:v=>act('/api/lists',{action:'remove',list:ltab,domain:v},loadLists),
  ban:(v,el)=>act('/api/ban',{ip:v,banned:el.dataset.b},loadClients),
  wake:v=>act('/api/wol',{action:'wake',name:v},loadWol),
- wolrm:v=>confirm('Remove '+v+'?')&&act('/api/wol',{action:'remove',name:v},loadWol),
+ wolrm:v=>confirm(tr('Remove {0}?',v))&&act('/api/wol',{action:'remove',name:v},loadWol),
  fetch:()=>act('/api/blocklist/fetch',{}),
  upload:upload,
- reboot:()=>confirm('Restart the device now?')&&act('/api/reboot',{}),
+ reboot:()=>confirm(tr('Restart the device now?'))&&act('/api/reboot',{}),
  scan:scan,
- pick:v=>{const x=nets[v],f=$('form[data-f="wifi"]');f.ssid.value=x.ssid;f.pass.value='';x.secure?f.pass.focus():toast('Open network: no password needed')},
+ pick:v=>{const x=nets[v],f=$('form[data-f="wifi"]');f.ssid.value=x.ssid;f.pass.value='';x.secure?f.pass.focus():toast(tr('Open network: no password needed'))},
  reconnect:()=>act('/api/wifi',{action:'reconnect'}),
- forget:()=>confirm('Forget this Wi-Fi? The setup access point will turn on.')&&act('/api/wifi',{action:'forget'},()=>{refresh();loadSettings()}),
+ forget:()=>confirm(tr('Forget this Wi-Fi? The setup access point will turn on.'))&&act('/api/wifi',{action:'forget'},()=>{refresh();loadSettings()}),
+ lang:v=>{try{localStorage.setItem('lang',v)}catch(e){}location.reload()},
 };
 const F={
  adddomain:(d,f)=>act('/api/lists',{action:'add',list:ltab,domain:d.domain},()=>{f.reset();loadLists()}),
@@ -371,7 +457,7 @@ const F={
  mqtt:(d,f)=>act('/api/settings',{section:'mqtt',...d},()=>f.pass.value=''),
  admin:d=>act('/api/settings',{section:'admin',...d}),
  hostname:d=>act('/api/settings',{section:'hostname',...d}),
- ip:d=>(d.mode=='dhcp'||confirm('Switch the device to '+d.ip+'? You will need to open it at that address.'))&&act('/api/settings',{section:'ip',...d}),
+ ip:d=>(d.mode=='dhcp'||confirm(tr('Switch the device to {0}? You will need to open it at that address.',d.ip)))&&act('/api/settings',{section:'ip',...d}),
  upd:d=>act('/api/settings',{section:'update',...d}),
 };
 document.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(el&&A[el.dataset.a]){e.preventDefault();A[el.dataset.a](el.dataset.v,el)}});
@@ -382,9 +468,10 @@ function route(){
  const t=location.hash.slice(1);tab=T[t]?t:'dash';
  $$('nav a').forEach(a=>a.classList.toggle('on',a.hash=='#'+tab));
  $$('main section').forEach(s=>s.hidden=s.id!=tab);
- $('#title').textContent=T[tab];
+ $('#title').textContent=tr(T[tab]);
  refresh();if(tab=='settings'||tab=='system')loadSettings().catch(()=>{});
 }
+i18nDom();
 addEventListener('hashchange',route);
 route();
 setInterval(()=>{if(!document.hidden)refresh()},4000);
