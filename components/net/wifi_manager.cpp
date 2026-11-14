@@ -19,6 +19,10 @@ constexpr uint32_t kMaxRetryMs = 60 * 1000;
 constexpr uint32_t kRetryWithApClientsMs = 60 * 1000;
 constexpr uint64_t kApGraceUs = 30ULL * 1000 * 1000;
 constexpr uint8_t kDhcpsOfferDns = 0x02;  // OFFER_DNS in lwIP's dhcpserver
+constexpr int8_t kFullTxQdbm = 80;      // 20 dBm (the driver clamps to the chip maximum)
+constexpr int8_t kReducedTxQdbm = 34;   // 8.5 dBm
+constexpr uint32_t kTxToggleAfter = 3;  // failed attempts before switching level
+constexpr const char* kLowTxKey = "lowtx";
 }  // namespace
 
 // ------------------------------------------------------------------ setup
@@ -57,9 +61,9 @@ esp_err_t WifiManager::begin()
     const Settings s = cfg_.get();
     configured_ = s.staSsid[0] != '\0';
     esp_wifi_set_mode(WIFI_MODE_APSTA);  // AP starts on; policy may turn it off later
-    configureAp(s);
+    configureAp();
     applyStaConfig(s.staSsid, s.staPass);
-    applyIpConfig(s);
+    applyIpConfig();
 
     err = esp_wifi_start();
     if (err != ESP_OK) return err;
@@ -67,9 +71,11 @@ esp_err_t WifiManager::begin()
     // Latency: modem sleep parks the radio between beacons and can add ~100 ms
     // to every reply. A DNS server is mains-powered, so keep the radio awake.
     esp_wifi_set_ps(WIFI_PS_NONE);
-#if CONFIG_SINKHOLE_WIFI_MAX_TX_POWER > 0
-    esp_wifi_set_max_tx_power(CONFIG_SINKHOLE_WIFI_MAX_TX_POWER);
-#endif
+
+    uint8_t low = 0;
+    nvs::loadU8(kLowTxKey, low);  // the level that last worked (Auto mode)
+    lowTx_ = low != 0;
+    applyTxPower();
 
     char ssid[33];
     apSsid(ssid);
@@ -78,12 +84,37 @@ esp_err_t WifiManager::begin()
     return ESP_OK;
 }
 
-void WifiManager::configureAp(const Settings& s)
+// ------------------------------------------------------------------ TX power
+
+void WifiManager::applyTxPower()
 {
+#if CONFIG_SINKHOLE_WIFI_MAX_TX_POWER > 0
+    esp_wifi_set_max_tx_power(CONFIG_SINKHOLE_WIFI_MAX_TX_POWER);  // pinned at build time
+#else
+    const uint8_t mode = cfg_.read([](const Settings& s) { return s.txPower; });
+    const bool low = mode == TxReduced || (mode == TxAuto && lowTx_);
+    esp_wifi_set_max_tx_power(low ? kReducedTxQdbm : kFullTxQdbm);
+#endif
+}
+
+float WifiManager::txPowerDbm() const
+{
+    int8_t q = 0;
+    return esp_wifi_get_max_tx_power(&q) == ESP_OK ? q / 4.0f : 0.0f;
+}
+
+void WifiManager::configureAp()
+{
+    char cfgSsid[33], cfgPass[65];
+    cfg_.read([&](const Settings& s) {
+        copyStr(cfgSsid, s.apSsid);
+        copyStr(cfgPass, s.apPass);
+        return 0;
+    });
     wifi_config_t ap{};
     char ssid[33];
-    if (s.apSsid[0]) {
-        copyStr(ssid, s.apSsid);
+    if (cfgSsid[0]) {
+        copyStr(ssid, cfgSsid);
     } else {
         uint8_t mac[6];
         esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
@@ -92,7 +123,7 @@ void WifiManager::configureAp(const Settings& s)
     copyStr(reinterpret_cast<char*>(ap.ap.ssid), sizeof(ap.ap.ssid), ssid);
     ap.ap.ssid_len = static_cast<uint8_t>(strlen(ssid));
 
-    const char* pass = strlen(s.apPass) >= 8 ? s.apPass : CONFIG_SINKHOLE_AP_PASSWORD;
+    const char* pass = strlen(cfgPass) >= 8 ? cfgPass : CONFIG_SINKHOLE_AP_PASSWORD;
     copyStr(reinterpret_cast<char*>(ap.ap.password), sizeof(ap.ap.password), pass);
     ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
     ap.ap.max_connection = 4;
@@ -128,8 +159,16 @@ void WifiManager::applyStaConfig(const char* ssid, const char* pass)
 
 // Static IP: stop the DHCP client and set the address before (re)connecting;
 // esp_netif then reports IP_EVENT_STA_GOT_IP on link-up as usual.
-void WifiManager::applyIpConfig(const Settings& s)
+void WifiManager::applyIpConfig()
 {
+    struct {
+        bool staticIp;
+        uint32_t ipAddr, ipMask, ipGw, ipDns;
+    } s;
+    cfg_.read([&](const Settings& c) {
+        s = {c.staticIp, c.ipAddr, c.ipMask, c.ipGw, c.ipDns};
+        return 0;
+    });
     if (s.staticIp && s.ipAddr && s.ipMask) {
         esp_netif_dhcpc_stop(sta_);
         esp_netif_ip_info_t info{};
@@ -151,9 +190,9 @@ void WifiManager::applyIpConfig(const Settings& s)
     }
 }
 
-// Deferred by 500 ms so the HTTP reply that triggered it still goes out on the
-// old address before the link drops.
-void WifiManager::applyIpSettings()
+// Re-applies credentials + IP settings and reconnects. Deferred by 500 ms so the
+// HTTP reply that triggered it still goes out before the link drops.
+void WifiManager::reconfigureStation()
 {
     esp_timer_stop(ipTimer_);
     esp_timer_start_once(ipTimer_, 500 * 1000);
@@ -162,14 +201,17 @@ void WifiManager::applyIpSettings()
 void WifiManager::onIpTimer(void* arg)
 {
     auto* self = static_cast<WifiManager*>(arg);
-    self->applyIpConfig(self->cfg_.get());
-    if (self->configured_) {
-        if (self->connected_) {
-            self->selfDisconnect_ = true;
-            esp_wifi_disconnect();
-        }
-        self->connectSoon();
-    }
+    char ssid[33], pass[65];
+    self->cfg_.read([&](const Settings& s) {
+        copyStr(ssid, s.staSsid);
+        copyStr(pass, s.staPass);
+        return 0;
+    });
+    self->selfDisconnect_ = self->connected_.load();
+    esp_wifi_disconnect();
+    self->applyStaConfig(ssid, pass);
+    self->applyIpConfig();
+    if (self->configured_) self->connectSoon();
 }
 
 // ------------------------------------------------------------------ AP policy
@@ -178,7 +220,7 @@ bool WifiManager::apWanted()
 {
     if (!configured_ || !connected_) return true;
     if (uptimeSeconds() < forcedUntil_) return true;
-    return cfg_.get().apAlways;
+    return cfg_.read([](const Settings& s) { return s.apAlways; });
 }
 
 void WifiManager::updateAp()
@@ -210,13 +252,13 @@ void WifiManager::setApEnabled(bool on)
     apOn_ = on;
     if (!on) apClients_ = 0;
     esp_wifi_set_mode(on ? WIFI_MODE_APSTA : WIFI_MODE_STA);
-    if (on) configureAp(cfg_.get());
+    if (on) configureAp();
     ESP_LOGI(TAG, "setup AP %s", on ? "on" : "off");
 }
 
 esp_err_t WifiManager::applyAccessPoint()
 {
-    configureAp(cfg_.get());
+    configureAp();
     updateAp();
     return ESP_OK;
 }
@@ -240,11 +282,8 @@ esp_err_t WifiManager::setStation(const char* ssid, const char* pass)
     configured_ = ssid[0] != '\0';
     attempts_ = 0;
     lastReason_ = 0;
-    selfDisconnect_ = connected_.load();
-    esp_wifi_disconnect();
-    applyStaConfig(ssid, pass);
     ESP_LOGI(TAG, "uplink set to \"%s\", connecting", ssid);
-    connectSoon();
+    reconfigureStation();  // deferred, so the HTTP reply still goes out
     return ESP_OK;
 }
 
@@ -399,8 +438,12 @@ void WifiManager::handleEvent(esp_event_base_t base, int32_t id, void* data)
             case WIFI_EVENT_STA_START:
                 if (configured_) esp_wifi_connect();
                 break;
+            case WIFI_EVENT_STA_CONNECTED:
+                linkUp_ = true;
+                break;
             case WIFI_EVENT_STA_DISCONNECTED: {
                 auto* ev = static_cast<wifi_event_sta_disconnected_t*>(data);
+                linkUp_ = false;
                 const bool was = connected_;
                 connected_ = false;
                 staIp_ = 0;
@@ -416,6 +459,16 @@ void WifiManager::handleEvent(esp_event_base_t base, int32_t id, void* data)
                         ESP_LOGW(TAG, "uplink %s: %s (reason %u, attempt %lu)", was ? "lost" : "failed",
                                  reasonText(lastReason_), lastReason_.load(),
                                  static_cast<unsigned long>(attempts_));
+#if CONFIG_SINKHOLE_WIFI_MAX_TX_POWER == 0
+                    // Auto TX power: some boards (C3 SuperMini) can't hold a link at
+                    // full power. Every few failures, try the other level.
+                    if (attempts_ % kTxToggleAfter == 0 &&
+                        cfg_.read([](const Settings& s) { return s.txPower; }) == TxAuto) {
+                        lowTx_ = !lowTx_;
+                        applyTxPower();
+                        ESP_LOGW(TAG, "auto TX power: trying %s", lowTx_ ? "reduced (8.5 dBm)" : "full");
+                    }
+#endif
                 }
                 // A pending timer means an attempt is already on its way (connectSoon);
         // during a scan, scan() restarts the attempt itself.
@@ -434,6 +487,12 @@ void WifiManager::handleEvent(esp_event_base_t base, int32_t id, void* data)
                 break;
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        // Setting a static IP raises GOT_IP immediately, even with the radio
+        // link down. Only an address on a live link counts as "connected".
+        if (!linkUp_) {
+            ESP_LOGD(TAG, "ignoring GOT_IP without link");
+            return;
+        }
         auto* ev = static_cast<ip_event_got_ip_t*>(data);
         staIp_ = ev->ip_info.ip.addr;
         staMask_ = ev->ip_info.netmask.addr;
@@ -445,7 +504,11 @@ void WifiManager::handleEvent(esp_event_base_t base, int32_t id, void* data)
         retryDelayMs_ = 1000;
         char ip[16];
         formatIp4(staIp_, ip);
-        ESP_LOGI(TAG, "uplink up, ip %s", ip);
+        ESP_LOGI(TAG, "uplink up, ip %s, tx %.1f dBm", ip, txPowerDbm());
+        // Remember which level worked so the next boot starts there.
+        uint8_t stored = 0;
+        nvs::loadU8(kLowTxKey, stored);
+        if ((stored != 0) != lowTx_) nvs::saveU8(kLowTxKey, lowTx_ ? 1 : 0);
         updateAp();
         if (listener_) listener_(listenerCtx_, true);
     }

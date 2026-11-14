@@ -59,7 +59,10 @@ public:
     esp_err_t setStation(const char* ssid, const char* pass);  // save + connect
     esp_err_t forgetStation();                                 // clear creds, AP on
     void reconnect();                                          // retry now
-    void applyIpSettings();                                    // DHCP/static changed: apply + reconnect
+    void reconfigureStation();                                 // creds/IP changed: apply + reconnect (deferred)
+    void applyTxPower();                                       // after Settings::txPower changes
+    float txPowerDbm() const;
+    bool txReduced() const { return lowTx_; }
     esp_err_t applyAccessPoint();                              // after AP settings change
     void forceAp(uint32_t minutes);                            // BOOT button
 
@@ -88,9 +91,9 @@ private:
     static void onApTimer(void* arg);
     static void onIpTimer(void* arg);
     void handleEvent(esp_event_base_t base, int32_t id, void* data);
-    void configureAp(const Settings& s);
+    void configureAp();
     void applyStaConfig(const char* ssid, const char* pass);
-    void applyIpConfig(const Settings& s);
+    void applyIpConfig();
     void scheduleRetry();
     void connectSoon();
     bool apWanted();
@@ -106,10 +109,12 @@ private:
     Listener listener_ = nullptr;
     void* listenerCtx_ = nullptr;
 
-    std::atomic<bool> connected_{false};
+    std::atomic<bool> connected_{false};  // link up AND address assigned
+    std::atomic<bool> linkUp_{false};     // associated with the uplink AP
     std::atomic<bool> configured_{false};
     std::atomic<bool> selfDisconnect_{false};
     std::atomic<bool> scanning_{false};
+    std::atomic<bool> lowTx_{false};  // Auto mode currently at reduced power
     Mutex scanMu_;
     wifi_ap_record_t raw_[32];  // driver scan records, only touched under scanMu_
     std::atomic<bool> apOn_{true};

@@ -121,6 +121,7 @@ size_t Config::validBytes(uint16_t version)
 {
     switch (version) {
         case 2: return offsetof(Settings, staticIp);
+        case 3: return offsetof(Settings, txPower);
         case kVersion: return sizeof(Settings);
         default: return 0;  // unknown / too old: start from defaults
     }

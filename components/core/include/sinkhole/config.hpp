@@ -48,16 +48,29 @@ struct Settings {
     // ---- v3 (append-only from here on: older blobs are migrated in place) ----
     bool staticIp;  // false = DHCP
     uint32_t ipAddr, ipMask, ipGw, ipDns;  // network byte order
+
+    // ---- v4 ----
+    uint8_t txPower;  // TxPower
 };
+
+enum TxPower : uint8_t { TxAuto = 0, TxFull = 1, TxReduced = 2 };
 
 class Config {
 public:
     // Bump when fields are appended to Settings, and add the previous version's
     // byte length to Config::validBytes() so stored settings migrate.
-    static constexpr uint16_t kVersion = 3;
+    static constexpr uint16_t kVersion = 4;
 
     esp_err_t load();  // defaults if missing / older version
-    Settings get();    // copy, thread-safe
+    Settings get();    // copy, thread-safe (~1 KB: avoid on small stacks)
+
+    // Read a few fields without copying the struct: cfg.read([](const Settings& s){ return s.apAlways; })
+    template <typename F>
+    auto read(F&& fn)
+    {
+        LockGuard g(mu_);
+        return fn(static_cast<const Settings&>(s_));
+    }
 
     // Apply a change and persist it: cfg.modify([](Settings& s){ ... });
     template <typename F>

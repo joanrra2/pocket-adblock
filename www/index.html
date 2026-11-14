@@ -178,7 +178,8 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
     <div class="row mt"><button class="btn" data-a="scan" id="scanb">Scan networks</button><span class="k" id="scanm"></span></div>
     <div class="list" id="nets"></div>
     <form data-f="wifi"><label>Network</label><input name="ssid" required><label>Password</label><input name="pass" type="password" autocomplete="current-password">
-     <div class="row mt"><button class="btn p">Connect</button><button class="btn" type="button" data-a="reconnect">Reconnect</button><button class="btn d" type="button" data-a="forget">Forget</button></div></form></div>
+     <div class="row mt"><button class="btn p">Connect</button><button class="btn" type="button" data-a="reconnect">Reconnect</button><button class="btn d" type="button" data-a="forget">Forget</button></div></form>
+    <form data-f="radio"><label>Transmit power <span id="txnow"></span></label><div class="row"><select name="tx" style="flex:1"><option value="auto">Auto (drops to 8.5 dBm if the link keeps failing)</option><option value="full">Full</option><option value="reduced">Reduced, 8.5 dBm</option></select><button class="btn">Save</button></div></form></div>
    <div class="card"><h2>Setup access point</h2><div class="mu" id="ast"></div>
     <form data-f="ap"><label>Name (empty = Sinkhole-XXXX)</label><input name="ssid">
      <label>New password (8+ characters, empty = keep)</label><input name="pass" type="password" autocomplete="new-password">
@@ -269,6 +270,7 @@ function renderStatus(s){
  // settings status lines
  $('#wst').innerHTML=w.connected?'<span class="ok">Connected</span> to '+esc(w.ssid)+' · '+w.ip+' · '+w.rssi+' dBm':w.state=='not configured'?'Not configured':
   '<span class="wa">'+esc(w.state)+'</span>'+(w.reason?' · '+esc(w.reason):'')+' · '+w.attempts+' attempts'+(w.nextRetry?' · next in '+w.nextRetry+'s':'');
+ $('#txnow').textContent='· now '+(w.txDbm10/10)+' dBm';
  $('#ast').innerHTML='Now '+(w.apOn?'<span class="ok">on</span> · '+w.apClients+' connected':'off')+(w.apForcedFor?' · forced for '+ago(w.apForcedFor):'');
  $('#mstate').innerHTML=s.mqtt.configured?(s.mqtt.connected?'<span class="ok">Broker connected.</span>':'<span class="wa">Broker not connected.</span>'):'Set up a broker in <a href="#settings">Settings</a>.';
 }
@@ -309,7 +311,7 @@ async function loadWol(){
 }
 async function loadSettings(){
  const s=await api('/api/settings');
- fill('wifi',{ssid:s.staSsid});fill('ap',{ssid:s.apSsid,always:s.apAlways?'1':'0'});fill('dns',{mode:s.upstreamMode,ip:s.upstreamIp});
+ fill('wifi',{ssid:s.staSsid});fill('radio',{tx:s.txPower});fill('ap',{ssid:s.apSsid,always:s.apAlways?'1':'0'});fill('dns',{mode:s.upstreamMode,ip:s.upstreamIp});
  fill('mqtt',{uri:s.mqttUri,user:s.mqttUser,prefix:s.mqttPrefix});fill('admin',{user:s.adminUser});fill('hostname',{hostname:s.hostname});
  fill('upd',{url:s.blocklistUrl,hours:s.updateHours});fill('ip',{mode:s.ipMode,ip:s.ipAddr,mask:s.ipMask,gw:s.ipGw,dns:s.ipDns});$('#mtopic').textContent=(s.mqttPrefix||'sinkhole')+'/wol/<name>/set';
 }
@@ -356,6 +358,7 @@ const F={
  adddomain:(d,f)=>act('/api/lists',{action:'add',list:ltab,domain:d.domain},()=>{f.reset();loadLists()}),
  woladd:(d,f)=>act('/api/wol',{action:'add',...d},()=>{f.reset();loadWol()}),
  wifi:d=>act('/api/settings',{section:'wifi',...d}),
+ radio:d=>act('/api/settings',{section:'radio',...d}),
  ap:(d,f)=>act('/api/settings',{section:'ap',...d},()=>{f.pass.value='';refresh()}),
  dns:d=>act('/api/settings',{section:'dns',...d}),
  mqtt:(d,f)=>act('/api/settings',{section:'mqtt',...d},()=>f.pass.value=''),

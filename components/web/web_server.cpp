@@ -251,6 +251,8 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
         .str("apSsid", apSsid)
         .ip("apIp", d_.wifi.apIp())
         .boolean("captive", d_.dns.captive())
+        .num("txDbm10", static_cast<int64_t>(d_.wifi.txPowerDbm() * 10))
+        .boolean("txReduced", d_.wifi.txReduced())
         .endObject();
 
     const uint32_t resumeAt = d_.filter.resumeAt();
@@ -428,6 +430,7 @@ esp_err_t WebServer::getSettings(httpd_req_t* req)
         .str("mqttUri", s.mqttUri)
         .str("mqttUser", s.mqttUser)
         .str("mqttPrefix", s.mqttPrefix)
+        .str("txPower", s.txPower == TxFull ? "full" : s.txPower == TxReduced ? "reduced" : "auto")
         .str("ipMode", s.staticIp ? "static" : "dhcp")
         // Static values when set, otherwise what DHCP handed out (handy defaults).
         .ip("ipAddr", s.staticIp ? s.ipAddr : d_.wifi.staIp())
@@ -516,11 +519,18 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         });
         return sendOk(req, "saved; reboot to apply");
     }
+    if (strcmp(section, "radio") == 0) {
+        field(form, "tx", a, 16);
+        const uint8_t mode = strcmp(a, "full") == 0 ? TxFull : strcmp(a, "reduced") == 0 ? TxReduced : TxAuto;
+        d_.cfg.modify([mode](Settings& s) { s.txPower = mode; });
+        d_.wifi.applyTxPower();
+        return sendOk(req);
+    }
     if (strcmp(section, "ip") == 0) {
         field(form, "mode", a, 16);
         if (strcmp(a, "static") != 0) {
             d_.cfg.modify([](Settings& s) { s.staticIp = false; });
-            d_.wifi.applyIpSettings();
+            d_.wifi.reconfigureStation();
             return sendOk(req, "switched to DHCP; the address may change");
         }
         char ipS[20] = "", maskS[20] = "", gwS[20] = "", dnsS[20] = "";
@@ -545,7 +555,7 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
             s.ipGw = gw;
             s.ipDns = dns;
         });
-        d_.wifi.applyIpSettings();
+        d_.wifi.reconfigureStation();
         char msg[64];
         snprintf(msg, sizeof(msg), "static IP set; reconnecting at http://%s/", ipS);
         return sendOk(req, msg);

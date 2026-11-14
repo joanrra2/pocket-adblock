@@ -89,11 +89,13 @@ menu "DNS Sinkhole"
             Hold 10 s: factory reset (erases settings, keeps the blocklist).
 
     config SINKHOLE_WIFI_MAX_TX_POWER
-        int "Max Wi-Fi TX power in 0.25 dBm units (0 = driver default)"
+        int "Pin Wi-Fi TX power in 0.25 dBm units (0 = runtime setting)"
         default 0
         range 0 84
         help
+            0 (default): TX power is chosen at runtime in Settings: Auto (full power,
+            falls back to 8.5 dBm after repeated failures), Full or Reduced.
             Some C3 SuperMini boards have a badly matched antenna and drop the
-            connection at full power. 34 (= 8.5 dBm) usually fixes them.
+            connection at full power; 34 (= 8.5 dBm) pins the reduced level.
 
 endmenu
