@@ -23,6 +23,10 @@ public:
 private:
     static void onUplinkChange(void* ctx, bool connected);
     static void applyUpstream(void* ctx);
+    MqttHooks mqttHooks();
+    static bool hookBlocking(void* ctx);
+    static void hookSetBlocking(void* ctx, bool on);
+    static size_t hookStats(void* ctx, char* out, size_t cap);
     void updateCaptive();
     void startRollbackGuard();
 
@@ -39,7 +43,7 @@ private:
     FirmwareUpdater firmware_;
     Updater updater_{config_, store_, wifi_, firmware_};
     WolService wol_{wifi_};
-    MqttBridge mqtt_{config_, wol_};
+    MqttBridge mqtt_{config_, wol_, mqttHooks()};
     BootButton button_{wifi_};
     WebServer web_;
 };

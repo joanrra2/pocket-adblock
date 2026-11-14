@@ -64,6 +64,9 @@ struct Settings {
 
     // ---- v8 ----
     bool cnameCheck;  // block allowed names that are CNAMEs of blocked ones
+
+    // ---- v9 ----
+    bool haDiscovery;  // announce entities to Home Assistant over MQTT
 };
 
 enum TxPower : uint8_t { TxAuto = 0, TxFull = 1, TxReduced = 2 };
@@ -72,7 +75,7 @@ class Config {
 public:
     // Bump when fields are appended to Settings, and add the previous version's
     // byte length to Config::validBytes() so stored settings migrate.
-    static constexpr uint16_t kVersion = 8;
+    static constexpr uint16_t kVersion = 9;
 
     esp_err_t load();  // defaults if missing / older version
     Settings get();    // copy, thread-safe (~1 KB: avoid on small stacks)

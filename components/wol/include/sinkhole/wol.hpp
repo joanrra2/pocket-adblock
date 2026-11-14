@@ -38,6 +38,23 @@ public:
     esp_err_t add(const WolHost& h);  // replaces an entry with the same name
     esp_err_t remove(const char* name);
     size_t list(WolHostState* out, size_t max);
+    // fn(const WolHost&) for each host, under the lock (keep fn short, no copies).
+    template <typename F>
+    void forEachHost(F&& fn)
+    {
+        LockGuard g(mu_);
+        for (size_t i = 0; i < count_; i++) fn(static_cast<const WolHost&>(hosts_[i].host));
+    }
+    // Changes whenever a host is added, removed or edited.
+    uint32_t fingerprint()
+    {
+        uint32_t h = 2166136261u;
+        forEachHost([&h](const WolHost& w) {
+            for (const char* c = w.name; *c; c++) h = (h ^ static_cast<uint8_t>(*c)) * 16777619u;
+            h = (h ^ w.ip) * 16777619u;
+        });
+        return h;
+    }
 
     esp_err_t wake(const char* name);
     esp_err_t wakeMac(const uint8_t mac[6]);
@@ -67,21 +84,49 @@ private:
 //   <p>/wol/<name>/set    any payload  -> wake that host
 //   <p>/wol/<name>/state  "online" / "offline" (retained, published by us)
 //   <p>/status            "online" / LWT "offline" (retained)
+// What the bridge may read and control besides Wake-on-LAN (provided by the
+// app, so this component needs no filter / stats dependencies).
+struct MqttHooks {
+    void* ctx = nullptr;
+    bool (*blocking)(void* ctx) = nullptr;
+    void (*setBlocking)(void* ctx, bool on) = nullptr;
+    // Writes the stats JSON object published on <prefix>/stats; returns length.
+    size_t (*stats)(void* ctx, char* out, size_t cap) = nullptr;
+    const char* model = "";
+    const char* version = "";
+};
+
+// MQTT: remote wake (<prefix>/wol/<name>/set), host states, and optional Home
+// Assistant discovery: a Blocking switch, stats sensors and a Wake button +
+// online sensor per WoL host appear in Home Assistant by themselves.
 class MqttBridge {
 public:
-    MqttBridge(Config& cfg, WolService& wol) : cfg_(cfg), wol_(wol) {}
+    MqttBridge(Config& cfg, WolService& wol, const MqttHooks& hooks) : cfg_(cfg), wol_(wol), hooks_(hooks) {}
     esp_err_t start();  // no-op when no broker URI is configured
     bool connected() const { return connected_; }
 
 private:
     static void onEvent(void* arg, const char* base, int32_t id, void* data);
     static void onHostState(void* ctx, const char* name, bool online);
+    static void onTick(void* arg);
     void handleEvent(int32_t id, void* data);
+    void tick();
+    void announce();
+    void publishBlocking();
+    void enqueue(const char* topic, const char* payload, bool retain);
+    void deviceJson(char* out, size_t cap);
+    static void objectId(const char* name, char* out, size_t cap);
 
     Config& cfg_;
     WolService& wol_;
+    MqttHooks hooks_;
     void* client_ = nullptr;  // esp_mqtt_client_handle_t
     std::atomic<bool> connected_{false};
+    std::atomic<bool> announceNow_{false};
+    bool ha_ = false;
+    uint32_t hostsHash_ = 0;
+    uint32_t ticks_ = 0;
+    int8_t lastBlocking_ = -1;  // last published switch state, -1 = none
     // Strings the MQTT client keeps pointers to.
     char uri_[128]{};
     char user_[64]{};
@@ -89,6 +134,11 @@ private:
     char prefix_[48]{};
     char statusTopic_[64]{};
     char clientId_[32]{};
+    char nodeId_[24]{};
+    char hostname_[32]{};
+    // Only used from the tick timer (single context).
+    char buf_[768]{};
+    char announced_[WolService::kCapacity][24]{};  // object ids of announced hosts
 };
 
 }  // namespace sinkhole

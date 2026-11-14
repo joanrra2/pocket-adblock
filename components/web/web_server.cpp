@@ -542,6 +542,7 @@ esp_err_t WebServer::getSettings(httpd_req_t* req)
         .str("mqttUri", s.mqttUri)
         .str("mqttUser", s.mqttUser)
         .str("mqttPrefix", s.mqttPrefix)
+        .boolean("haDiscovery", s.haDiscovery)
         .str("txPower", s.txPower == TxFull ? "full" : s.txPower == TxReduced ? "reduced" : "auto")
         .str("fwManifestUrl", s.fwManifestUrl)
         .boolean("fwAuto", s.fwAuto)
@@ -642,7 +643,10 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         field(form, "user", b, 64);
         field(form, "pass", c, 64);
         field(form, "prefix", e, 48);
+        char ha[4] = "";
+        field(form, "ha", ha, sizeof(ha));
         d_.cfg.modify([&](Settings& s) {
+            s.haDiscovery = ha[0] == '1';
             copyStr(s.mqttUri, a);
             copyStr(s.mqttUser, b);
             if (c[0]) copyStr(s.mqttPass, c);

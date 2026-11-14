@@ -103,6 +103,44 @@ void App::applyUpstream(void* ctx)
     ESP_LOGI(TAG, "upstream DNS %s, backup %s", ip, ip2);
 }
 
+// What the MQTT bridge may read / control (Home Assistant entities).
+MqttHooks App::mqttHooks()
+{
+    MqttHooks h;
+    h.ctx = this;
+    h.blocking = &App::hookBlocking;
+    h.setBlocking = &App::hookSetBlocking;
+    h.stats = &App::hookStats;
+    h.model = Updater::boardId();
+    h.version = FirmwareUpdater::version();
+    return h;
+}
+
+bool App::hookBlocking(void* ctx)
+{
+    return static_cast<App*>(ctx)->filter_.enabled();
+}
+
+void App::hookSetBlocking(void* ctx, bool on)
+{
+    auto* self = static_cast<App*>(ctx);
+    self->filter_.setEnabled(on);
+    self->config_.modify([on](Settings& s) { s.blocking = on; });
+}
+
+size_t App::hookStats(void* ctx, char* out, size_t cap)
+{
+    auto* self = static_cast<App*>(ctx);
+    const uint32_t blocked = self->counters_.blocked, allowed = self->counters_.allowed;
+    const uint64_t total = static_cast<uint64_t>(blocked) + allowed;
+    const unsigned pct10 = total ? static_cast<unsigned>(blocked * 1000ULL / total) : 0;
+    const int n = snprintf(out, cap, "{\"blocked\":%u,\"allowed\":%u,\"percent\":%u.%u,\"domains\":%u,\"clients\":%u}",
+                           static_cast<unsigned>(blocked), static_cast<unsigned>(allowed), pct10 / 10, pct10 % 10,
+                           static_cast<unsigned>(self->store_.info().count),
+                           static_cast<unsigned>(self->clients_.activeCount(3600)));
+    return n > 0 ? static_cast<size_t>(n) : 0;
+}
+
 // A freshly flashed image boots as PENDING_VERIFY. If it still runs and the DNS
 // task is alive after a minute, keep it; if it crashes first, the bootloader
 // rolls back to the previous image on the next reset.

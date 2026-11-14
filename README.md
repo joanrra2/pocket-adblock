@@ -189,10 +189,22 @@ HiveMQ Cloud or your Home Assistant's Mosquitto). Then:
 | `sinkhole/wol/<name>/set` | you → device | anything: wakes `<name>` |
 | `sinkhole/wol/<name>/state` | device → you | `online` / `offline` (retained) |
 | `sinkhole/status` | device → you | `online` / `offline` (LWT, retained) |
+| `sinkhole/blocking/set` | you → device | `ON` / `OFF` |
+| `sinkhole/blocking` | device → you | `ON` / `OFF` (retained, on every change) |
+| `sinkhole/stats` | device → you | `{"blocked","allowed","percent","domains","clients"}` every 60 s |
 
 ```bash
 mosquitto_pub -h broker -p 8883 -u user -P pass -t sinkhole/wol/office-pc/set -m wake
 ```
+
+### Home Assistant
+
+With **Show in Home Assistant** ticked (default) and the broker your Home Assistant
+uses, a *Pocket AdBlock* device appears by itself (MQTT discovery): a **Blocking**
+switch, sensors for blocked / allowed queries, blocked share, blocklist size and
+active clients, and for every Wake-on-LAN host a **Wake** button plus an **online**
+sensor (hosts with an IP). Adding or removing hosts updates Home Assistant within
+a few seconds. MQTT changes apply after a restart.
 
 ## Updates
 

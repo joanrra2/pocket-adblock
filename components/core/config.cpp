@@ -116,6 +116,7 @@ void Config::applyDefaults(Settings& s)
     copyStr(s.fwManifestUrl, CONFIG_SINKHOLE_FW_MANIFEST_URL);
     s.bypassGuard = 1;  // canary domains on, encrypted-DNS list off (see bypass_guard.hpp)
     s.cnameCheck = true;
+    s.haDiscovery = true;
 }
 
 // Bytes of Settings that were meaningful in a given stored version. Fields are
@@ -129,6 +130,7 @@ size_t Config::validBytes(uint16_t version)
         case 5: return offsetof(Settings, fwManifestUrl);
         case 6: return offsetof(Settings, bypassGuard);
         case 7: return offsetof(Settings, cnameCheck);
+        case 8: return offsetof(Settings, haDiscovery);
         case kVersion: return sizeof(Settings);
         default: return 0;  // unknown / too old: start from defaults
     }

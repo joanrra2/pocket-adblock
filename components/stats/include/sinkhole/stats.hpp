@@ -64,6 +64,8 @@ public:
 
     // Snapshot for the UI. Resolves missing MACs from the ARP table first.
     size_t snapshot(ClientInfo* out, size_t max);
+    // Clients seen within the last `seconds`.
+    size_t activeCount(uint32_t seconds);
 
 private:
     ClientInfo* findLocked(const ClientAddr& addr);

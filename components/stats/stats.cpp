@@ -128,6 +128,15 @@ esp_err_t ClientTable::saveBannedLocked()
     return nvs::saveBlob(kBannedKey, banned_, bannedCount_ * sizeof(uint32_t));
 }
 
+size_t ClientTable::activeCount(uint32_t seconds)
+{
+    const uint32_t now = uptimeSeconds();
+    LockGuard g(mu_);
+    size_t n = 0;
+    for (size_t i = 0; i < count_; i++) n += now - clients_[i].lastSeen <= seconds;
+    return n;
+}
+
 size_t ClientTable::snapshot(ClientInfo* out, size_t max)
 {
     {
