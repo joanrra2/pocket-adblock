@@ -1,10 +1,10 @@
-# 4 MB layout: two OTA app slots + two A/B blocklist slots.
-# Blocklist slots hold a 64-byte header + 5-byte hashes: 0xD0000 -> ~170k domains each.
-# Check `idf.py size` before shrinking the app slots.
+# 4 MB layout: two 1.25 MB OTA app slots + two A/B blocklist slots of 704 KB.
+# A slot holds ~218k domains in the compact v2 format (~144k in v1/raw).
+# Check `idf.py size` (and the signed build, ~30 KB bigger) before changing.
 # Name,   Type, SubType, Offset,   Size
 nvs,      data, nvs,     0x9000,   0x6000
 otadata,  data, ota,     0xF000,   0x2000
-ota_0,    app,  ota_0,   0x20000,  0x120000
-ota_1,    app,  ota_1,   0x140000, 0x120000
-bl_a,     data, 0x40,    0x260000, 0xD0000
-bl_b,     data, 0x40,    0x330000, 0xD0000
+ota_0,    app,  ota_0,   0x20000,  0x140000
+ota_1,    app,  ota_1,   0x160000, 0x140000
+bl_a,     data, 0x40,    0x2A0000, 0xB0000
+bl_b,     data, 0x40,    0x350000, 0xB0000

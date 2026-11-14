@@ -36,7 +36,7 @@ jobs:
           grep -q "signed" build.log && payload=$(( payload - 64 ))   # signature trailer
           test $(( payload % 3 )) -eq 0
           test $(( payload / 3 )) -gt 50000       # >50k domains: catches a silently shrunk list
-          test "$size" -le $((0xD0000))           # fits a 4 MB-layout slot
+          test "$size" -le $((0xB0000))           # fits a 4 MB-layout slot (704 KB)
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}

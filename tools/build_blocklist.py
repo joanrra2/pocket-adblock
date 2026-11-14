@@ -182,9 +182,9 @@ def main():
     print(f'file             : {os.path.getsize(out):,} bytes -> {out}')
     if version == 1:
         print(f'lookup           : ~{math.ceil(math.log2(max(n, 2)))} reads/query')
-        print('fits             : 4 MB layout up to 170,380 / 8 MB layout up to 511,168')
+        print('fits             : 4 MB layout up to 144,166 / 8 MB layout up to 511,168')
     else:
-        print('fits             : 4 MB layout up to 261,781 / 8 MB layout up to 829,760')
+        print('fits             : 4 MB layout up to 218,090 / 8 MB layout up to 829,760')
 
 
 if __name__ == '__main__':

@@ -9,7 +9,7 @@ A Pi-hole-style **DNS ad-blocker and Wake-on-LAN node** for a few-dollar ESP32,
 written in plain **ESP-IDF v6.1** (no Arduino). It runs on a $2 ESP32-C3 with no
 PSRAM, and takes advantage of PSRAM when the board has it.
 
-- **~260k domains on a 4 MB C3, ~830k on 8 MB+** stored as compact 40-bit hashes in flash,
+- **~218k domains on a 4 MB C3, ~830k on 8 MB+** stored as compact 40-bit hashes in flash,
   memory-mapped and binary-searched. No file system, no RAM index.
 - **Non-blocking DNS forwarding**: one slow upstream lookup never stalls other clients.
 - **DNS answer cache** (4096 entries in PSRAM on boards that have it, 32 in internal RAM otherwise).
@@ -134,7 +134,7 @@ domain plus a 65 KB index, so slots hold more and lookups are faster:
 | Same 138,896 domains | v1 (`--v1`) | v2 (default) |
 |---|---|---|
 | File size | 694 KB | 483 KB (-31%) |
-| 4 MB / 8 MB layout capacity | 170k / 511k | 262k / 830k |
+| 4 MB / 8 MB layout capacity | 144k / 511k | 218k / 830k |
 | Filter time per query (ESP32-S3) | 81 µs | 59 µs |
 
 Raw headerless lists from esp32-c3-adblock (`--raw`) and v1 lists are still accepted.
