@@ -484,6 +484,14 @@ void WifiManager::handleEvent(esp_event_base_t base, int32_t id, void* data)
             }
             case WIFI_EVENT_AP_STACONNECTED:
                 apClients_++;
+                // Someone is setting the device up: push a pending fast uplink retry
+                // out to 60 s, its channel scan would interrupt them right away.
+                if (configured_ && !connected_ && esp_timer_is_active(retryTimer_) &&
+                    retryAt_ < uptimeSeconds() + kRetryWithApClientsMs / 1000) {
+                    esp_timer_stop(retryTimer_);
+                    esp_timer_start_once(retryTimer_, static_cast<uint64_t>(kRetryWithApClientsMs) * 1000);
+                    retryAt_ = uptimeSeconds() + kRetryWithApClientsMs / 1000;
+                }
                 break;
             case WIFI_EVENT_AP_STADISCONNECTED:
                 if (apClients_) apClients_--;
