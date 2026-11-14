@@ -37,7 +37,7 @@ private:
     WifiManager wifi_{config_};
     DnsServer dns_{filter_, clients_, queryLog_, counters_};
     FirmwareUpdater firmware_;
-    BlocklistUpdater blocklistUpdater_{config_, store_, wifi_};
+    Updater updater_{config_, store_, wifi_, firmware_};
     WolService wol_{wifi_};
     MqttBridge mqtt_{config_, wol_};
     BootButton button_{wifi_};

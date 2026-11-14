@@ -34,7 +34,7 @@ struct WebDeps {
     QueryLog& log;
     Counters& counters;
     DnsServer& dns;
-    BlocklistUpdater& blocklistUpdater;
+    Updater& updater;
     FirmwareUpdater& firmware;
     WolService& wol;
     MqttBridge& mqtt;
@@ -79,6 +79,8 @@ private:
     esp_err_t postBlocklistFetch(httpd_req_t* req);
     esp_err_t postBlocklistUpload(httpd_req_t* req);
     esp_err_t postFirmwareUpload(httpd_req_t* req);
+    esp_err_t postFirmwareCheck(httpd_req_t* req);
+    esp_err_t postFirmwareInstall(httpd_req_t* req);
     esp_err_t postReboot(httpd_req_t* req);
     esp_err_t getWol(httpd_req_t* req);
     esp_err_t postWol(httpd_req_t* req);

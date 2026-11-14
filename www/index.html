@@ -168,6 +168,12 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
    <div class="card"><h2>Firmware</h2><dl class="kv" id="fwinfo"></dl>
     <label>Upload a firmware image (esp-dns-sinkhole.bin)</label><div class="row"><input type="file" id="fwf" accept=".bin"><button class="btn p" data-a="upload" data-v="fw">Install</button></div><div class="prog" id="fwp"></div>
     <p class="mu mt">The device restarts into the new image and goes back to the previous one automatically if it doesn't come up healthy within a minute.</p>
+    <h2 class="mt">Online updates</h2><div class="mu" id="fwupd"></div>
+    <div class="row mt"><button class="btn" data-a="fwcheck">Check now</button><button class="btn p" data-a="fwinstall" id="fwinst" hidden>Install</button></div>
+    <form data-f="fw"><label>Update manifest URL</label><input name="url" placeholder="https://github.com/OWNER/REPO/releases/latest/download/manifest.json">
+     <label style="display:flex;gap:8px;align-items:center;color:var(--tx)"><input type="checkbox" name="auto" value="1" style="width:auto"> <span>Install updates automatically</span></label>
+     <p class="k" id="fwautonote"></p>
+     <div class="row mt"><button class="btn">Save</button></div></form>
     <div class="row mt"><button class="btn d" data-a="reboot">Restart device</button></div></div>
   </div>
  </section>
@@ -267,7 +273,7 @@ const ES={
 'not configured':'sin configurar','connecting':'conectando','connected':'conectado','retrying':'reintentando','network not found':'red no encontrada','wrong password?':'¿contraseña incorrecta?',
 'signal lost':'señal perdida','disconnected':'desconectado','network security not supported':'seguridad de red no compatible','signal too weak':'señal demasiado débil',
 'authentication expired':'autenticación caducada','connection failed':'conexión fallida','connection error':'error de conexión',
-'Domains':'Dominios','compact':'compacta','of {0} · slot {1}':'de {0} · ranura {1}','Custom / allowed':'Propios / permitidos','Loaded':'Cargada','{0} ago':'hace {0}','Last update':'Última actualización',
+'Domains':'Dominios','Online updates':'Actualizaciones en línea','Check now':'Comprobar ahora','Update manifest URL':'URL del manifiesto de actualizaciones','Install updates automatically':'Instalar actualizaciones automáticamente','Set an update manifest URL to check for new versions.':'Configura una URL de manifiesto para buscar versiones nuevas.','Installing… {0} KB':'Instalando… {0} KB','Not checked yet.':'Aún no se ha comprobado.','Version {0} is available.':'Hay una versión {0} disponible.','Up to date ({0}).':'Al día ({0}).','Board {0} · checked {1} ago':'Placa {0} · comprobado hace {1}','Install {0}':'Instalar {0}','This firmware is signed: updates are verified before they can run.':'Este firmware está firmado: las actualizaciones se verifican antes de ejecutarse.','Automatic install needs a signed firmware build; this one is unsigned.':'La instalación automática necesita un firmware firmado; este no lo está.','Install the update and restart?':'¿Instalar la actualización y reiniciar?','Signature':'Firma','verified':'verificada','not signed':'sin firmar','not checked (no key in this build)':'no comprobada (este firmware no tiene clave)','checking for updates':'buscando actualizaciones','installing; the device restarts when done':'instalando; el dispositivo se reiniciará al terminar','no update available; check first':'no hay actualización; comprueba primero','compact':'compacta','of {0} · slot {1}':'de {0} · ranura {1}','Custom / allowed':'Propios / permitidos','Loaded':'Cargada','{0} ago':'hace {0}','Last update':'Última actualización',
 'in progress…':'en curso…','none since restart':'ninguna desde el reinicio','Version':'Versión','Uptime':'Tiempo encendido','Internal RAM free':'RAM interna libre','PSRAM free':'PSRAM libre','none':'ninguna',
 'Connected':'Conectado','to {0}':'a {0}','Not configured':'Sin configurar','{0} attempts':'{0} intentos','next in {0}s':'siguiente en {0} s','· now {0} dBm':'· ahora {0} dBm',
 'Now':'Ahora','forced for {0}':'forzado durante {0}','Broker connected.':'Broker conectado.','Broker not connected.':'Broker no conectado.','Set up a broker in':'Configura un broker en',
@@ -314,7 +320,7 @@ async function api(u,data){
  const r=await fetch(u,o);let j={};try{j=await r.json()}catch(e){}
  if(!r.ok)throw new Error(tr(j.message||'HTTP '+r.status));return j}
 async function act(u,data,after){try{const j=await api(u,data);toast(j.message&&j.message!='ok'?tr(j.message):tr('Saved'));(after||refresh)()}catch(e){toast(e.message,1)}}
-const fill=(f,o)=>{for(const el of $(`form[data-f="${f}"]`).elements)if(el.name&&o[el.name]!==undefined&&el.type!='password')el.value=o[el.name]};
+const fill=(f,o)=>{for(const el of $(`form[data-f="${f}"]`).elements)if(el.name&&o[el.name]!==undefined&&el.type!='password'){if(el.type=='checkbox')el.checked=!!o[el.name];else el.value=o[el.name]}};
 const kv=rows=>rows.map(([k,v])=>`<dt>${tr(k)}</dt><dd>${v}</dd>`).join('');
 
 // ---------- rendering
@@ -356,7 +362,16 @@ function renderStatus(s){
  const u=s.update;
  $('#blinfo').innerHTML=kv([['Domains',n(b.count)+' <span class="mu">'+tr('of {0} · slot {1}',n(b.capacity),b.slot)+(b.format?' · '+(b.format==2?tr('compact'):'v1'):'')+'</span>'],['Custom / allowed',b.custom+' / '+b.allow],
   ['Loaded',b.count?tr('{0} ago',ago(b.activeFor)):'–'],
+  ['Signature',b.signed?'<span class="ok">'+tr('verified')+'</span>':tr(b.keyConfigured?'not signed':'not checked (no key in this build)')],
   ['Last update',u.running||b.writing?'<span class="wa">'+tr('in progress…')+'</span>':u.lastAgo<0?tr('none since restart'):tr('{0} ago',ago(u.lastAgo))+' · <span class="'+(u.lastOk?'ok':'bad')+'">'+esc(u.message)+'</span>']]);
+ const fw=s.firmware;
+ $('#fwupd').innerHTML=!fw.manifest?tr('Set an update manifest URL to check for new versions.'):
+  fw.installing?'<span class="wa">'+tr('Installing… {0} KB',n(fw.bytes/1024|0))+'</span>':
+  fw.checkedAgo<0?tr('Not checked yet.'):(fw.available?'<span class="ok">'+tr('Version {0} is available.',esc(fw.latest))+'</span>':tr('Up to date ({0}).',esc(fw.latest||s.version)))+
+  ' <span class="k">'+tr('Board {0} · checked {1} ago',esc(fw.board),ago(fw.checkedAgo))+(fw.checkOk?'':' · '+esc(fw.message))+'</span>';
+ $('#fwinst').hidden=!fw.available||fw.installing;$('#fwinst').textContent=tr('Install {0}',fw.latest);
+ $('#fwautonote').textContent=fw.signedBuild?tr('This firmware is signed: updates are verified before they can run.'):tr('Automatic install needs a signed firmware build; this one is unsigned.');
+ $('form[data-f="fw"] [name=auto]').disabled=!fw.signedBuild;
  $('#blbar').style.width=(b.capacity?b.count/b.capacity*100:0)+'%';
  $('#fwinfo').innerHTML=kv([['Version',esc(s.version)],['Uptime',ago(s.uptime)],['Internal RAM free',n(s.memory.internalFree/1024|0)+' KB'],['PSRAM free',s.memory.psram?n(s.memory.psramFree/1048576|0)+' MB':tr('none')]]);
  // settings status lines
@@ -409,7 +424,7 @@ async function loadSettings(){
  const s=await api('/api/settings');
  fill('wifi',{ssid:s.staSsid});fill('radio',{tx:s.txPower});fill('ap',{ssid:s.apSsid,always:s.apAlways?'1':'0'});fill('dns',{mode:s.upstreamMode,ip:s.upstreamIp,backup:s.backupIp});
  fill('mqtt',{uri:s.mqttUri,user:s.mqttUser,prefix:s.mqttPrefix});fill('admin',{user:s.adminUser});fill('hostname',{hostname:s.hostname});
- fill('upd',{url:s.blocklistUrl,hours:s.updateHours});fill('ip',{mode:s.ipMode,ip:s.ipAddr,mask:s.ipMask,gw:s.ipGw,dns:s.ipDns});$('#mtopic').textContent=(s.mqttPrefix||'sinkhole')+'/wol/<name>/set';
+ fill('upd',{url:s.blocklistUrl,hours:s.updateHours});fill('fw',{url:s.fwManifestUrl,auto:s.fwAuto});fill('ip',{mode:s.ipMode,ip:s.ipAddr,mask:s.ipMask,gw:s.ipGw,dns:s.ipDns});$('#mtopic').textContent=(s.mqttPrefix||'sinkhole')+'/wol/<name>/set';
 }
 const extra={dash:loadDash,lists:loadLists,devices:loadClients,wake:loadWol,system:()=>{},settings:()=>{}};
 async function refresh(){try{S=await api('/api/status');renderStatus(S);await extra[tab]()}catch(e){toast(tr('Device unreachable: {0}',e.message),1)}}
@@ -443,6 +458,8 @@ const A={
  wake:v=>act('/api/wol',{action:'wake',name:v},loadWol),
  wolrm:v=>confirm(tr('Remove {0}?',v))&&act('/api/wol',{action:'remove',name:v},loadWol),
  fetch:()=>act('/api/blocklist/fetch',{}),
+ fwcheck:()=>act('/api/firmware/check',{}),
+ fwinstall:()=>confirm(tr('Install the update and restart?'))&&act('/api/firmware/install',{}),
  upload:upload,
  reboot:()=>confirm(tr('Restart the device now?'))&&act('/api/reboot',{}),
  scan:scan,
@@ -463,6 +480,7 @@ const F={
  hostname:d=>act('/api/settings',{section:'hostname',...d}),
  ip:d=>(d.mode=='dhcp'||confirm(tr('Switch the device to {0}? You will need to open it at that address.',d.ip)))&&act('/api/settings',{section:'ip',...d}),
  upd:d=>act('/api/settings',{section:'update',...d}),
+ fw:d=>act('/api/settings',{section:'fw',url:d.url||'',auto:d.auto?1:0}),
 };
 document.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(el&&A[el.dataset.a]){e.preventDefault();A[el.dataset.a](el.dataset.v,el)}});
 document.addEventListener('submit',e=>{const f=e.target;if(F[f.dataset.f]){e.preventDefault();F[f.dataset.f](Object.fromEntries(new FormData(f)),f)}});

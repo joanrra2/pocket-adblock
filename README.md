@@ -165,6 +165,21 @@ mosquitto_pub -h broker -p 8883 -u user -P pass -t sinkhole/wol/office-pc/set -m
   **Updates**. The new image stays on probation for 60 s and the bootloader rolls back if it crashes first.
 - **Blocklist:** **Download now**, upload a `.bin`, or let the schedule run.
 
+### Online updates and signing
+
+Release firmware checks `manifest.json` from the latest GitHub release once a day
+(*Updates → Online updates*) and offers **Install**.
+
+| What | How | Effect |
+|---|---|---|
+| Signed blocklists | `tools/keys.py blocklist-key keys/bl.pem`, put the printed `CONFIG_SINKHOLE_BLOCKLIST_PUBKEY` line in your sdkconfig, build lists with `--sign=keys/bl.pem` | signed lists are verified (ECDSA P-256); with `SINKHOLE_BLOCKLIST_REQUIRE_SIGNED` unsigned/raw lists are refused |
+| Signed firmware | `tools/keys.py firmware-key keys/firmware_signing.pem`, add `boards/signed-firmware.defaults` | OTA only accepts images signed with that key (RSA-3072); unlocks automatic install |
+| Automatic install | *Install updates automatically* (signed builds only) | new releases install themselves, with the usual 60 s health probation and rollback |
+
+No eFuses are burned: a board can always be re-flashed over USB. In CI, the
+`FIRMWARE_SIGNING_KEY` and `BLOCKLIST_SIGNING_KEY` secrets (and the
+`BLOCKLIST_PUBKEY` variable) turn signing on for releases and the weekly list.
+
 ## Security
 
 Plain HTTP on the LAN, the same trust model as the original project. Every API call

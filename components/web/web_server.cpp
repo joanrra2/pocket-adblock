@@ -81,6 +81,8 @@ const WebServer::Route WebServer::kRoutes[] = {
     {"/api/blocklist/fetch", HTTP_POST, &WebServer::postBlocklistFetch, true},
     {"/api/blocklist/upload", HTTP_POST, &WebServer::postBlocklistUpload, true},
     {"/api/firmware/upload", HTTP_POST, &WebServer::postFirmwareUpload, true},
+    {"/api/firmware/check", HTTP_POST, &WebServer::postFirmwareCheck, true},
+    {"/api/firmware/install", HTTP_POST, &WebServer::postFirmwareInstall, true},
     {"/api/reboot", HTTP_POST, &WebServer::postReboot, true},
     {"/api/wol", HTTP_GET, &WebServer::getWol, true},
     {"/api/wol", HTTP_POST, &WebServer::postWol, true},
@@ -220,7 +222,7 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
 {
     const Settings s = d_.cfg.get();
     const BlocklistInfo bl = d_.store.info();
-    const UpdateStatus up = d_.blocklistUpdater.status();
+    const UpdateStatus up = d_.updater.status();
     const uint32_t now = uptimeSeconds();
     char apSsid[33];
     d_.wifi.apSsid(apSsid);
@@ -294,6 +296,8 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
         .num("count", bl.count)
         .num("capacity", bl.capacity)
         .num("format", bl.format)
+        .boolean("signed", bl.signedOk)
+        .boolean("keyConfigured", bl.keyConfigured)
         .str("slot", slot)
         .num("activeFor", bl.count ? now - bl.activatedUptime : 0)
         .num("created", bl.createdUnix)
@@ -307,6 +311,21 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
         .boolean("lastOk", up.lastOk)
         .num("lastAgo", up.lastAttempt ? static_cast<int64_t>(now - up.lastAttempt) : -1)
         .str("message", up.message)
+        .endObject();
+
+    const FirmwareCheck fc = d_.updater.firmwareStatus();
+    j.beginObject("firmware")
+        .str("board", Updater::boardId())
+        .str("latest", fc.latest)
+        .boolean("available", fc.available)
+        .boolean("installing", fc.installing)
+        .num("bytes", fc.bytes)
+        .num("checkedAgo", fc.lastCheck ? static_cast<int64_t>(now - fc.lastCheck) : -1)
+        .boolean("checkOk", fc.lastOk)
+        .str("message", fc.message)
+        .boolean("signedBuild", Updater::autoInstallAllowed())
+        .boolean("auto", s.fwAuto)
+        .boolean("manifest", s.fwManifestUrl[0] != '\0')
         .endObject();
 
     j.beginObject("mqtt")
@@ -470,6 +489,8 @@ esp_err_t WebServer::getSettings(httpd_req_t* req)
         .str("mqttUser", s.mqttUser)
         .str("mqttPrefix", s.mqttPrefix)
         .str("txPower", s.txPower == TxFull ? "full" : s.txPower == TxReduced ? "reduced" : "auto")
+        .str("fwManifestUrl", s.fwManifestUrl)
+        .boolean("fwAuto", s.fwAuto)
         .str("ipMode", s.staticIp ? "static" : "dhcp")
         // Static values when set, otherwise what DHCP handed out (handy defaults).
         .ip("ipAddr", s.staticIp ? s.ipAddr : d_.wifi.staIp())
@@ -560,6 +581,20 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
             copyStr(s.mqttPrefix, e[0] ? e : "sinkhole");
         });
         return sendOk(req, "saved; reboot to apply");
+    }
+    if (strcmp(section, "fw") == 0) {
+        field(form, "url", a, sizeof(Settings::fwManifestUrl));
+        field(form, "auto", b, 4);
+        if (a[0] && strncmp(a, "https://", 8) != 0 && strncmp(a, "http://", 7) != 0)
+            return sendError(req, "400 Bad Request", "URL must start with https://");
+        const bool autoOn = b[0] == '1';
+        if (autoOn && !Updater::autoInstallAllowed())
+            return sendError(req, "400 Bad Request", "automatic install needs a signed firmware build");
+        d_.cfg.modify([&](Settings& s) {
+            copyStr(s.fwManifestUrl, a);
+            s.fwAuto = autoOn;
+        });
+        return sendOk(req);
     }
     if (strcmp(section, "radio") == 0) {
         field(form, "tx", a, 16);
@@ -653,7 +688,7 @@ esp_err_t WebServer::getWifiScan(httpd_req_t* req)
 esp_err_t WebServer::postBlocklistFetch(httpd_req_t* req)
 {
     if (!d_.wifi.connected()) return sendError(req, "409 Conflict", "no uplink: join a Wi-Fi network first");
-    d_.blocklistUpdater.fetchNow();
+    d_.updater.fetchNow();
     return sendOk(req, "download started");
 }
 
@@ -673,7 +708,7 @@ esp_err_t WebServer::postBlocklistUpload(httpd_req_t* req)
         }
         if (d_.store.write(chunk_, static_cast<size_t>(n)) != ESP_OK) {
             d_.store.abortWrite();
-            d_.blocklistUpdater.report(false, "upload: list too large or flash error", 0);
+            d_.updater.report(false, "upload: list too large or flash error", 0);
             return sendError(req, "413 Payload Too Large", "list too large for the slot or flash error");
         }
         left -= static_cast<size_t>(n);
@@ -681,12 +716,12 @@ esp_err_t WebServer::postBlocklistUpload(httpd_req_t* req)
 
     char why[96];
     if (d_.store.finishWrite(why, sizeof(why)) != ESP_OK) {
-        d_.blocklistUpdater.report(false, why, req->content_len);
+        d_.updater.report(false, why, req->content_len);
         return sendError(req, "422 Unprocessable Entity", why);
     }
     char msg[96];
     snprintf(msg, sizeof(msg), "uploaded: %lu domains", static_cast<unsigned long>(d_.store.info().count));
-    d_.blocklistUpdater.report(true, msg, req->content_len);
+    d_.updater.report(true, msg, req->content_len);
     return sendOk(req, msg);
 }
 
@@ -712,9 +747,32 @@ esp_err_t WebServer::postFirmwareUpload(httpd_req_t* req)
         left -= static_cast<size_t>(n);
     }
     err = d_.firmware.finish();
-    if (err != ESP_OK) return sendError(req, "422 Unprocessable Entity", "image rejected (wrong chip or corrupt)");
+    if (err != ESP_OK) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "image rejected (%s): %s", esp_err_to_name(err),
+                 Updater::autoInstallAllowed() ? "wrong chip, corrupt, or not signed with this device's key"
+                                               : "wrong chip or corrupt");
+        return sendError(req, "422 Unprocessable Entity", msg);
+    }
     FirmwareUpdater::restartIn(1500);
     return sendOk(req, "firmware accepted, rebooting");
+}
+
+esp_err_t WebServer::postFirmwareCheck(httpd_req_t* req)
+{
+    if (!d_.wifi.connected()) return sendError(req, "409 Conflict", "no uplink: join a Wi-Fi network first");
+    if (!d_.cfg.read([](const Settings& s) { return s.fwManifestUrl[0] != '\0'; }))
+        return sendError(req, "409 Conflict", "no update manifest URL configured");
+    d_.updater.checkFirmwareNow();
+    return sendOk(req, "checking for updates");
+}
+
+esp_err_t WebServer::postFirmwareInstall(httpd_req_t* req)
+{
+    esp_err_t err = d_.updater.installFirmwareNow();
+    if (err == ESP_ERR_NOT_FOUND) return sendError(req, "409 Conflict", "no update available; check first");
+    if (err != ESP_OK) return sendError(req, "409 Conflict", "an installation is already running");
+    return sendOk(req, "installing; the device restarts when done");
 }
 
 esp_err_t WebServer::postReboot(httpd_req_t* req)

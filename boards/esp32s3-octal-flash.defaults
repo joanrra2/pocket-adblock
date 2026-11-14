@@ -6,6 +6,7 @@
 #     -D SDKCONFIG=build-s3-octal/sdkconfig \
 #     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32s3-octal-flash.defaults" \
 #     set-target esp32s3 build
+CONFIG_SINKHOLE_BOARD_ID="esp32s3-octal-flash"
 CONFIG_ESPTOOLPY_OCT_FLASH=y
 CONFIG_ESPTOOLPY_FLASHMODE_OPI=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y

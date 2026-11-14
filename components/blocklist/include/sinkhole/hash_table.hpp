@@ -50,6 +50,14 @@ constexpr char kBlocklistMagic[4] = {'S', 'H', 'B', 'L'};
 constexpr uint8_t kBlocklistV1 = 1;
 constexpr uint8_t kBlocklistV2 = 2;
 
+// reserved[0] bit 0: an ECDSA P-256 signature (64 bytes, raw r||s) follows the
+// payload. It signs SHA-256 of the first kSignedHeaderBytes header bytes, which
+// include the payload SHA-256 and this flag, so it covers the whole list.
+constexpr uint8_t kFlagSigned = 0x01;
+constexpr size_t kSignedHeaderBytes = 49;
+constexpr size_t kSignatureBytes = 64;
+inline bool isSigned(const BlocklistHeader& h) { return h.reserved[0] & kFlagSigned; }
+
 // v2 "compact" payload (upstream issue #3): each 40-bit hash = 16-bit bucket
 // (top bits) + 24-bit suffix.
 //   uint32 coarse[256]  entries before bucket i*256 (little endian)    1 KB

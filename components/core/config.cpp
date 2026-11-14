@@ -113,6 +113,7 @@ void Config::applyDefaults(Settings& s)
     copyStr(s.blocklistUrl, CONFIG_SINKHOLE_BLOCKLIST_URL);
     s.updateHours = CONFIG_SINKHOLE_BLOCKLIST_UPDATE_HOURS;
     copyStr(s.mqttPrefix, "sinkhole");
+    copyStr(s.fwManifestUrl, CONFIG_SINKHOLE_FW_MANIFEST_URL);
 }
 
 // Bytes of Settings that were meaningful in a given stored version. Fields are
@@ -123,6 +124,7 @@ size_t Config::validBytes(uint16_t version)
         case 2: return offsetof(Settings, staticIp);
         case 3: return offsetof(Settings, txPower);
         case 4: return offsetof(Settings, upstreamIp2);
+        case 5: return offsetof(Settings, fwManifestUrl);
         case kVersion: return sizeof(Settings);
         default: return 0;  // unknown / too old: start from defaults
     }
@@ -144,6 +146,7 @@ esp_err_t Config::load()
     if (stored.version != kVersion) {
         memcpy(&s_, &stored, valid);  // keep everything the old version knew
         s_.version = kVersion;
+        if (stored.version < 6) copyStr(s_.fwManifestUrl, CONFIG_SINKHOLE_FW_MANIFEST_URL);
         ESP_LOGI(TAG, "settings migrated from v%u to v%u", stored.version, kVersion);
         saveLocked();
     } else {

@@ -42,10 +42,24 @@ struct UpdateStatus {
     char message[96];
 };
 
-class BlocklistUpdater {
+struct FirmwareCheck {
+    bool available;        // newer version for this board in the manifest
+    bool installing;
+    bool lastOk;
+    uint32_t lastCheck;    // uptime seconds, 0 = never
+    uint32_t bytes;        // install progress
+    char latest[24];
+    char message[96];
+};
+
+// One background task (one TLS-capable stack) for all downloads:
+//   - blocklist: scheduled and on demand, into the inactive A/B slot
+//   - firmware: daily manifest check; install on request, or automatically on
+//     signed builds (an unsigned build must never auto-install code)
+class Updater {
 public:
-    BlocklistUpdater(Config& cfg, BlocklistStore& store, WifiManager& wifi)
-        : cfg_(cfg), store_(store), wifi_(wifi)
+    Updater(Config& cfg, BlocklistStore& store, WifiManager& wifi, FirmwareUpdater& fw)
+        : cfg_(cfg), store_(store), wifi_(wifi), fw_(fw)
     {
     }
 
@@ -55,22 +69,42 @@ public:
     // For uploads: record the outcome so the UI shows one status line.
     void report(bool ok, const char* message, uint32_t bytes);
 
+    void checkFirmwareNow();
+    esp_err_t installFirmwareNow();  // ESP_ERR_NOT_FOUND if no update is known
+    FirmwareCheck firmwareStatus();
+    static bool autoInstallAllowed();  // built with signed-image verification
+    static const char* boardId();
+
+    // Exposed for tests: "1.2.10" > "1.2.9"; a leading "v" is ignored.
+    static int compareVersions(const char* a, const char* b);
+
 private:
+    using Sink = esp_err_t (*)(void* ctx, const uint8_t* data, size_t len);
+
     static void taskEntry(void* arg);
     void run();
-    bool due();
-    void fetch();
-    esp_err_t download(const char* url, char* why, size_t whyLen, uint32_t& bytes);
+    bool blocklistDue();
+    bool firmwareDue();
+    void fetchBlocklist();
+    void checkFirmware();
+    void installFirmware();
+    esp_err_t httpGet(const char* url, Sink sink, void* ctx, char* why, size_t whyLen, uint32_t& bytes);
 
     Config& cfg_;
     BlocklistStore& store_;
     WifiManager& wifi_;
+    FirmwareUpdater& fw_;
 
     Mutex mu_;
     UpdateStatus status_{};
+    FirmwareCheck fwStatus_{};
+    char fwUrl_[256]{};  // image for this board from the last good check
     std::atomic<bool> manual_{false};
+    std::atomic<bool> manualCheck_{false};
+    std::atomic<bool> manualInstall_{false};
 
     uint8_t buf_[2048];
+    char manifest_[2048];
     StaticTask<8192> task_;  // TLS handshake needs a deep stack
 };
 

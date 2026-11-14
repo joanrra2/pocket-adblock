@@ -3,7 +3,10 @@
 64-byte SHBL header (format, count, SHA-256), ready to upload or serve over HTTPS.
 
 Usage:
-  build_blocklist.py OUT.bin [SOURCE ...] [--v1 | --raw] [--allow-missing]
+  build_blocklist.py OUT.bin [SOURCE ...] [--v1 | --raw] [--sign=KEY.pem] [--allow-missing]
+
+--sign=KEY.pem appends an ECDSA P-256 signature (key from tools/keys.py
+blocklist-key; needs `pip install cryptography`).
 
 SOURCE is a URL or a local file: hosts files, plain domain lists, or AdGuard /
 Adblock basic rules (||domain^ blocks, @@||domain^ removes). With no sources a
@@ -133,6 +136,18 @@ def payload_v2(hashes):
             b''.join(s.to_bytes(3, 'little') for b in buckets for s in b))
 
 
+def sign_header(header, key_path):
+    """ECDSA P-256 over SHA-256(header[:49]) (includes the payload hash and the
+    signed flag), raw r||s. Must match BlocklistStore::verifySignature."""
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+    with open(key_path, 'rb') as f:
+        key = serialization.load_pem_private_key(f.read(), password=None)
+    r, s = decode_dss_signature(key.sign(header[:49], ec.ECDSA(hashes.SHA256())))
+    return r.to_bytes(32, 'big') + s.to_bytes(32, 'big')
+
+
 def main():
     flags = {a for a in sys.argv[1:] if a.startswith('--')}
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
@@ -140,6 +155,9 @@ def main():
     sources = args[1:] or DEFAULT_SOURCES
     raw = '--raw' in flags
     version = 1 if raw or '--format=v1' in flags or '--v1' in flags else 2
+    sign_key = next((a.split('=', 1)[1] for a in flags if a.startswith('--sign=')), None)
+    if sign_key and raw:
+        sys.exit('--raw lists have no header and cannot be signed')
 
     domains = parse(sources, '--allow-missing' in flags)
     hashes = sorted({fnv(d.encode()) for d in domains})
@@ -147,16 +165,20 @@ def main():
 
     with open(out, 'wb') as f:
         if not raw:
-            header = struct.pack('<4sBBHII32s16s', b'SHBL', version, HASH_BYTES, 64, len(hashes),
-                                 int(time.time()), hashlib.sha256(payload).digest(), b'\0' * 16)
+            flags_byte = 0x01 if sign_key else 0x00  # reserved[0] bit 0 = signed
+            header = struct.pack('<4sBBHII32sB15s', b'SHBL', version, HASH_BYTES, 64, len(hashes),
+                                 int(time.time()), hashlib.sha256(payload).digest(), flags_byte, b'\0' * 15)
             assert len(header) == 64
             f.write(header)
         f.write(payload)
+        if sign_key:
+            f.write(sign_header(header, sign_key))
 
     n = len(hashes)
     print(f'source domains   : {len(domains):,}')
     print(f'hash entries     : {n:,}  (collisions: {len(domains) - n})')
-    print(f'format           : {"raw v1 (esp32-c3-adblock)" if raw else f"SHBL v{version}"}')
+    print(f'format           : {"raw v1 (esp32-c3-adblock)" if raw else f"SHBL v{version}"}'
+          f'{", signed" if sign_key else ""}')
     print(f'file             : {os.path.getsize(out):,} bytes -> {out}')
     if version == 1:
         print(f'lookup           : ~{math.ceil(math.log2(max(n, 2)))} reads/query')

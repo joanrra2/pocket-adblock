@@ -17,7 +17,7 @@ constexpr uint64_t kHealthyAfterUs = 60ULL * 1000 * 1000;
 
 App::App()
     : web_(WebDeps{config_, wifi_, store_, custom_, allow_, filter_, clients_, queryLog_, counters_,
-                   dns_, blocklistUpdater_, firmware_, wol_, mqtt_, &App::applyUpstream, this})
+                   dns_, updater_, firmware_, wol_, mqtt_, &App::applyUpstream, this})
 {
 }
 
@@ -50,7 +50,7 @@ void App::start()
     updateCaptive();
     ESP_ERROR_CHECK(dns_.start());
     ESP_ERROR_CHECK(web_.start());
-    blocklistUpdater_.start();
+    updater_.start();
     wol_.begin();
     mqtt_.start();
     button_.start();

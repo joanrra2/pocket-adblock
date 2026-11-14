@@ -19,11 +19,21 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build (fails if a source is unreachable)
-        run: python3 tools/build_blocklist.py blocklist.bin | tee build.log   # compact SHBL v2
+        env:
+          BL_KEY: ${{ secrets.BLOCKLIST_SIGNING_KEY }}
+        run: |
+          sign=""
+          if [ -n "$BL_KEY" ]; then          # signed lists when the secret exists
+            pip install --quiet cryptography
+            printf '%s\n' "$BL_KEY" > /tmp/bl.pem && sign="--sign=/tmp/bl.pem"
+          fi
+          python3 tools/build_blocklist.py blocklist.bin $sign | tee build.log   # compact SHBL v2
+          rm -f /tmp/bl.pem
       - name: Sanity checks
         run: |
           size=$(stat -c%s blocklist.bin)
           payload=$(( size - 64 - 1024 - 65536 ))
+          grep -q "signed" build.log && payload=$(( payload - 64 ))   # signature trailer
           test $(( payload % 3 )) -eq 0
           test $(( payload / 3 )) -gt 50000       # >50k domains: catches a silently shrunk list
           test "$size" -le $((0xD0000))           # fits a 4 MB-layout slot

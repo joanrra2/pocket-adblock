@@ -25,6 +25,8 @@ struct BlocklistInfo {
     char slot;                 // 'A', 'B' or '-' when none
     uint32_t capacity;         // max hashes a slot can hold (in the active format)
     uint8_t format;            // 1, 2 (compact) or 0 when none
+    bool signedOk;             // signature verified against the configured key
+    bool keyConfigured;        // firmware built with a blocklist public key
 };
 
 class BlocklistStore {
@@ -50,6 +52,7 @@ private:
         BlocklistHeader hdr{};
         HashTable table;
         bool valid = false;
+        bool signedOk = false;
     };
 
     const esp_partition_t* slotPartition(int slot) const { return slots_[slot]; }
@@ -57,6 +60,8 @@ private:
     static void unmap(Mapped& m);
     esp_err_t writeAt(size_t offset, const uint8_t* data, size_t len);
     esp_err_t payloadWrite(const uint8_t* data, size_t len);
+    void importKey();
+    bool verifySignature(const BlocklistHeader& hdr, const uint8_t* sig);
 
     const esp_partition_t* slots_[2] = {nullptr, nullptr};
 
@@ -74,6 +79,11 @@ private:
     size_t headLen_ = 0;
     enum class Mode { Detect, WithHeader, Raw } mode_ = Mode::Detect;
     psa_hash_operation_t sha_ = PSA_HASH_OPERATION_INIT;
+    size_t expectedPayload_ = 0;  // known once an SHBL header arrived
+    uint8_t sig_[kSignatureBytes]{};
+    size_t sigLen_ = 0;
+    bool trailerOverflow_ = false;
+    psa_key_id_t pubKey_ = 0;
 };
 
 }  // namespace sinkhole

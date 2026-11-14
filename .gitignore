@@ -12,3 +12,5 @@ sdkconfig.old
 __pycache__/
 test_logic
 test_logic.exe
+keys/
+*.pem

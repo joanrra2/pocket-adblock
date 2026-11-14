@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "esp_log.h"
+#include "sdkconfig.h"
 #include "sinkhole/config.hpp"
 
 namespace sinkhole {
@@ -24,6 +25,7 @@ void setWhy(char* why, size_t len, const char* msg)
 esp_err_t BlocklistStore::begin()
 {
     psa_crypto_init();  // idempotent; ESP-IDF normally did it already
+    importKey();
 
     slots_[0] = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, kSubtype, "bl_a");
     slots_[1] = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, kSubtype, "bl_b");
@@ -69,7 +71,8 @@ bool BlocklistStore::mapSlot(int slot, Mapped& out, bool verifyHash, char* why, 
         return false;
     }
     const size_t payload = payloadSize(hdr.version, hdr.count);
-    if (hdr.count == 0 || kHdr + payload > part->size) {
+    const size_t sigBytes = isSigned(hdr) ? kSignatureBytes : 0;
+    if (hdr.count == 0 || kHdr + payload + sigBytes > part->size) {
         setWhy(why, whyLen, "count does not fit the partition");
         return false;
     }
@@ -101,6 +104,23 @@ bool BlocklistStore::mapSlot(int slot, Mapped& out, bool verifyHash, char* why, 
         setWhy(why, whyLen, "hashes not sorted / index inconsistent");
         return false;
     }
+    bool signedOk = false;
+    if (isSigned(hdr) && pubKey_) {
+        uint8_t sig[kSignatureBytes];
+        if (esp_partition_read(part, kHdr + payload, sig, sizeof(sig)) != ESP_OK || !verifySignature(hdr, sig)) {
+            esp_partition_munmap(handle);
+            setWhy(why, whyLen, "signature does not verify");
+            return false;
+        }
+        signedOk = true;
+    }
+#if CONFIG_SINKHOLE_BLOCKLIST_REQUIRE_SIGNED
+    if (!signedOk) {
+        esp_partition_munmap(handle);
+        setWhy(why, whyLen, "unsigned list (this firmware requires signed lists)");
+        return false;
+    }
+#endif
 
     out.part = part;
     out.handle = handle;
@@ -108,6 +128,7 @@ bool BlocklistStore::mapSlot(int slot, Mapped& out, bool verifyHash, char* why, 
     out.hdr = hdr;
     out.table = table;
     out.valid = true;
+    out.signedOk = signedOk;
     return true;
 }
 
@@ -132,6 +153,8 @@ BlocklistInfo BlocklistStore::info()
     i.activatedUptime = activatedUptime_;
     i.slot = activeSlot_ < 0 ? '-' : static_cast<char>('A' + activeSlot_);
     i.format = active_.valid ? active_.hdr.version : 0;
+    i.signedOk = active_.valid && active_.signedOk;
+    i.keyConfigured = pubKey_ != 0;
     i.capacity = slots_[0] ? capacityFor(i.format ? i.format : kBlocklistV2, slots_[0]->size) : 0;
     return i;
 }
@@ -154,6 +177,9 @@ esp_err_t BlocklistStore::beginWrite()
     payloadBytes_ = 0;
     headLen_ = 0;
     mode_ = Mode::Detect;
+    expectedPayload_ = 0;
+    sigLen_ = 0;
+    trailerOverflow_ = false;
     sha_ = PSA_HASH_OPERATION_INIT;
     if (psa_hash_setup(&sha_, PSA_ALG_SHA_256) != PSA_SUCCESS) {
         writing_ = false;
@@ -178,6 +204,20 @@ esp_err_t BlocklistStore::writeAt(size_t offset, const uint8_t* data, size_t len
 
 esp_err_t BlocklistStore::payloadWrite(const uint8_t* data, size_t len)
 {
+    // Bytes beyond the payload the header announced are a signature trailer.
+    if (mode_ == Mode::WithHeader && expectedPayload_) {
+        const size_t room = payloadBytes_ < expectedPayload_ ? expectedPayload_ - payloadBytes_ : 0;
+        if (len > room) {
+            const size_t extra = len - room;
+            if (sigLen_ + extra > sizeof(sig_)) {
+                trailerOverflow_ = true;
+            } else {
+                memcpy(sig_ + sigLen_, data + room, extra);
+                sigLen_ += extra;
+            }
+            len = room;
+        }
+    }
     if (!len) return ESP_OK;
     if (psa_hash_update(&sha_, data, len) != PSA_SUCCESS) return ESP_FAIL;
     esp_err_t err = writeAt(kHdr + payloadBytes_, data, len);
@@ -201,6 +241,9 @@ esp_err_t BlocklistStore::write(const uint8_t* data, size_t len)
 
         if (memcmp(headBuf_, kBlocklistMagic, 4) == 0) {
             mode_ = Mode::WithHeader;  // header kept in headBuf_, written at finish
+            BlocklistHeader h;
+            memcpy(&h, headBuf_, sizeof(h));
+            expectedPayload_ = headerLooksValid(h) ? payloadSize(h.version, h.count) : 0;
         } else {
             mode_ = Mode::Raw;  // those 64 bytes were already payload
             esp_err_t err = payloadWrite(headBuf_, kHdr);
@@ -250,6 +293,16 @@ esp_err_t BlocklistStore::finishWrite(char* why, size_t whyLen)
             abortWrite();
             return ESP_ERR_INVALID_CRC;
         }
+        if (trailerOverflow_ || sigLen_ != (isSigned(hdr) ? kSignatureBytes : 0)) {
+            setWhy(why, whyLen, isSigned(hdr) ? "signature missing or truncated" : "unexpected data after the list");
+            abortWrite();
+            return ESP_ERR_INVALID_SIZE;
+        }
+        if (isSigned(hdr) && writeAt(kHdr + payloadBytes_, sig_, kSignatureBytes) != ESP_OK) {
+            setWhy(why, whyLen, "flash write failed");
+            abortWrite();
+            return ESP_FAIL;
+        }
     } else {
         // Raw upload (esp32-c3-adblock format): headerless v1, 5 bytes per hash.
         if (payloadBytes_ == 0 || payloadBytes_ % kHashBytes != 0) {
@@ -296,6 +349,45 @@ esp_err_t BlocklistStore::finishWrite(char* why, size_t whyLen)
     writeSlot_ = -1;
     writing_ = false;
     return ESP_OK;
+}
+
+// ------------------------------------------------------------------ signatures
+
+void BlocklistStore::importKey()
+{
+    static const char* hex = CONFIG_SINKHOLE_BLOCKLIST_PUBKEY;
+    if (strlen(hex) != 130) {
+        if (hex[0]) ESP_LOGE(TAG, "SINKHOLE_BLOCKLIST_PUBKEY must be 130 hex chars (uncompressed P-256)");
+        return;
+    }
+    uint8_t point[65];
+    for (size_t i = 0; i < sizeof(point); i++) {
+        unsigned v = 0;
+        if (sscanf(hex + 2 * i, "%2x", &v) != 1) return;
+        point[i] = static_cast<uint8_t>(v);
+    }
+    psa_key_attributes_t attr = PSA_KEY_ATTRIBUTES_INIT;
+    psa_set_key_type(&attr, PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attr, 256);
+    psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attr, PSA_ALG_ECDSA(PSA_ALG_SHA_256));
+    if (psa_import_key(&attr, point, sizeof(point), &pubKey_) != PSA_SUCCESS) {
+        pubKey_ = 0;
+        ESP_LOGE(TAG, "blocklist public key rejected");
+    } else {
+        ESP_LOGI(TAG, "blocklist signatures verified with the built-in key");
+    }
+}
+
+bool BlocklistStore::verifySignature(const BlocklistHeader& hdr, const uint8_t* sig)
+{
+    uint8_t digest[32];
+    size_t dlen = 0;
+    if (psa_hash_compute(PSA_ALG_SHA_256, reinterpret_cast<const uint8_t*>(&hdr), kSignedHeaderBytes,
+                         digest, sizeof(digest), &dlen) != PSA_SUCCESS)
+        return false;
+    return psa_verify_hash(pubKey_, PSA_ALG_ECDSA(PSA_ALG_SHA_256), digest, sizeof(digest), sig,
+                           kSignatureBytes) == PSA_SUCCESS;
 }
 
 void BlocklistStore::abortWrite()

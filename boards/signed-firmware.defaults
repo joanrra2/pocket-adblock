@@ -1,0 +1,13 @@
+# Add to any profile to build signed firmware: once a signed build is running,
+# OTA only accepts images signed with the same key (and automatic firmware
+# updates become available). No eFuses are burned: flashing over USB still works.
+#
+#   python tools/keys.py firmware-key keys/firmware_signing.pem   (keep it secret!)
+#   idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/<board>.defaults;boards/signed-firmware.defaults" build
+#
+# ESP32-S3/C3 sign with RSA-3072 (secure boot v2 scheme).
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
+CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
+CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
+CONFIG_SECURE_BOOT_SIGNING_KEY="keys/firmware_signing.pem"

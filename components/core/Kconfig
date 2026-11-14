@@ -36,6 +36,35 @@ menu "DNS Sinkhole"
         default 24
         range 0 720
 
+    config SINKHOLE_BLOCKLIST_PUBKEY
+        string "Blocklist signing public key (hex, empty = no verification)"
+        default ""
+        help
+            Uncompressed ECDSA P-256 public key (130 hex characters, from
+            tools/keys.py blocklist-key). Signed lists are verified against it;
+            a list whose signature does not verify is rejected.
+
+    config SINKHOLE_BLOCKLIST_REQUIRE_SIGNED
+        bool "Reject unsigned blocklists"
+        default n
+        help
+            Only accept lists signed with SINKHOLE_BLOCKLIST_PUBKEY. Raw lists from
+            esp32-c3-adblock and unsigned SHBL lists are refused.
+
+    config SINKHOLE_FW_MANIFEST_URL
+        string "Default firmware update manifest URL (empty = no checks)"
+        default ""
+        help
+            JSON written by the release workflow: {"version": "x.y.z",
+            "images": {"<board id>": "<url of the OTA image>", ...}}. Checked daily.
+
+    config SINKHOLE_BOARD_ID
+        string "Board id used to pick the image from the update manifest"
+        default ""
+        help
+            Empty = the chip target (esp32c3, esp32s3, ...). Board profiles set
+            their own id, e.g. esp32s3-octal-flash.
+
     config SINKHOLE_MAX_CLIENTS
         int "Tracked DNS clients"
         default 64
