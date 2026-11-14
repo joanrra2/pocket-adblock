@@ -54,16 +54,33 @@ struct QueryEntry {
     char domain[64];
 };
 
+struct QueryFilter {
+    uint32_t ip = 0;          // 0 = any client
+    bool blockedOnly = false;
+    const char* text = nullptr;  // substring of the domain, nullptr = any
+};
+
 class QueryLog {
 public:
-    static constexpr size_t kCapacity = 32;
+    static constexpr size_t kSmall = 32;
+
+    // Allocates the long history when CONFIG_SINKHOLE_QUERY_HISTORY_EXTENDED.
+    void begin();
     void add(uint32_t ip, const char* domain, bool blocked);
-    // Newest first.
-    size_t snapshot(QueryEntry* out, size_t max);
+
+    // Paged, newest first. `cursor` counts entries already scanned (start at 0);
+    // copies up to `max` matches and returns how many. The lock is held only per
+    // page, so the DNS task is never stuck behind a slow HTTP client.
+    size_t page(size_t& cursor, const QueryFilter& f, QueryEntry* out, size_t max);
+    size_t capacity() const { return cap_; }
+    bool inPsram() const { return psram_; }
 
 private:
     Mutex mu_;
-    QueryEntry ring_[kCapacity]{};
+    QueryEntry small_[kSmall]{};
+    QueryEntry* ring_ = small_;
+    size_t cap_ = kSmall;
+    bool psram_ = false;
     size_t head_ = 0;
     size_t count_ = 0;
 };

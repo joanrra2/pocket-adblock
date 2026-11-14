@@ -74,6 +74,23 @@ menu "DNS Sinkhole"
         default 3600
         range 30 86400
 
+    config SINKHOLE_QUERY_HISTORY_EXTENDED
+        bool "Long query history (uses extra RAM, PSRAM recommended)"
+        default n
+        help
+            Off: the last 32 queries are kept in internal RAM (2.4 KB).
+            On: keep SINKHOLE_QUERY_HISTORY_ENTRIES queries (76 bytes each), allocated
+            once at boot in PSRAM when present, halved until it fits, falling back to
+            32 entries. Makes the per-device view useful for finding what a blocklist
+            breaks. Recommended for boards with PSRAM (ESP32-S3 N8R8/N16R8/N32R16V,
+            WROVER); leave off on the ESP32-C3.
+
+    config SINKHOLE_QUERY_HISTORY_ENTRIES
+        int "Query history entries"
+        depends on SINKHOLE_QUERY_HISTORY_EXTENDED
+        default 2048
+        range 64 32768
+
     config SINKHOLE_WOL_MAX_HOSTS
         int "Wake-on-LAN hosts"
         default 16

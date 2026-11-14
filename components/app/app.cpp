@@ -39,6 +39,7 @@ void App::start()
     custom_.load();
     allow_.load();
     clients_.load();
+    queryLog_.begin();
     filter_.setEnabled(s.blocking);
 
     wifi_.setListener(&App::onUplinkChange, this);

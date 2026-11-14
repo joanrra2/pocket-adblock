@@ -1,5 +1,6 @@
 #include "sinkhole/web_server.hpp"
 
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -330,22 +331,45 @@ esp_err_t WebServer::getClients(httpd_req_t* req)
     return j.finish();
 }
 
+// GET /api/queries?limit=100&ip=192.168.1.20&blocked=1&q=ads
 esp_err_t WebServer::getQueries(httpd_req_t* req)
 {
-    static QueryEntry snap[QueryLog::kCapacity];  // httpd task only
-    const size_t n = d_.log.snapshot(snap, QueryLog::kCapacity);
-    const uint32_t now = uptimeSeconds();
-    JsonWriter j(req);
-    j.beginArray();
-    for (size_t i = 0; i < n; i++) {
-        j.beginObject()
-            .num("ago", now - snap[i].uptime)
-            .ip("ip", snap[i].ip)
-            .str("domain", snap[i].domain)
-            .boolean("blocked", snap[i].blocked)
-            .endObject();
+    char qs[160] = "", v[64];
+    httpd_req_get_url_query_str(req, qs, sizeof(qs));
+    size_t limit = 100;
+    QueryFilter f;
+    char text[64] = "";
+    if (httpd_query_key_value(qs, "limit", v, sizeof(v)) == ESP_OK) {
+        limit = strtoul(v, nullptr, 10);
+        if (limit < 1 || limit > 500) limit = 500;
     }
-    j.endArray();
+    if (httpd_query_key_value(qs, "ip", v, sizeof(v)) == ESP_OK) parseIp4(v, f.ip);
+    if (httpd_query_key_value(qs, "blocked", v, sizeof(v)) == ESP_OK) f.blockedOnly = v[0] == '1';
+    if (field(qs, "q", text, sizeof(text)) && text[0]) {
+        for (char* c = text; *c; c++) *c = static_cast<char>(tolower(static_cast<unsigned char>(*c)));
+        f.text = text;
+    }
+
+    static QueryEntry page[16];  // httpd task only; small pages keep the lock short
+    const uint32_t now = uptimeSeconds();
+    size_t cursor = 0, sent = 0;
+    JsonWriter j(req);
+    j.beginObject().num("capacity", static_cast<int64_t>(d_.log.capacity())).beginArray("items");
+    while (sent < limit) {
+        const size_t want = limit - sent < 16 ? limit - sent : 16;
+        const size_t n = d_.log.page(cursor, f, page, want);
+        if (!n) break;
+        for (size_t i = 0; i < n; i++) {
+            j.beginObject()
+                .num("ago", now - page[i].uptime)
+                .ip("ip", page[i].ip)
+                .str("domain", page[i].domain)
+                .boolean("blocked", page[i].blocked)
+                .endObject();
+        }
+        sent += n;
+    }
+    j.endArray().endObject();
     return j.finish();
 }
 

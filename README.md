@@ -56,6 +56,15 @@ idf.py -B build-s3 -D SDKCONFIG=build-s3/sdkconfig \
   set-target esp32s3 build flash monitor
 ```
 
+### Build options (`idf.py menuconfig` → DNS Sinkhole)
+
+Features that cost extra RAM are compile-time options, off by default. Board
+profiles in `boards/` turn on what suits that hardware.
+
+| Option | Default | RAM | Recommended for |
+|---|---|---|---|
+| `SINKHOLE_QUERY_HISTORY_EXTENDED` (+ `_ENTRIES`, 2048) | off (32 queries) | 76 B per entry, PSRAM | boards with PSRAM (on in the octal S3 profile, 4096) |
+
 Prebuilt images for every board are attached to each
 [release](../../releases): flash `*-full.bin` at `0x0` the first time.
 

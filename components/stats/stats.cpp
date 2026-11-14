@@ -2,7 +2,10 @@
 
 #include <cstring>
 
+#include "esp_log.h"
 #include "esp_netif.h"
+#include "sdkconfig.h"
+#include "sinkhole/memory.hpp"
 #include "lwip/etharp.h"
 #include "lwip/netif.h"
 #include "sinkhole/config.hpp"
@@ -131,6 +134,23 @@ size_t ClientTable::snapshot(ClientInfo* out, size_t max)
 
 // ------------------------------------------------------------ QueryLog
 
+void QueryLog::begin()
+{
+#if CONFIG_SINKHOLE_QUERY_HISTORY_EXTENDED
+    // PSRAM: the configured size, halved until it fits. No PSRAM: a modest 64
+    // entries (5 KB) of internal RAM, never the full table.
+    Region r = allocTable(sizeof(QueryEntry), CONFIG_SINKHOLE_QUERY_HISTORY_ENTRIES, 64);
+    if (r.count > kSmall) {
+        LockGuard g(mu_);
+        ring_ = static_cast<QueryEntry*>(r.ptr);
+        cap_ = r.count;
+        psram_ = r.psram;
+    }
+    ESP_LOGI("stats", "query history: %u entries in %s", static_cast<unsigned>(cap_),
+             psram_ ? "PSRAM" : "internal RAM");
+#endif
+}
+
 void QueryLog::add(uint32_t ip, const char* domain, bool blocked)
 {
     LockGuard g(mu_);
@@ -140,15 +160,22 @@ void QueryLog::add(uint32_t ip, const char* domain, bool blocked)
     e.blocked = blocked;
     strncpy(e.domain, domain, sizeof(e.domain) - 1);
     e.domain[sizeof(e.domain) - 1] = '\0';
-    head_ = (head_ + 1) % kCapacity;
-    if (count_ < kCapacity) count_++;
+    head_ = (head_ + 1) % cap_;
+    if (count_ < cap_) count_++;
 }
 
-size_t QueryLog::snapshot(QueryEntry* out, size_t max)
+size_t QueryLog::page(size_t& cursor, const QueryFilter& f, QueryEntry* out, size_t max)
 {
     LockGuard g(mu_);
-    size_t n = count_ < max ? count_ : max;
-    for (size_t i = 0; i < n; i++) out[i] = ring_[(head_ + kCapacity - 1 - i) % kCapacity];
+    size_t n = 0;
+    while (cursor < count_ && n < max) {
+        const QueryEntry& e = ring_[(head_ + cap_ - 1 - cursor) % cap_];
+        cursor++;
+        if (f.ip && e.ip != f.ip) continue;
+        if (f.blockedOnly && !e.blocked) continue;
+        if (f.text && !strstr(e.domain, f.text)) continue;
+        out[n++] = e;
+    }
     return n;
 }
 

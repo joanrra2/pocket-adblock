@@ -220,7 +220,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
 const n=x=>Number(x||0).toLocaleString();
 const ago=s=>s<0?'never':s<60?s+'s':s<3600?(s/60|0)+'m':s<86400?(s/3600|0)+'h':(s/86400|0)+'d';
 const T={dash:'Overview',lists:'Filters',devices:'Devices',wake:'Wake-on-LAN',system:'Updates',settings:'Settings'};
-let tab='dash',S=null,hist=[],prev=null,feed=[],feedMode='all',ltab='block',L={block:[],allow:[]},nets=[];
+let tab='dash',S=null,hist=[],prev=null,feed=[],feedCap=0,feedMode='all',ltab='block',L={block:[],allow:[]},nets=[];
 
 function toast(m,err){const t=$('#toast');t.textContent=m;t.className='toast'+(err?' e':'');t.style.display='block';clearTimeout(toast.h);toast.h=setTimeout(()=>t.style.display='none',3500)}
 async function api(u,data){
@@ -285,9 +285,8 @@ function drawSpark(){
  $('#rate').textContent=hist[hist.length-1].toFixed(0)+' / min now · peak '+mx.toFixed(0);
 }
 function renderFeed(){
- const f=$('#ff').value.trim().toLowerCase();
- const rows=feed.filter(e=>(feedMode=='all'||e.blocked)&&(!f||e.domain.includes(f)||e.ip==f));
- $('#feed').innerHTML=rows.length?rows.map(e=>`<div><span class="dot${e.blocked?' x':''}"></span><span class="g">${esc(e.domain)}</span><span class="k">${e.ip}</span><span class="k" style="width:40px;text-align:right">${ago(e.ago)}</span></div>`).join(''):'<div class="mu">No queries yet</div>';
+ $('#feed').innerHTML=(feed.length?feed.map(e=>`<div><span class="dot${e.blocked?' x':''}"></span><span class="g">${esc(e.domain)}</span><span class="k">${e.ip}</span><span class="k" style="width:40px;text-align:right">${ago(e.ago)}</span></div>`).join(''):'<div class="mu">No matching queries</div>')
+  +`<div class="k" style="border:0">Searching the last ${n(feedCap)} queries${feed.length>=100?' · showing the newest 100':''}</div>`;
 }
 function renderLists(){
  $$('#ltabs button').forEach(x=>x.classList.toggle('on',x.dataset.v==ltab));
@@ -296,7 +295,12 @@ function renderLists(){
 }
 
 // ---------- loaders
-async function loadDash(){feed=await api('/api/queries');renderFeed()}
+// The device filters its (possibly long) history; we only fetch the newest 100 matches.
+async function loadDash(){
+ const f=$('#ff').value.trim().toLowerCase(),p=new URLSearchParams({limit:100});
+ if(/^\d+\.\d+\.\d+\.\d+$/.test(f))p.set('ip',f);else if(f)p.set('q',f);
+ if(feedMode=='blocked')p.set('blocked',1);
+ const r=await api('/api/queries?'+p);feed=r.items;feedCap=r.capacity;renderFeed()}
 async function loadLists(){L=await api('/api/lists');renderLists()}
 async function loadClients(){
  const c=await api('/api/clients');c.sort((a,b)=>b.blocked+b.allowed-a.blocked-a.allowed);
@@ -342,8 +346,8 @@ async function scan(){
 }
 const A={
  mode:v=>act('/api/blocking',v=='on'||v=='off'?{mode:v}:{mode:'pause',minutes:v}),
- feedmode:(v,el)=>{feedMode=v;$$('[data-a=feedmode]').forEach(x=>x.classList.toggle('on',x==el));renderFeed()},
- feedip:v=>{location.hash='dash';$('#ff').value=v;feedMode='all';setTimeout(renderFeed,300)},
+ feedmode:(v,el)=>{feedMode=v;$$('[data-a=feedmode]').forEach(x=>x.classList.toggle('on',x==el));loadDash()},
+ feedip:v=>{$('#ff').value=v;feedMode='all';location.hash='dash'},
  ltab:v=>{ltab=v;renderLists()},
  rm:v=>act('/api/lists',{action:'remove',list:ltab,domain:v},loadLists),
  ban:(v,el)=>act('/api/ban',{ip:v,banned:el.dataset.b},loadClients),
@@ -372,7 +376,7 @@ const F={
 };
 document.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(el&&A[el.dataset.a]){e.preventDefault();A[el.dataset.a](el.dataset.v,el)}});
 document.addEventListener('submit',e=>{const f=e.target;if(F[f.dataset.f]){e.preventDefault();F[f.dataset.f](Object.fromEntries(new FormData(f)),f)}});
-$('#ff').addEventListener('input',renderFeed);
+$('#ff').addEventListener('input',()=>{clearTimeout(loadDash.t);loadDash.t=setTimeout(()=>loadDash().catch(()=>{}),300)});
 
 function route(){
  const t=location.hash.slice(1);tab=T[t]?t:'dash';

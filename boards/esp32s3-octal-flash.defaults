@@ -13,4 +13,8 @@ CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 # Only the first 8 MB are partitioned (2 x 1.5 MB apps, 2 x 2.4 MB blocklists,
 # ~500k domains each); that avoids 32-bit flash addressing on 32 MB parts.
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+
+# These modules carry 8-16 MB of PSRAM: keep a long query history there.
+CONFIG_SINKHOLE_QUERY_HISTORY_EXTENDED=y
+CONFIG_SINKHOLE_QUERY_HISTORY_ENTRIES=4096
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_8mb.csv"
