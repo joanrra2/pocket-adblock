@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a blocklist for esp-dns-sinkhole: 40-bit FNV-1a domain hashes with a
+"""Build a blocklist for pocket-adblock: 40-bit FNV-1a domain hashes with a
 64-byte SHBL header (format, count, SHA-256), ready to upload or serve over HTTPS.
 
 Usage:

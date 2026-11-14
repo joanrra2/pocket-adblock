@@ -166,11 +166,11 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
     <div class="row mt"><button class="btn p" data-a="fetch">Download now</button></div>
     <label>Or upload a .bin built with tools/build_blocklist.py</label><div class="row"><input type="file" id="blf" accept=".bin"><button class="btn" data-a="upload" data-v="bl">Upload</button></div><div class="prog" id="blp"></div></div>
    <div class="card"><h2>Firmware</h2><dl class="kv" id="fwinfo"></dl>
-    <label>Upload a firmware image (esp-dns-sinkhole.bin)</label><div class="row"><input type="file" id="fwf" accept=".bin"><button class="btn p" data-a="upload" data-v="fw">Install</button></div><div class="prog" id="fwp"></div>
+    <label>Upload a firmware image (pocket-adblock.bin)</label><div class="row"><input type="file" id="fwf" accept=".bin"><button class="btn p" data-a="upload" data-v="fw">Install</button></div><div class="prog" id="fwp"></div>
     <p class="mu mt">The device restarts into the new image and goes back to the previous one automatically if it doesn't come up healthy within a minute.</p>
     <h2 class="mt">Online updates</h2><div class="mu" id="fwupd"></div>
     <div class="row mt"><button class="btn" data-a="fwcheck">Check now</button><button class="btn p" data-a="fwinstall" id="fwinst" hidden>Install</button></div>
-    <form data-f="fw"><label>Update manifest URL</label><input name="url" placeholder="https://github.com/OWNER/REPO/releases/latest/download/manifest.json">
+    <form data-f="fw"><label>Update manifest URL</label><input name="url" placeholder="https://github.com/joanrra2/pocket-adblock/releases/latest/download/manifest.json">
      <label style="display:flex;gap:8px;align-items:center;color:var(--tx)"><input type="checkbox" name="auto" value="1" style="width:auto"> <span>Install updates automatically</span></label>
      <p class="k" id="fwautonote"></p>
      <div class="row mt"><button class="btn">Save</button></div></form>
@@ -241,7 +241,7 @@ const ES={
 'Wake from anywhere':'Encender desde cualquier lugar','Publish any message to':'Publica cualquier mensaje en','on your MQTT broker. No open ports needed.':'en tu broker MQTT. No hace falta abrir puertos.',
 'Blocklist':'Lista de bloqueo','Update URL':'URL de actualización','Check every (hours, 0 = never)':'Comprobar cada (horas, 0 = nunca)','Download now':'Descargar ahora',
 'Or upload a .bin built with tools/build_blocklist.py':'O sube un .bin creado con tools/build_blocklist.py','Upload':'Subir',
-'Upload a firmware image (esp-dns-sinkhole.bin)':'Sube una imagen de firmware (esp-dns-sinkhole.bin)','Install':'Instalar',
+'Upload a firmware image (pocket-adblock.bin)':'Sube una imagen de firmware (pocket-adblock.bin)','Install':'Instalar',
 "The device restarts into the new image and goes back to the previous one automatically if it doesn't come up healthy within a minute.":'El dispositivo se reinicia con la nueva imagen y vuelve a la anterior automáticamente si no arranca bien en un minuto.',
 'Restart device':'Reiniciar dispositivo','Your Wi-Fi':'Tu Wi-Fi','Scan networks':'Buscar redes','Password':'Contraseña','Connect':'Conectar','Reconnect':'Reconectar','Forget':'Olvidar',
 'Transmit power':'Potencia de transmisión','Auto (drops to 8.5 dBm if the link keeps failing)':'Automática (baja a 8,5 dBm si la conexión sigue fallando)','Full':'Máxima','Reduced, 8.5 dBm':'Reducida, 8,5 dBm',

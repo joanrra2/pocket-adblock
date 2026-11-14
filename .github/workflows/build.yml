@@ -65,8 +65,8 @@ jobs:
       - name: Collect
         run: |
           mkdir -p dist
-          sudo cp build/merged.bin "dist/esp-dns-sinkhole-${{ matrix.name }}-full.bin"
-          sudo cp build/esp-dns-sinkhole.bin "dist/esp-dns-sinkhole-${{ matrix.name }}-ota.bin"
+          sudo cp build/merged.bin "dist/pocket-adblock-${{ matrix.name }}-full.bin"
+          sudo cp build/pocket-adblock.bin "dist/pocket-adblock-${{ matrix.name }}-ota.bin"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}

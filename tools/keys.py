@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signing keys for esp-dns-sinkhole (needs: pip install cryptography).
+"""Signing keys for pocket-adblock (needs: pip install cryptography).
 
   python tools/keys.py blocklist-key keys/blocklist_signing.pem
       ECDSA P-256 key for signing blocklists. Prints the public key line for

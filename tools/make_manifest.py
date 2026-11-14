@@ -2,9 +2,9 @@
 """Write the firmware update manifest the devices check daily.
 
   python tools/make_manifest.py --version 0.2.0 --bins dist \
-      --base-url https://github.com/OWNER/REPO/releases/download/v0.2.0 --out dist/manifest.json
+      --base-url https://github.com/joanrra2/pocket-adblock/releases/download/v0.2.0 --out dist/manifest.json
 
-Every dist/esp-dns-sinkhole-<board>-ota.bin becomes "<board>": "<base-url>/<file>".
+Every dist/pocket-adblock-<board>-ota.bin becomes "<board>": "<base-url>/<file>".
 The board id must match CONFIG_SINKHOLE_BOARD_ID (or the chip target).
 """
 import argparse
@@ -23,7 +23,7 @@ def main():
 
     images = {}
     for name in sorted(os.listdir(a.bins)):
-        m = re.fullmatch(r'esp-dns-sinkhole-(.+)-ota\.bin', name)
+        m = re.fullmatch(r'pocket-adblock-(.+)-ota\.bin', name)
         if m:
             images[m.group(1)] = f'{a.base_url.rstrip("/")}/{name}'
     if not images:

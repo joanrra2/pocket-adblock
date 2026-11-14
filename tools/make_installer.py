@@ -3,7 +3,7 @@
 
   python tools/make_installer.py --bins dist --version 0.2.0 --out _site
 
-Expects dist/esp-dns-sinkhole-<board>-full.bin (merged image, flashed at 0x0)
+Expects dist/pocket-adblock-<board>-full.bin (merged image, flashed at 0x0)
 for the boards below; boards without an image are skipped.
 """
 import argparse
@@ -39,13 +39,13 @@ def main():
 
     made = []
     for board, family in BOARDS.items():
-        name = f'esp-dns-sinkhole-{board}-full.bin'
+        name = f'pocket-adblock-{board}-full.bin'
         src = os.path.join(a.bins, name)
         if not os.path.exists(src):
             continue
         shutil.copy(src, os.path.join(a.out, 'firmware', name))
         manifest = {
-            'name': 'esp-dns-sinkhole',
+            'name': 'pocket-adblock',
             'version': a.version,
             'new_install_prompt_erase': True,
             'builds': [{'chipFamily': family, 'parts': [{'path': f'../firmware/{name}', 'offset': 0}]}],

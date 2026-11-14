@@ -1,6 +1,6 @@
-# esp-dns-sinkhole
+# Pocket AdBlock
 
-[![build](https://github.com/OWNER/esp-dns-sinkhole/actions/workflows/build.yml/badge.svg)](https://github.com/OWNER/esp-dns-sinkhole/actions/workflows/build.yml)
+[![build](https://github.com/joanrra2/pocket-adblock/actions/workflows/build.yml/badge.svg)](https://github.com/joanrra2/pocket-adblock/actions/workflows/build.yml)
 [![ESP-IDF v6.1](https://img.shields.io/badge/ESP--IDF-v6.1-blue)](https://github.com/espressif/esp-idf/releases/tag/v6.1)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-support%20this%20project-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/joanramon)
@@ -41,7 +41,7 @@ Power it from a stable USB supply. Many routers have a spare USB port that is en
 
 ## Install from the browser
 
-Open the **[web installer](https://OWNER.github.io/esp-dns-sinkhole/)** in Chrome or Edge,
+Open the **[web installer](https://joanrra2.github.io/pocket-adblock/)** in Chrome or Edge,
 pick your board and press *Connect and install*. No toolchain needed.
 
 ## Build & flash
@@ -74,7 +74,7 @@ profiles in `boards/` turn on what suits that hardware.
 Prebuilt images for every board are attached to each
 [release](../../releases): flash `*-full.bin` at `0x0` the first time.
 
-> **Windows:** keep the project in a short path such as `C:\src\esp-dns-sinkhole`.
+> **Windows:** keep the project in a short path such as `C:\src\pocket-adblock`.
 > Managed components have deep paths and fail past Windows' 260-character limit.
 
 ## First setup
@@ -162,7 +162,7 @@ mosquitto_pub -h broker -p 8883 -u user -P pass -t sinkhole/wol/office-pc/set -m
 
 ## Updates
 
-- **Firmware:** upload `build/esp-dns-sinkhole.bin` (or a release's `*-ota.bin`) under
+- **Firmware:** upload `build/pocket-adblock.bin` (or a release's `*-ota.bin`) under
   **Updates**. The new image stays on probation for 60 s and the bootloader rolls back if it crashes first.
 - **Blocklist:** **Download now**, upload a `.bin`, or let the schedule run.
 
@@ -194,7 +194,7 @@ from a wired PC with `tools/dns_bench.py`. The original (Arduino, commit at the 
 writing) was built for the S3 with an added PlatformIO env; ours is the default build
 (no bloom filter).
 
-| | esp32-c3-adblock | esp-dns-sinkhole |
+| | esp32-c3-adblock | pocket-adblock |
 |---|---|---|
 | Blocked query, p50 / p99 | 5.05 / 10.96 ms | **1.87 / 5.90 ms** |
 | Same allowed name again, p50 | 18.99 ms (forwarded every time) | **1.87 ms** (answer cache) |
