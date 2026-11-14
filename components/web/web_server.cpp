@@ -537,6 +537,9 @@ esp_err_t WebServer::getSettings(httpd_req_t* req)
         .boolean("guardCanary", s.bypassGuard & 1)
         .boolean("guardEncrypted", s.bypassGuard & 2)
         .boolean("cnameCheck", s.cnameCheck)
+        .boolean("safeGoogle", s.safeSearch & 1)
+        .boolean("safeBing", s.safeSearch & 2)
+        .str("safeYoutube", (s.safeSearch & 8) ? "strict" : (s.safeSearch & 4) ? "moderate" : "off")
         .str("blocklistUrl", s.blocklistUrl)
         .num("updateHours", s.updateHours)
         .str("mqttUri", s.mqttUri)
@@ -624,6 +627,15 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         });
         d_.dns.setGuard(flags);
         d_.dns.setCnameCheck(cname);
+        // SafeSearch: google=1, bing=1, youtube=off|moderate|strict
+        char g[4] = "", bi[4] = "", yt[16] = "";
+        field(form, "google", g, sizeof(g));
+        field(form, "bing", bi, sizeof(bi));
+        field(form, "youtube", yt, sizeof(yt));
+        const uint8_t ss = static_cast<uint8_t>((g[0] == '1' ? 1 : 0) | (bi[0] == '1' ? 2 : 0) |
+                                                (strcmp(yt, "moderate") == 0 ? 4 : 0) | (strcmp(yt, "strict") == 0 ? 8 : 0));
+        d_.cfg.modify([ss](Settings& s) { s.safeSearch = ss; });
+        d_.dns.setSafeSearch(ss);
         return sendOk(req);
     }
     if (strcmp(section, "update") == 0) {

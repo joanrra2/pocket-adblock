@@ -96,6 +96,7 @@ void App::applyUpstream(void* ctx)
     self->dns_.setUpstream(up, s.upstreamIp2);
     self->dns_.setGuard(s.bypassGuard);
     self->dns_.setCnameCheck(s.cnameCheck);
+    self->dns_.setSafeSearch(s.safeSearch);
 
     char ip[16], ip2[16] = "none";
     formatIp4(up, ip);

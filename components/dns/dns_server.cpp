@@ -17,6 +17,8 @@ constexpr const char* TAG = "dns";
 constexpr uint16_t kDnsPort = 53;
 constexpr TickType_t kTimeout = pdMS_TO_TICKS(CONFIG_SINKHOLE_DNS_UPSTREAM_TIMEOUT_MS);
 constexpr uint32_t kLocalTtl = 60;  // local names: short, so edits show up quickly
+constexpr uint32_t kSafeTtl = 300;
+constexpr uint32_t kSafeRefreshS = 6 * 3600, kSafeRetryS = 60;
 
 int openUdp(uint16_t port)
 {
@@ -97,6 +99,7 @@ void DnsServer::run()
         }
         expirePending();
         if (flushCache_.exchange(false)) cache_.clear();
+        refreshSafeTargets();
     }
 }
 
@@ -152,6 +155,19 @@ void DnsServer::onClientPacket(int sock)
         return;
     }
     const uint32_t forwardTo = local ? localIp : 0;  // forward rule: that server only
+
+    // SafeSearch: search hostnames get the provider's safe endpoint (A only;
+    // NODATA for AAAA etc. so clients use it). Stays on while blocking is paused.
+    if (const uint8_t ss = forwardTo ? 0 : safe_.load()) {
+        const safe::Target t = safe::check(q.name, q.nameLen, ss);
+        if (t != safe::None) {
+            counters_.allowed++;
+            clients_.record(client, false);
+            log_.add(client, q.name, false);
+            reply(from, v6, buf_, dns::buildCaptive(buf_, sizeof(buf_), q, safeIps_[t], kSafeTtl));
+            return;
+        }
+    }
 
     // Bypass guard (canary domains / encrypted-DNS resolvers): NXDOMAIN, so
     // browsers and phones keep using this server. Respects pause and allow list.
@@ -232,6 +248,7 @@ void DnsServer::onClientPacket(int sock)
     p->failedMask = 0;
     p->client = from;
     p->clientV6 = v6;
+    p->internal = -1;
     p->deadline = xTaskGetTickCount() + kTimeout;
     pendingInUse_++;
 
@@ -279,6 +296,21 @@ void DnsServer::onUpstreamPacket()
             p.failedMask |= static_cast<uint8_t>(1 << which);
             if (p.failedMask != 0x3) return;
         }
+        if (p.internal >= 0) {  // our SafeSearch endpoint lookup: keep the first A
+            const int t = p.internal;
+            dns::forEachRecord(buf_, static_cast<size_t>(len), qend, [&](uint8_t* ttl, uint16_t type) {
+                if (type == dns::kTypeA && dns::rd16(ttl + 4) == 4 && !(safeResolved_ & (1 << t))) {
+                    uint32_t ip;
+                    memcpy(&ip, ttl + 6, 4);
+                    safeIps_[t] = ip;
+                    safeResolved_ |= static_cast<uint8_t>(1 << t);
+                }
+            });
+            if (safeResolved_ == (1 << safe::kTargets) - 1) safeRefreshAt_ = uptimeSeconds() + kSafeRefreshS;
+            p.used = false;
+            pendingInUse_--;
+            return;
+        }
         wins_[which]++;
         dns::wr16(buf_, p.clientId);
         // CNAME cloaking: an allowed name that is an alias of a blocked one
@@ -323,6 +355,58 @@ void DnsServer::countCnameBlocked(const ClientAddr& client, const char* name)
     counters_.cnameBlocked++;
 }
 
+// Looks up the SafeSearch endpoints through the upstream (their addresses
+// change, e.g. strict.bing.com), every 6 h, or every minute until all resolve.
+void DnsServer::refreshSafeTargets()
+{
+    const uint8_t ss = safe_;
+    const uint32_t up = upstream_;
+    const uint32_t now = uptimeSeconds();
+    if (!ss || !up || now < safeRefreshAt_) return;
+    safeResolved_ = 0;
+    for (int t = 0; t < safe::kTargets; t++) {
+        Pending* p = allocPending();
+        if (!p) break;
+        uint8_t pkt[64] = {0, 0, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0};
+        size_t n = dns::kHeaderLen;
+        for (const char* s = safe::kTargetNames[t]; *s;) {
+            const char* dot = strchr(s, '.');
+            const size_t l = dot ? static_cast<size_t>(dot - s) : strlen(s);
+            pkt[n++] = static_cast<uint8_t>(l);
+            memcpy(pkt + n, s, l);
+            n += l;
+            s += l + (dot ? 1 : 0);
+        }
+        pkt[n++] = 0;
+        dns::wr16(pkt + n, dns::kTypeA);
+        dns::wr16(pkt + n + 2, 1);
+        n += 4;
+        uint16_t id;
+        bool clash;
+        do {
+            id = static_cast<uint16_t>(esp_random());
+            clash = false;
+            for (const auto& o : pending_)
+                if (o.used && o.upstreamId == id) clash = true;
+        } while (clash);
+        dns::wr16(pkt, id);
+        *p = Pending{};
+        p->used = true;
+        p->upstreamId = id;
+        p->questionKey = dns::questionKey(pkt, n);
+        p->upstreamIp = up;
+        p->internal = static_cast<int8_t>(t);
+        p->deadline = xTaskGetTickCount() + kTimeout;
+        pendingInUse_++;
+        sockaddr_in to{};
+        to.sin_family = AF_INET;
+        to.sin_port = htons(kDnsPort);
+        to.sin_addr.s_addr = up;
+        sendto(upstreamSock_, pkt, n, 0, reinterpret_cast<sockaddr*>(&to), sizeof(to));
+    }
+    safeRefreshAt_ = now + kSafeRetryS;  // becomes 6 h once all resolved (checked next round)
+}
+
 void DnsServer::expirePending()
 {
     const TickType_t now = xTaskGetTickCount();
@@ -330,7 +414,7 @@ void DnsServer::expirePending()
         if (p.used && static_cast<int32_t>(now - p.deadline) >= 0) {
             p.used = false;
             pendingInUse_--;
-            counters_.upstreamTimeouts++;
+            if (p.internal < 0) counters_.upstreamTimeouts++;
         }
     }
 }

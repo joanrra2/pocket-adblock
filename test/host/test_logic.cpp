@@ -11,6 +11,7 @@
 #include "sinkhole/bypass_guard.hpp"
 #include "sinkhole/dns_packet.hpp"
 #include "sinkhole/hash_table.hpp"
+#include "sinkhole/safe_search.hpp"
 
 using namespace sinkhole;
 
@@ -280,9 +281,31 @@ static void testCnameTargets()
     CHECK(!dns::anyCnameTarget(p.data(), firstRdata + 3, qend, [](const char*, size_t) { return true; }));
 }
 
+static void testSafeSearch()
+{
+    auto chk = [](const char* n, uint8_t f) { return safe::check(n, std::strlen(n), f); };
+    const uint8_t gb = safe::kGoogle | safe::kBing;
+    CHECK(chk("google.com", gb) == safe::Google);
+    CHECK(chk("google.es", gb) == safe::Google);
+    CHECK(chk("google.co.uk", gb) == safe::Google);
+    CHECK(chk("google.com.br", gb) == safe::Google);
+    CHECK(chk("mail.google.com", gb) == safe::None);    // other Google services pass
+    CHECK(chk("google.blog", gb) == safe::None);        // not a country domain
+    CHECK(chk("google.com.evil.io", gb) == safe::None);
+    CHECK(chk("google.com", safe::kBing) == safe::None);  // flag off
+    CHECK(chk("bing.com", gb) == safe::Bing);
+    CHECK(chk("youtube.com", gb) == safe::None);
+    CHECK(chk("youtube.com", safe::kYoutubeModerate) == safe::YoutubeModerate);
+    CHECK(chk("m.youtube.com", safe::kYoutubeStrict) == safe::YoutubeStrict);
+    CHECK(chk("youtubei.googleapis.com", safe::kYoutubeStrict) == safe::YoutubeStrict);
+    CHECK(chk("i.ytimg.com", safe::kYoutubeStrict) == safe::None);
+    CHECK(safe::kDefaultIps[safe::Google] == safe::ip4(216, 239, 38, 120));
+}
+
 int main()
 {
     testCnameTargets();
+    testSafeSearch();
     testHashTable();
     testCompactFormat();
     testDnsPacket();

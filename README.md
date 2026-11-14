@@ -16,6 +16,10 @@ PSRAM, and takes advantage of PSRAM when the board has it.
   a blocked tracker (`smetrics.ikea.com` → `…2o7.net`) is blocked too, also for cached answers.
 - **Bypass protection**: Firefox's automatic DNS-over-HTTPS and iCloud Private Relay are
   told to stand down; optionally, well-known encrypted-DNS servers are blocked.
+- **SafeSearch for families** (optional): Google, Bing and YouTube (moderate / strict) are
+  forced into safe mode for every device, using each provider's official safe endpoint
+  (looked up through the upstream every 6 h, since addresses change). Stays on when
+  ad blocking is paused.
 - **DNS answer cache** (4096 entries in PSRAM on boards that have it, 32 in internal RAM otherwise).
   Answers with TTL 0 or a few seconds (some resolvers, Quad9 at times, send them) are still
   cached for 30 s, while clients see the upstream's own TTL

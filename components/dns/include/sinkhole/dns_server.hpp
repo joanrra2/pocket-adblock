@@ -15,6 +15,7 @@
 #include "sinkhole/dns_cache.hpp"
 #include "sinkhole/domain_filter.hpp"
 #include "sinkhole/local_records.hpp"
+#include "sinkhole/safe_search.hpp"
 #include "sinkhole/rtos.hpp"
 #include "sinkhole/stats.hpp"
 
@@ -37,6 +38,7 @@ public:
     // matching answer wins: a dead or slow resolver costs no latency.
     void setUpstream(uint32_t primary, uint32_t backup = 0)
     {
+        if (primary != upstream_) safeRefreshAt_ = 0;  // re-learn SafeSearch endpoints from it
         upstream_ = primary;
         upstream2_ = backup != primary ? backup : 0;
     }
@@ -64,6 +66,13 @@ public:
     LocalRecords& records() { return records_; }
     // Drop cached answers (e.g. after a forward rule changed). Done by the DNS task.
     void flushCache() { flushCache_ = true; }
+    // safe::kGoogle | kBing | kYoutubeModerate | kYoutubeStrict (0 = off).
+    void setSafeSearch(uint8_t flags)
+    {
+        safe_ = flags;
+        safeRefreshAt_ = 0;  // look the endpoints up now
+    }
+    uint32_t safeSearchIp(int target) const { return safeIps_[target]; }
 
 private:
     struct Pending {
@@ -76,6 +85,7 @@ private:
         uint32_t upstreamIp2;  // 0 = no backup for this query
         uint8_t failedMask;    // which upstreams answered with an error
         bool clientV6;
+        int8_t internal;  // >= 0: our own lookup of a SafeSearch endpoint
         ClientSockAddr client;
         TickType_t deadline;
     };
@@ -85,6 +95,7 @@ private:
     void onClientPacket(int sock);
     void onUpstreamPacket();
     void expirePending();
+    void refreshSafeTargets();
     bool cnameCloaked(const uint8_t* pkt, size_t len, size_t qend);
     void countCnameBlocked(const ClientAddr& client, const char* name);
     Pending* allocPending();
@@ -110,6 +121,11 @@ private:
     std::atomic<uint8_t> guard_{0};
     std::atomic<bool> cnameCheck_{false};
     std::atomic<bool> flushCache_{false};
+    std::atomic<uint8_t> safe_{0};
+    std::atomic<uint32_t> safeRefreshAt_{0};  // uptime seconds
+    std::atomic<uint32_t> safeIps_[safe::kTargets] = {safe::kDefaultIps[0], safe::kDefaultIps[1],
+                                                      safe::kDefaultIps[2], safe::kDefaultIps[3]};
+    uint8_t safeResolved_ = 0;  // bit per target, DNS task only
     std::atomic<uint32_t> apIp_{0};
     std::atomic<uint32_t> apMask_{0};
 
