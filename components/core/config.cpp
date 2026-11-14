@@ -133,17 +133,27 @@ size_t Config::validBytes(uint16_t version)
         case 8: return offsetof(Settings, haDiscovery);
         case 9: return offsetof(Settings, safeSearch);
         case kVersion: return sizeof(Settings);
-        default: return 0;  // unknown / too old: start from defaults
+        default:
+            // Newer firmware wrote it (rollback / downgrade): fields are only ever
+            // appended, so everything this version knows is still a valid prefix.
+            // Keeps Wi-Fi and the rest instead of resetting to defaults.
+            if (version > kVersion && version < 1000) return sizeof(Settings);
+            return 0;  // unknown / too old: start from defaults
     }
 }
 
 esp_err_t Config::load()
 {
     LockGuard g(mu_);
-    static Settings stored;  // only used here, under mu_; keeps 1 KB off the stack
-    memset(&stored, 0, sizeof(stored));
+    // Only used here, under mu_ (keeps ~1 KB off the stack). Room for fields a
+    // newer firmware appended, so a rollback keeps the settings.
+    static uint8_t raw[sizeof(Settings) + 256];
+    static Settings stored;
+    memset(raw, 0, sizeof(raw));
     size_t n = 0;
-    esp_err_t err = nvs::loadBlob(kSettingsKey, &stored, sizeof(stored), &n);
+    esp_err_t err = nvs::loadBlob(kSettingsKey, raw, sizeof(raw), &n);
+    memcpy(&stored, raw, sizeof(stored));
+    if (n > sizeof(stored)) n = sizeof(stored);
     const size_t valid = (err == ESP_OK && n >= sizeof(uint16_t)) ? validBytes(stored.version) : 0;
     applyDefaults(s_);
     if (!valid || n < valid) {
