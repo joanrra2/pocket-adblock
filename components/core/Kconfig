@@ -33,7 +33,7 @@ menu "DNS Sinkhole"
 
     config SINKHOLE_BLOCKLIST_UPDATE_HOURS
         int "Hours between automatic blocklist updates (0 = off)"
-        default 24
+        default 6
         range 0 720
 
     config SINKHOLE_BLOCKLIST_PUBKEY

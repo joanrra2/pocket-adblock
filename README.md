@@ -159,8 +159,8 @@ by IP address can't be stopped by DNS: set it to "use the system's DNS" / off.
 
 Settings also has **Reconnect now** and **Forget** for the uplink.
 
-By default the blocklist auto-updates every 24 h from esp32-c3-adblock's weekly
-release. You can change the URL, or upload your own list, under **Updates**.
+By default the blocklist checks for a new version every 6 h; this project rebuilds
+its lists daily. You can pick another list or URL, or upload your own, under **Updates**.
 
 ### Local names
 
@@ -195,7 +195,7 @@ domain plus a 65 KB index, so slots hold more and lookups are faster:
 Raw headerless lists from esp32-c3-adblock (`--raw`) and v1 lists are still accepted.
 Blocking a domain also blocks its subdomains. The **Always allow** list wins over every blocklist.
 
-**Which list.** *Settings → Updates → Blocklist* picks one of the weekly lists this
+**Which list.** *Settings → Updates → Blocklist* picks one of the daily lists this
 project publishes: **Light** (StevenBlack, ~56k domains, fewest false positives),
 **Normal** (default, + HaGeZi Light, ~140k) or **Aggressive** (+ HaGeZi Pro, ~280k,
 8 MB boards only: the device refuses a list bigger than its slot before writing
@@ -206,11 +206,11 @@ with the settings, custom lists, local names, Wake-on-LAN computers and device
 rules (passwords only if you tick the box) and restores it on any board.
 
 **Automatic updates.** The device checks its blocklist URL 10 minutes after
-booting and then every *Settings → Updates → interval* (24 h by default). It
+booting and then every *Settings → Updates → interval* (6 h by default). It
 reads the 64-byte header first: if checksum and size match the active list it
 stops there ("already up to date": no download, no flash write); otherwise the
 new list goes into the other slot, is verified and then swapped in. The default
-URL is this project's list, rebuilt by GitHub Actions every Monday
+URL is this project's list, rebuilt by GitHub Actions every day
 (`.github/workflows/blocklist.yml`). *Update now* triggers a check by hand.
 
 ## Status LED
@@ -281,7 +281,7 @@ Release firmware checks `manifest.json` from the latest GitHub release once a da
 
 No eFuses are burned: a board can always be re-flashed over USB. In CI, the
 `FIRMWARE_SIGNING_KEY` and `BLOCKLIST_SIGNING_KEY` secrets (and the
-`BLOCKLIST_PUBKEY` variable) turn signing on for releases and the weekly list.
+`BLOCKLIST_PUBKEY` variable) turn signing on for releases and the daily lists.
 
 ## Security
 

@@ -1,10 +1,10 @@
 name: blocklist
 
-# Weekly SHBL blocklist with SHA-256 header, published at a stable URL:
+# Daily SHBL blocklists with SHA-256 header, published at a stable URL:
 #   https://github.com/<owner>/<repo>/releases/download/blocklist/blocklist.bin
 on:
   schedule:
-    - cron: "41 4 * * 1"   # Mondays 04:41 UTC
+    - cron: "41 4 * * *"   # daily 04:41 UTC (HaGeZi updates daily; devices fetch only when it changed)
   workflow_dispatch:
 
 permissions:
@@ -54,6 +54,6 @@ jobs:
         run: |
           notes="Auto-built $(date -u +%F). Normal (blocklist.bin): $(grep 'hash entries' build.log | grep -oE '[0-9,]+' | head -1) domains · Light: $(grep 'hash entries' build-light.log | grep -oE '[0-9,]+' | head -1) · Aggressive (8 MB boards): $(grep 'hash entries' build-aggressive.log | grep -oE '[0-9,]+' | head -1)"
           gh release view blocklist >/dev/null 2>&1 || \
-            gh release create blocklist --title "Weekly blocklist" --notes "$notes" --latest=false
+            gh release create blocklist --title "Daily blocklist" --notes "$notes" --latest=false
           gh release edit blocklist --notes "$notes"
           gh release upload blocklist blocklist.bin blocklist-light.bin blocklist-aggressive.bin --clobber
