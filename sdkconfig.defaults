@@ -25,6 +25,11 @@ CONFIG_LWIP_RAW=y
 # server can be offered as the IPv6 resolver too.
 CONFIG_LWIP_IPV6=y
 CONFIG_LWIP_IPV6_AUTOCONFIG=y
+# Lease table of the DHCP servers (setup AP, optional home-network server).
+# Past this many clients lwIP silently drops the oldest lease and may hand
+# its address out twice; LanDhcp caps the pool at this size. Heap only, and
+# only for clients that actually got a lease (~90 bytes each).
+CONFIG_LWIP_DHCPS_MAX_STATION_NUM=64
 
 # ---- tasks ----
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096

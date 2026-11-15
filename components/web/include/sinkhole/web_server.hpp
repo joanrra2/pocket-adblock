@@ -19,6 +19,7 @@
 #include "sinkhole/stats.hpp"
 #include "sinkhole/updaters.hpp"
 #include "sinkhole/status_led.hpp"
+#include "sinkhole/lan_dhcp.hpp"
 #include "sinkhole/wifi_manager.hpp"
 #include "sinkhole/wol.hpp"
 
@@ -41,6 +42,7 @@ struct WebDeps {
     MqttBridge& mqtt;
     StatusLed& led;
     History& history;
+    LanDhcp& dhcp;
     void (*applyUpstream)(void* ctx);
     void* appCtx;
 };

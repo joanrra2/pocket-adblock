@@ -131,6 +131,7 @@ void Config::applyDefaults(Settings& s)
     s.ledPin = -1;
     s.ledBrightness = 24;
     s.rateLimit = 1000;  // Pi-hole's default: 1000 queries per minute per client
+    s.dhcpLeaseMinutes = 720;
 }
 
 // Bytes of Settings that were meaningful in a given stored version. Fields are
@@ -149,6 +150,7 @@ size_t Config::validBytes(uint16_t version)
         case 10: return offsetof(Settings, dot);
         case 11: return offsetof(Settings, ledKind);
         case 12: return offsetof(Settings, privacy);
+        case 13: return offsetof(Settings, dhcpServer);
         case kVersion: return sizeof(Settings);
         default:
             // Newer firmware wrote it (rollback / downgrade): fields are only ever

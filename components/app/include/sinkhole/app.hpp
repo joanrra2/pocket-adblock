@@ -7,6 +7,7 @@
 #include "sinkhole/dns_server.hpp"
 #include "sinkhole/domain_filter.hpp"
 #include "sinkhole/domain_list.hpp"
+#include "sinkhole/lan_dhcp.hpp"
 #include "sinkhole/stats.hpp"
 #include "sinkhole/status_led.hpp"
 #include "sinkhole/updaters.hpp"
@@ -24,6 +25,7 @@ public:
 private:
     static void onUplinkChange(void* ctx, bool connected);
     static void applyUpstream(void* ctx);
+    void applyDhcp();
     MqttHooks mqttHooks();
     static StatusLed::State ledState(void* ctx);
     static bool hookBlocking(void* ctx);
@@ -41,6 +43,7 @@ private:
     QueryLog queryLog_;
     Counters counters_;
     WifiManager wifi_{config_};
+    LanDhcp dhcp_;
     DnsServer dns_{filter_, clients_, queryLog_, counters_};
     FirmwareUpdater firmware_;
     Updater updater_{config_, store_, wifi_, firmware_};

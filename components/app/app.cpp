@@ -17,7 +17,7 @@ constexpr uint64_t kHealthyAfterUs = 60ULL * 1000 * 1000;
 
 App::App()
     : web_(WebDeps{config_, wifi_, store_, custom_, allow_, filter_, clients_, queryLog_, counters_,
-                   dns_, updater_, firmware_, wol_, mqtt_, led_, history_, &App::applyUpstream, this})
+                   dns_, updater_, firmware_, wol_, mqtt_, led_, history_, dhcp_, &App::applyUpstream, this})
 {
 }
 
@@ -69,6 +69,8 @@ void App::start()
 void App::onUplinkChange(void* ctx, bool connected)
 {
     auto* self = static_cast<App*>(ctx);
+    // Also starts the LAN DHCP server. It stays up while the link is down: a
+    // Wi-Fi blip must not wipe its lease table.
     if (connected) applyUpstream(ctx);
     self->updateCaptive();
 }
@@ -112,6 +114,7 @@ void App::applyUpstream(void* ctx)
     self->dns_.setSafeSearch(s.safeSearch);
     self->queryLog_.setPrivacy(s.privacy);
     self->dns_.setRateLimit(s.rateLimit);
+    self->applyDhcp();
 
     char ip[16], ip2[16] = "none";
     formatIp4(up, ip);
@@ -135,6 +138,25 @@ StatusLed::State App::ledState(void* ctx)
         return StatusLed::State::Failure;
     if (!self->filter_.enabled()) return StatusLed::State::Paused;
     return StatusLed::State::Ok;
+}
+
+// LAN DHCP server: only with a static IP and a valid pool (LanDhcp checks it).
+// Starts once the uplink is up; after that a no-op unless the settings changed.
+void App::applyDhcp()
+{
+    const auto o = config_.read([](const Settings& s) {
+        struct {
+            bool on;
+            LanDhcp::Options opt;
+        } r{s.dhcpServer && s.staticIp,
+            {s.ipAddr, s.ipMask, s.ipGw, s.dhcpFirst, s.dhcpLast,
+             s.dhcpLeaseMinutes ? s.dhcpLeaseMinutes : uint16_t(720)}};
+        return r;
+    });
+    if (!o.on)
+        dhcp_.stop();
+    else if (wifi_.connected())
+        dhcp_.start(wifi_.staNetif(), o.opt);
 }
 
 // What the MQTT bridge may read / control (Home Assistant entities).

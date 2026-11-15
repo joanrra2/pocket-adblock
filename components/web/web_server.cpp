@@ -349,6 +349,19 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
         .boolean("manifest", s.fwManifestUrl[0] != '\0')
         .endObject();
 
+    const LanDhcp::Stats ds = LanDhcp::stats();
+    j.beginObject("dhcp")
+        .boolean("running", d_.dhcp.running())
+        .num("leases", ds.leases)
+        .ip("lastLease", ds.lastLeaseIp)
+        .num("discovers", ds.discovers)
+        .num("requests", ds.requests)
+        .num("others", ds.others)
+        .num("offers", ds.offers)
+        .num("acks", ds.acks)
+        .num("naks", ds.naks)
+        .endObject();
+
     j.beginObject("mqtt")
         .boolean("configured", s.mqttUri[0] != '\0')
         .boolean("connected", d_.mqtt.connected())
@@ -798,6 +811,10 @@ esp_err_t WebServer::getSettings(httpd_req_t* req)
         .ip("ipMask", s.staticIp ? s.ipMask : d_.wifi.staNetmask())
         .ip("ipGw", s.staticIp ? s.ipGw : d_.wifi.gateway())
         .ip("ipDns", s.staticIp ? s.ipDns : d_.wifi.staDns())
+        .boolean("dhcpServer", s.dhcpServer)
+        .ip("dhcpFirst", s.dhcpFirst)
+        .ip("dhcpLast", s.dhcpLast)
+        .num("dhcpLease", s.dhcpLeaseMinutes)
         .endObject();
     return j.finish();
 }
@@ -977,6 +994,34 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         const uint8_t mode = strcmp(a, "full") == 0 ? TxFull : strcmp(a, "reduced") == 0 ? TxReduced : TxAuto;
         d_.cfg.modify([mode](Settings& s) { s.txPower = mode; });
         d_.wifi.applyTxPower();
+        return sendOk(req);
+    }
+    if (strcmp(section, "dhcp") == 0) {
+        // enabled=1, first, last (IPv4 in this device's subnet), lease (minutes)
+        field(form, "enabled", a, 4);
+        field(form, "first", b, 20);
+        field(form, "last", c, 20);
+        field(form, "lease", e, 8);
+        const bool on = a[0] == '1';
+        uint32_t first = 0, last = 0;
+        const unsigned long lease = strtoul(e, nullptr, 10);
+        const auto net = d_.cfg.read([](const Settings& s) {
+            struct { bool st; uint32_t ip, mask, gw; } r{s.staticIp, s.ipAddr, s.ipMask, s.ipGw};
+            return r;
+        });
+        if (on) {
+            if (!net.st) return sendError(req, "400 Bad Request", "set a static IP for this device first");
+            if (!parseIp4(b, first) || !parseIp4(c, last)) return sendError(req, "400 Bad Request", "invalid pool addresses");
+            if (const char* why = LanDhcp::checkPool({net.ip, net.mask, net.gw, first, last, 0}))
+                return sendError(req, "400 Bad Request", why);
+        }
+        d_.cfg.modify([&](Settings& s) {
+            s.dhcpServer = on;
+            if (first) s.dhcpFirst = first;
+            if (last) s.dhcpLast = last;
+            if (lease) s.dhcpLeaseMinutes = static_cast<uint16_t>(lease < 5 ? 5 : lease > 10080 ? 10080 : lease);
+        });
+        if (d_.applyUpstream) d_.applyUpstream(d_.appCtx);  // applies the DHCP server too
         return sendOk(req);
     }
     if (strcmp(section, "ip") == 0) {
