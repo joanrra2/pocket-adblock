@@ -259,7 +259,7 @@ static void testCnameTargets()
         p.insert(p.end(), rdata.begin(), rdata.end());
     };
     const size_t firstRdata = p.size() + 12;
-    rr(dns::kTypeCname, {7, 'e', 'u', 'l', 'e', 'r', 'i', 'a', 'n', 3, 'n', 'e', 't', 0});
+    rr(dns::kTypeCname, {8, 'e', 'u', 'l', 'e', 'r', 'i', 'a', 'n', 3, 'n', 'e', 't', 0});
     rr(dns::kTypeCname, {4, 'S', 'H', 'O', 'P', 0xC0, static_cast<uint8_t>(firstRdata)});  // -> eulerian.net
     rr(dns::kTypeA, {1, 2, 3, 4});
 
