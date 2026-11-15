@@ -135,6 +135,10 @@ public:
     size_t capacity() const { return cap_; }
     bool inPsram() const { return psram_; }
     bool topEnabled() const { return top_.enabled(); }
+    // 0 = record everything, 1 = hide domains ("(hidden)", no top domains),
+    // 2 = also hide clients (no addresses in the log or the client views).
+    void setPrivacy(uint8_t level) { privacy_ = level; }
+    uint8_t privacy() const { return privacy_; }
     size_t top(bool blocked, TopDomains::Item* out, size_t max)
     {
         LockGuard g(mu_);
@@ -150,6 +154,7 @@ private:
     size_t head_ = 0;
     size_t count_ = 0;
     TopDomains top_;
+    std::atomic<uint8_t> privacy_{0};
 };
 
 struct Counters {

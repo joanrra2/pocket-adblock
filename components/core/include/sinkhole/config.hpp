@@ -80,6 +80,10 @@ struct Settings {
     int8_t ledPin;        // -1 = none
     bool ledActiveLow;
     uint8_t ledBrightness;  // RGB only, 1..255
+
+    // ---- v13 ----
+    uint8_t privacy;      // QueryLog::setPrivacy level
+    uint16_t rateLimit;   // queries per minute per client, 0 = off
 };
 
 enum TxPower : uint8_t { TxAuto = 0, TxFull = 1, TxReduced = 2 };
@@ -88,7 +92,7 @@ class Config {
 public:
     // Bump when fields are appended to Settings, and add the previous version's
     // byte length to Config::validBytes() so stored settings migrate.
-    static constexpr uint16_t kVersion = 12;
+    static constexpr uint16_t kVersion = 13;
 
     esp_err_t load();  // defaults if missing / older version
     Settings get();    // copy, thread-safe (~1 KB: avoid on small stacks)

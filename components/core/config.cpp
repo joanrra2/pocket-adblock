@@ -120,6 +120,7 @@ void Config::applyDefaults(Settings& s)
     copyStr(s.dotHost, "dns.quad9.net");
     s.ledPin = -1;
     s.ledBrightness = 24;
+    s.rateLimit = 1000;  // Pi-hole's default: 1000 queries per minute per client
 }
 
 // Bytes of Settings that were meaningful in a given stored version. Fields are
@@ -137,6 +138,7 @@ size_t Config::validBytes(uint16_t version)
         case 9: return offsetof(Settings, safeSearch);
         case 10: return offsetof(Settings, dot);
         case 11: return offsetof(Settings, ledKind);
+        case 12: return offsetof(Settings, privacy);
         case kVersion: return sizeof(Settings);
         default:
             // Newer firmware wrote it (rollback / downgrade): fields are only ever

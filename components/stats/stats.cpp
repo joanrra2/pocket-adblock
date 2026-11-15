@@ -226,11 +226,13 @@ size_t TopDomains::topLocked(bool blocked, Item* out, size_t max) const
 
 void QueryLog::add(const ClientAddr& addr, const char* domain, bool blocked)
 {
+    const uint8_t privacy = privacy_;
+    if (privacy >= 1) domain = "(hidden)";
     LockGuard g(mu_);
-    top_.recordLocked(domain, blocked);
+    if (privacy == 0) top_.recordLocked(domain, blocked);
     QueryEntry& e = ring_[head_];
     e.uptime = uptimeSeconds();
-    e.addr = addr;
+    e.addr = privacy >= 2 ? ClientAddr{} : addr;
     e.blocked = blocked;
     strncpy(e.domain, domain, sizeof(e.domain) - 1);
     e.domain[sizeof(e.domain) - 1] = '\0';

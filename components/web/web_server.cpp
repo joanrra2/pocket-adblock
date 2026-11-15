@@ -360,6 +360,11 @@ ClientInfo sClientSnap[ClientTable::kCapacity];  // httpd task only (shared by t
 
 esp_err_t WebServer::getClients(httpd_req_t* req)
 {
+    if (d_.log.privacy() >= 2) {  // privacy mode: clients are not shown
+        JsonWriter j(req);
+        j.beginArray().endArray();
+        return j.finish();
+    }
     ClientInfo* snap = sClientSnap;
     char addr[46];
     const size_t n = d_.clients.snapshot(snap, ClientTable::kCapacity);
@@ -453,7 +458,7 @@ esp_err_t WebServer::getTop(httpd_req_t* req)
         for (size_t i = 0; i < n; i++) j.beginObject().str("name", items[i].name).num("count", items[i].count).endObject();
         j.endArray();
     }
-    const size_t n = d_.clients.snapshot(sClientSnap, ClientTable::kCapacity);
+    const size_t n = d_.log.privacy() >= 2 ? 0 : d_.clients.snapshot(sClientSnap, ClientTable::kCapacity);
     size_t order[5];
     size_t k = 0;
     for (size_t i = 0; i < n; i++) {  // top 5 by total queries
@@ -598,6 +603,7 @@ esp_err_t WebServer::getSettings(httpd_req_t* req)
         .boolean("guardCanary", s.bypassGuard & 1)
         .boolean("guardEncrypted", s.bypassGuard & 2)
         .boolean("cnameCheck", s.cnameCheck)
+        .num("privacy", s.privacy)
         .boolean("safeGoogle", s.safeSearch & 1)
         .boolean("safeBing", s.safeSearch & 2)
         .str("safeYoutube", (s.safeSearch & 8) ? "strict" : (s.safeSearch & 4) ? "moderate" : "off")
@@ -732,8 +738,15 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         field(form, "youtube", yt, sizeof(yt));
         const uint8_t ss = static_cast<uint8_t>((g[0] == '1' ? 1 : 0) | (bi[0] == '1' ? 2 : 0) |
                                                 (strcmp(yt, "moderate") == 0 ? 4 : 0) | (strcmp(yt, "strict") == 0 ? 8 : 0));
-        d_.cfg.modify([ss](Settings& s) { s.safeSearch = ss; });
+        char pv[4] = "";
+        field(form, "privacy", pv, sizeof(pv));
+        const uint8_t privacy = static_cast<uint8_t>(pv[0] == '2' ? 2 : pv[0] == '1' ? 1 : 0);
+        d_.cfg.modify([ss, privacy](Settings& s) {
+            s.safeSearch = ss;
+            s.privacy = privacy;
+        });
         d_.dns.setSafeSearch(ss);
+        d_.log.setPrivacy(privacy);
         return sendOk(req);
     }
     if (strcmp(section, "update") == 0) {
