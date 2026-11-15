@@ -527,7 +527,7 @@ esp_err_t WebServer::getHistory(httpd_req_t* req)
 
 namespace {
 constexpr const char* kBackupKeys[] = {"settings", "custom_block", "custom_allow", "local_dns",
-                                       "wol_hosts", "banned", "nofilter"};
+                                       "wol_hosts2", "wol_hosts", "banned", "nofilter"};
 constexpr size_t kBackupMax = 64 * 1024;
 
 void clearSecrets(Settings& s)
@@ -601,6 +601,11 @@ esp_err_t WebServer::postRestore(httpd_req_t* req)
         got += static_cast<size_t>(r);
     }
     body[got] = '\0';
+    // Files edited on Windows have CRLF line ends: drop the CRs.
+    size_t kept = 0;
+    for (size_t r = 0; r < got; r++)
+        if (body[r] != '\r') body[kept++] = body[r];
+    body[kept] = '\0';
     if (!strstr(body, "\nformat=1\n") && strncmp(body, "format=1\n", 9) != 0) {
         free(body);
         return sendError(req, "400 Bad Request", "not a Pocket AdBlock backup (format=1 missing)");
@@ -614,7 +619,8 @@ esp_err_t WebServer::postRestore(httpd_req_t* req)
     } items[sizeof(kBackupKeys) / sizeof(kBackupKeys[0])] = {};
     size_t count = 0;
     const char* why = nullptr;
-    for (char* line = strtok(body, "\n"); line && !why; line = strtok(nullptr, "\n")) {
+    char* save = nullptr;
+    for (char* line = strtok_r(body, "\n", &save); line && !why; line = strtok_r(nullptr, "\n", &save)) {
         char* eq = strchr(line, '=');
         if (!eq || line[0] == '#') continue;
         *eq = '\0';
@@ -1215,6 +1221,10 @@ esp_err_t WebServer::getWol(httpd_req_t* req)
             .mac("mac", snap[i].host.mac)
             .ip("ip", snap[i].host.ip)
             .boolean("online", snap[i].online)
+            .num("port", snap[i].host.port)
+            .boolean("waking", snap[i].waking)
+            .str("result", snap[i].result)
+            .num("resultAgo", snap[i].resultAt ? static_cast<int64_t>(now - snap[i].resultAt) : -1)
             .num("wokeAgo", snap[i].lastWake ? static_cast<int64_t>(now - snap[i].lastWake) : -1)
             .endObject();
     }
@@ -1224,17 +1234,19 @@ esp_err_t WebServer::getWol(httpd_req_t* req)
 
 esp_err_t WebServer::postWol(httpd_req_t* req)
 {
-    char form[kFormMax], action[16], name[32] = "", macStr[24] = "", ipStr[20] = "";
+    char form[kFormMax], action[16], name[32] = "", macStr[24] = "", ipStr[20] = "", portStr[8] = "";
     if (readForm(req, form, sizeof(form)) < 0 || !field(form, "action", action, sizeof(action)))
         return sendError(req, "400 Bad Request", "action is required");
     field(form, "name", name, sizeof(name));
     field(form, "mac", macStr, sizeof(macStr));
     field(form, "ip", ipStr, sizeof(ipStr));
+    field(form, "port", portStr, sizeof(portStr));
 
     if (strcmp(action, "wake") == 0) {
         if (name[0]) {
-            esp_err_t err = d_.wol.wake(name);
-            return err == ESP_OK ? sendOk(req, "magic packet sent")
+            esp_err_t err = d_.wol.wakeAndVerify(name);
+            if (err == ESP_ERR_INVALID_STATE) return sendOk(req, "already online");
+            return err == ESP_OK ? sendOk(req, "waking; checking until it answers")
                                  : sendError(req, "404 Not Found", "unknown host");
         }
         uint8_t mac[6];
@@ -1247,6 +1259,10 @@ esp_err_t WebServer::postWol(httpd_req_t* req)
         copyStr(h.name, name);
         if (!parseMac(macStr, h.mac)) return sendError(req, "400 Bad Request", "valid MAC required");
         if (ipStr[0] && !parseIp4(ipStr, h.ip)) return sendError(req, "400 Bad Request", "invalid IP");
+        const unsigned long port = strtoul(portStr, nullptr, 10);
+        if (port > 65535) return sendError(req, "400 Bad Request", "invalid port");
+        if (port && !h.ip) return sendError(req, "400 Bad Request", "a port check needs the IP");
+        h.port = static_cast<uint16_t>(port);
         esp_err_t err = d_.wol.add(h);
         if (err == ESP_ERR_INVALID_ARG) return sendError(req, "400 Bad Request", "name: no spaces, '/', '+' or '#'");
         if (err == ESP_ERR_NO_MEM) return sendError(req, "409 Conflict", "host list is full");

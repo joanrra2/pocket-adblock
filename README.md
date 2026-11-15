@@ -234,8 +234,16 @@ colours so you can confirm. Pins used by flash or PSRAM are refused. Off by defa
 
 ## Wake-on-LAN
 
-Add a host under **Wake-on-LAN** (name, MAC, optional IP for the online indicator)
-and press **Wake**. The PC needs wired Ethernet with WoL enabled in BIOS/UEFI and on
+Add a host under **Wake-on-LAN** (name, MAC, optional IP and port) and press **Wake**.
+
+- **Online check:** with an IP the device checks the host every 30 s, by ping, or by
+  TCP connect when you give a port (e.g. 3389 Remote Desktop, 22 SSH, 445 file
+  sharing). The port check is more reliable (Windows drops ping by default) and
+  means the service is ready. A host goes offline only after two failed checks.
+- **Wake and verify:** *Wake* (also from MQTT / Home Assistant) checks first and does
+  nothing if the host is already up; otherwise it sends the magic packets, checks
+  every 3 s (resending at 20 s and 60 s) and reports "online after N s" or "no answer
+  after 3 min". The PC needs wired Ethernet with WoL enabled in BIOS/UEFI and on
 its network adapter.
 
 **From anywhere:** set an MQTT broker in Settings (TLS recommended, e.g. a free

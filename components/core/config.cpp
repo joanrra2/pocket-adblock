@@ -74,6 +74,17 @@ esp_err_t saveBlob(const char* key, const void* data, size_t len)
     return err;
 }
 
+esp_err_t eraseKey(const char* key)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(kNamespace, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_erase_key(h, key);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+
 size_t blobSize(const char* key)
 {
     nvs_handle_t h;

@@ -166,7 +166,8 @@ inline bool readName(const uint8_t* pkt, size_t len, size_t i, char* out, size_t
             return true;
         }
         if ((l & 0xC0) == 0xC0) {
-            if (i + 1 >= len || ++jumps > 16) return false;
+            if (i + 1 >= len) return false;
+            if (++jumps > 16) return false;
             i = static_cast<size_t>(l & 0x3F) << 8 | pkt[i + 1];
             continue;
         }

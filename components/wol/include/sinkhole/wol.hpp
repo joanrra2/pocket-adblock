@@ -18,13 +18,19 @@ namespace sinkhole {
 struct WolHost {
     char name[32];
     uint8_t mac[6];
-    uint32_t ip;  // optional, network order; enables the online probe
+    uint32_t ip;    // optional, network order; enables the online check
+    uint16_t port;  // optional TCP port (3389 RDP, 22 SSH...): online = it accepts; 0 = ping
 };
 
 struct WolHostState {
     WolHost host;
     bool online;
-    uint32_t lastWake;  // uptime seconds, 0 = never
+    uint32_t lastWake;      // uptime seconds, 0 = never
+    bool waking;            // wake-and-verify in progress
+    uint32_t wakeDeadline;  // uptime seconds
+    char result[48];        // last wake result, e.g. "online after 41 s"
+    uint32_t resultAt;      // uptime seconds, 0 = none
+    uint8_t misses;         // failed checks in a row (offline after 2)
 };
 
 class WolService {
@@ -57,6 +63,12 @@ public:
     }
 
     esp_err_t wake(const char* name);
+    // Checks first (no packet when already online), wakes, then checks every
+    // 3 s (resending at 20 s and 60 s) until online or kVerifySeconds pass.
+    // The outcome is in WolHostState::result. Hosts without an IP just wake.
+    // ESP_ERR_INVALID_STATE: already online, nothing sent.
+    esp_err_t wakeAndVerify(const char* name);
+    static constexpr uint32_t kVerifySeconds = 180;
     esp_err_t wakeMac(const uint8_t mac[6]);
 
     // Notified after each probe round (used by the MQTT bridge).
@@ -67,6 +79,9 @@ private:
     static void taskEntry(void* arg);
     void run();
     bool ping(uint32_t ip);
+    static bool tcpOpen(uint32_t ip, uint16_t port);
+    bool check(const WolHost& h) { return h.port ? tcpOpen(h.ip, h.port) : ping(h.ip); }
+    void setResultLocked(int i, const char* text);
     esp_err_t saveLocked();
     int findLocked(const char* name);
 

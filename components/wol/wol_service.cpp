@@ -1,5 +1,8 @@
 #include <cstring>
 
+#include <cerrno>
+#include <fcntl.h>
+
 #include "esp_log.h"
 #include "esp_random.h"
 #include "lwip/sockets.h"
@@ -10,7 +13,13 @@ namespace sinkhole {
 
 namespace {
 constexpr const char* TAG = "wol";
-constexpr const char* kHostsKey = "wol_hosts";
+constexpr const char* kHostsKey = "wol_hosts2";   // WolHost with port
+constexpr const char* kOldHostsKey = "wol_hosts";  // before ports: migrated at boot
+struct OldWolHost {
+    char name[32];
+    uint8_t mac[6];
+    uint32_t ip;
+};
 constexpr uint16_t kWolPort = 9;
 constexpr uint32_t kProbeIntervalMs = 30 * 1000;
 
@@ -40,6 +49,23 @@ esp_err_t WolService::begin()
         LockGuard g(mu_);
         WolHost stored[kCapacity];
         size_t n = 0;
+        // Older firmware (or an old backup restored) wrote hosts without a
+        // port under the old key: convert them and drop the old entry.
+        if (nvs::blobSize(kOldHostsKey)) {
+            OldWolHost old[kCapacity];
+            nvs::loadBlob(kOldHostsKey, old, sizeof(old), &n);
+            const size_t m = n / sizeof(OldWolHost);
+            for (size_t i = 0; i < m; i++) {
+                stored[i] = WolHost{};
+                memcpy(stored[i].name, old[i].name, sizeof(old[i].name));
+                memcpy(stored[i].mac, old[i].mac, 6);
+                stored[i].ip = old[i].ip;
+            }
+            nvs::saveBlob(kHostsKey, stored, m * sizeof(WolHost));
+            nvs::eraseKey(kOldHostsKey);
+            ESP_LOGI(TAG, "migrated %u hosts", static_cast<unsigned>(m));
+        }
+        n = 0;
         nvs::loadBlob(kHostsKey, stored, sizeof(stored), &n);
         count_ = n / sizeof(WolHost);
         for (size_t i = 0; i < count_; i++) {
@@ -115,6 +141,69 @@ esp_err_t WolService::wake(const char* name)
     return wakeMac(mac);
 }
 
+void WolService::setResultLocked(int i, const char* text)
+{
+    copyStr(hosts_[i].result, text);
+    hosts_[i].resultAt = uptimeSeconds();
+}
+
+esp_err_t WolService::wakeAndVerify(const char* name)
+{
+    WolHost h;
+    {
+        LockGuard g(mu_);
+        const int i = findLocked(name);
+        if (i < 0) return ESP_ERR_NOT_FOUND;
+        if (hosts_[i].waking) return ESP_OK;  // already on it
+        h = hosts_[i].host;
+    }
+    if (!h.ip) return wake(name);  // nothing to verify against
+    if (check(h) || check(h)) {  // one lost packet must not trigger a wake
+        LockGuard g(mu_);
+        const int i = findLocked(name);
+        if (i >= 0) {
+            hosts_[i].online = true;
+            setResultLocked(i, "already online");
+        }
+        return ESP_ERR_INVALID_STATE;  // nothing sent: it is up
+    }
+    const esp_err_t err = wake(name);
+    LockGuard g(mu_);
+    const int i = findLocked(name);
+    if (i >= 0 && err == ESP_OK) {
+        hosts_[i].waking = true;
+        hosts_[i].wakeDeadline = uptimeSeconds() + kVerifySeconds;
+        setResultLocked(i, "waking");
+    }
+    return err;
+}
+
+// Non-blocking connect with a 1 s limit: true when the port accepts.
+bool WolService::tcpOpen(uint32_t ip, uint16_t port)
+{
+    int s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s < 0) return false;
+    fcntl(s, F_SETFL, fcntl(s, F_GETFL, 0) | O_NONBLOCK);
+    sockaddr_in to{};
+    to.sin_family = AF_INET;
+    to.sin_port = htons(port);
+    to.sin_addr.s_addr = ip;
+    bool open = connect(s, reinterpret_cast<sockaddr*>(&to), sizeof(to)) == 0;
+    if (!open && errno == EINPROGRESS) {
+        fd_set wr;
+        FD_ZERO(&wr);
+        FD_SET(s, &wr);
+        timeval tv{1, 0};
+        if (select(s + 1, nullptr, &wr, nullptr, &tv) > 0) {
+            int err = 0;
+            socklen_t len = sizeof(err);
+            open = getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0;
+        }
+    }
+    close(s);
+    return open;
+}
+
 esp_err_t WolService::wakeMac(const uint8_t mac[6])
 {
     // Magic packet: 6 x 0xFF followed by the MAC 16 times.
@@ -187,30 +276,61 @@ void WolService::taskEntry(void* arg)
     static_cast<WolService*>(arg)->run();
 }
 
+// Every host with an IP is checked every kProbeIntervalMs; a host being
+// woken is checked every 3 s until it answers or its deadline passes.
 void WolService::run()
 {
+    uint32_t tick = 0;
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(kProbeIntervalMs));
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        tick++;
         if (!wifi_.connected()) continue;
+        const bool routine = tick % (kProbeIntervalMs / 1000) == 0;
         for (size_t i = 0; i < kCapacity; i++) {
             WolHost h;
+            bool waking;
+            uint32_t since = 0;
             {
                 LockGuard g(mu_);
                 if (i >= count_) break;
                 h = hosts_[i].host;
+                waking = hosts_[i].waking;
+                since = hosts_[i].lastWake;
             }
-            if (!h.ip) continue;
-            const bool up = ping(h.ip);
+            if (!h.ip || !(routine || (waking && tick % 3 == 0))) continue;
+            const uint32_t now = uptimeSeconds();
+            const uint32_t age = now - since;
+            if (waking && ((age >= 20 && age < 23) || (age >= 60 && age < 63))) {
+                uint8_t mac[6];
+                memcpy(mac, h.mac, 6);
+                wakeMac(mac);  // some network cards miss the first packets
+            }
+            const bool up = check(h);
             bool changed = false;
+            bool state = up;
             {
                 LockGuard g(mu_);
                 int j = findLocked(h.name);
                 if (j >= 0) {
-                    changed = hosts_[j].online != up;
-                    hosts_[j].online = up;
+                    // Offline only after two failed checks in a row (a lost
+                    // packet or a busy service must not flip the state).
+                    hosts_[j].misses = up ? 0 : static_cast<uint8_t>(hosts_[j].misses < 255 ? hosts_[j].misses + 1 : 255);
+                    const bool now_online = up || (hosts_[j].online && hosts_[j].misses < 2);
+                    changed = hosts_[j].online != now_online;
+                    hosts_[j].online = now_online;
+                    state = now_online;
+                    if (hosts_[j].waking && up) {
+                        char text[48];
+                        snprintf(text, sizeof(text), "online after %u s", static_cast<unsigned>(now - since));
+                        hosts_[j].waking = false;
+                        setResultLocked(j, text);
+                    } else if (hosts_[j].waking && now >= hosts_[j].wakeDeadline) {
+                        hosts_[j].waking = false;
+                        setResultLocked(j, "no answer after 3 min");
+                    }
                 }
             }
-            if (changed && listener_) listener_(listenerCtx_, h.name, up);
+            if (changed && listener_) listener_(listenerCtx_, h.name, state);
         }
     }
 }

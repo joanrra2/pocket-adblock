@@ -279,7 +279,7 @@ void MqttBridge::handleEvent(int32_t id, void* data)
         char* slash = strchr(name, '/');
         if (!slash || strcmp(slash, "/set") != 0) return;
         *slash = '\0';
-        esp_err_t err = wol_.wake(name);
+        esp_err_t err = wol_.wakeAndVerify(name);
         ESP_LOGI(TAG, "remote wake '%s': %s", name, esp_err_to_name(err));
     }
 }
