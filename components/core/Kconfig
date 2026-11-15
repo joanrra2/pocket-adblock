@@ -65,6 +65,14 @@ menu "DNS Sinkhole"
             Empty = the chip target (esp32c3, esp32s3, ...). Board profiles set
             their own id, e.g. esp32s3-octal-flash.
 
+    config SINKHOLE_FLAVOUR
+        string "Edition (set from the features file, don't edit)"
+        default "custom"
+        help
+            lite / plus for the release editions (flavours/*.cfg), custom for
+            builds made with FEATURES.cfg. Release images are looked up as
+            <board> (lite) or <board>-plus; custom builds never auto-install.
+
     config SINKHOLE_MAX_CLIENTS
         int "Tracked DNS clients"
         default 64

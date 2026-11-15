@@ -15,11 +15,4 @@ CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 # ~500k domains each); that avoids 32-bit flash addressing on 32 MB parts.
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 
-# These modules carry 8-16 MB of PSRAM: keep a long query history there.
-CONFIG_SINKHOLE_QUERY_HISTORY_EXTENDED=y
-CONFIG_SINKHOLE_QUERY_HISTORY_ENTRIES=4096
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_8mb.csv"
-# Encrypted upstream: the TLS session fits easily next to 8 MB of PSRAM.
-CONFIG_SINKHOLE_DNS_OVER_TLS=y
-# Top domains statistics in PSRAM (2048 counters, ~120 KB).
-CONFIG_SINKHOLE_TOP_DOMAINS=y

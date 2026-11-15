@@ -234,6 +234,7 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
     JsonWriter j(req);
     j.beginObject();
     j.str("version", FirmwareUpdater::version());
+    j.str("edition", Updater::flavour());
     j.str("hostname", s.hostname);
     j.num("uptime", now);
     j.num("freeHeap", static_cast<int64_t>(esp_get_free_heap_size()));
@@ -329,7 +330,7 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
 
     const FirmwareCheck fc = d_.updater.firmwareStatus();
     j.beginObject("firmware")
-        .str("board", Updater::boardId())
+        .str("board", Updater::imageKey())
         .str("latest", fc.latest)
         .boolean("available", fc.available)
         .boolean("installing", fc.installing)

@@ -72,17 +72,31 @@ idf.py -B build-s3 -D SDKCONFIG=build-s3/sdkconfig \
   set-target esp32s3 build flash monitor
 ```
 
-### Build options (`idf.py menuconfig` → DNS Sinkhole)
+### Editions and optional features
 
-Features that cost extra RAM are compile-time options, off by default. Board
-profiles in `boards/` turn on what suits that hardware.
+Features that cost extra RAM are chosen at build time in **[`FEATURES.cfg`](FEATURES.cfg)**
+at the top of the project: one `ENABLE_… = 1/0` line each, with its RAM cost.
+Edit it and rebuild; it wins over `menuconfig` for these options.
 
-| Option | Default | RAM | Recommended for |
+Releases come in two editions, built from [`flavours/`](flavours) and each kept up to
+date by the online updater:
+
+| Edition | Extras | Boards | Release images / update key |
 |---|---|---|---|
-| `SINKHOLE_QUERY_HISTORY_EXTENDED` (+ `_ENTRIES`, 2048) | off (32 queries) | 76 B per entry, PSRAM | boards with PSRAM (on in the octal S3 profile, 4096) |
-| `SINKHOLE_DNS_OVER_TLS` | off (on in the octal S3 profile) | ~26 KB internal while connected (closes after 2 min idle) + 6 KB task | boards with PSRAM; not the C3. Encrypted upstream (port 853); on the S3 uncached lookups were no slower than plain UDP |
-| `SINKHOLE_TOP_DOMAINS` (+ `_ENTRIES`, 2048) | off (on in the octal S3 profile) | ~60 B per counter, PSRAM only (~120 KB) | boards with PSRAM; turns itself off without it. Top allowed / blocked domains on the overview (top clients are always shown) |
-| `SINKHOLE_BLOOM_FILTER` (+ `_BITS_PER_ENTRY`, 10) | off | ~1.25 B per slot entry: ~270 KB (4 MB layout), ~1 MB (8 MB layout) | boards with PSRAM; not the C3 (it needs that RAM for HTTPS). On an S3: not-listed lookups 80.8 → 54.7 µs |
+| **Lite** | none | every board (ESP32-C3, ESP32-C6, boards without PSRAM) | `pocket-adblock-<board>-…` / `<board>` |
+| **Plus** | all of the table below | ESP32-S3 with PSRAM, ESP32-WROVER | `pocket-adblock-<board>-plus-…` / `<board>-plus` |
+
+A device only installs updates of its own edition. Builds made from `FEATURES.cfg`
+are *custom*: they never pick up release images by themselves (manual upload in the
+web UI still works). To switch edition, flash the other one once (browser installer
+or firmware upload).
+
+| `FEATURES.cfg` | Editions | RAM | Recommended for |
+|---|---|---|---|
+| `ENABLE_LONG_HISTORY` (+ `LONG_HISTORY_ENTRIES`, 4096) | Lite off (32 queries), Plus on | 76 B per entry, PSRAM | boards with PSRAM (on in the octal S3 profile, 4096) |
+| `ENABLE_DNS_OVER_TLS` | Lite off, Plus on | ~26 KB internal while connected (closes after 2 min idle) + 6 KB task | boards with PSRAM; not the C3. Encrypted upstream (port 853); on the S3 uncached lookups were no slower than plain UDP |
+| `ENABLE_TOP_DOMAINS` (+ `TOP_DOMAINS_ENTRIES`, 2048) | Lite off, Plus on | ~60 B per counter, PSRAM only (~120 KB) | boards with PSRAM; turns itself off without it. Top allowed / blocked domains on the overview (top clients are always shown) |
+| `ENABLE_BLOOM_FILTER` (bits per entry: `menuconfig`, 10) | Lite off, Plus on | ~1.25 B per slot entry: ~270 KB (4 MB layout), ~1 MB (8 MB layout) | boards with PSRAM; not the C3 (it needs that RAM for HTTPS). On an S3: not-listed lookups 80.8 → 54.7 µs |
 
 Prebuilt images for every board are attached to each
 [release](../../releases): flash `*-full.bin` at `0x0` the first time.

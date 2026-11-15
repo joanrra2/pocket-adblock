@@ -121,6 +121,18 @@ const char* Updater::boardId()
     return CONFIG_SINKHOLE_BOARD_ID[0] ? CONFIG_SINKHOLE_BOARD_ID : CONFIG_IDF_TARGET;
 }
 
+const char* Updater::imageKey()
+{
+    static char key[64];
+    if (!key[0]) {
+        if (strcmp(CONFIG_SINKHOLE_FLAVOUR, "lite") == 0)
+            snprintf(key, sizeof(key), "%s", boardId());
+        else
+            snprintf(key, sizeof(key), "%s-%s", boardId(), CONFIG_SINKHOLE_FLAVOUR);
+    }
+    return key;
+}
+
 int Updater::compareVersions(const char* a, const char* b)
 {
     if (*a == 'v') a++;
@@ -270,9 +282,12 @@ void Updater::checkFirmware()
         err = ESP_ERR_INVALID_RESPONSE;
         snprintf(why, sizeof(why), "manifest has no version");
     }
-    if (err == ESP_OK && !jsonString(manifest_, boardId(), image, sizeof(image))) {
+    if (err == ESP_OK && !jsonString(manifest_, imageKey(), image, sizeof(image))) {
         err = ESP_ERR_NOT_FOUND;
-        snprintf(why, sizeof(why), "no image for board %s in the manifest", boardId());
+        if (strcmp(flavour(), "custom") == 0)
+            snprintf(why, sizeof(why), "custom build: install updates manually");
+        else
+            snprintf(why, sizeof(why), "no image for %s in the manifest", imageKey());
     }
 
     LockGuard g(mu_);
