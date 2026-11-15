@@ -127,7 +127,7 @@ def main():
         print(f'{a.label} {name}: {json.dumps(res[name])}', flush=True)
         time.sleep(1)
     if a.json:
-        with open(a.json, 'w') as f:
+        with open(a.json, 'w') as f:  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
             json.dump(res, f, indent=2)
 
 

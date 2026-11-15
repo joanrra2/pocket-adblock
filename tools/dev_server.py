@@ -22,7 +22,7 @@ def make_handler(device, auth):
         def _proxy(self, method):
             length = int(self.headers.get('Content-Length') or 0)
             body = self.rfile.read(length) if length else None
-            req = urllib.request.Request(f'http://{device}{self.path}', data=body, method=method)
+            req = urllib.request.Request(f'http://{device}{self.path}', data=body, method=method)  # NOSONAR - dev-only proxy on 127.0.0.1 to the user's own device, which serves plain HTTP on the LAN; path checked above
             req.add_header('Authorization', auth)
             for h in ('Content-Type', 'X-Requested-With'):
                 if self.headers.get(h):
@@ -41,7 +41,7 @@ def make_handler(device, auth):
             self.wfile.write(data)
 
         def do_GET(self):
-            if self.path.startswith('/api/'):
+            if self.path.startswith('/api/') and '..' not in self.path and '//' not in self.path[1:]:
                 return self._proxy('GET')
             with open(os.path.join(ROOT, 'index.html'), 'rb') as f:
                 data = f.read()
@@ -70,7 +70,7 @@ def main():
     auth = 'Basic ' + base64.b64encode(cred.encode()).decode()
     srv = http.server.ThreadingHTTPServer(('127.0.0.1', a.port), make_handler(a.device, auth))
     print(f'UI on http://localhost:{a.port}/  ->  API on http://{a.device}/')
-    srv.serve_forever()
+    srv.serve_forever()  # NOSONAR - dev-only server bound to 127.0.0.1
 
 
 if __name__ == '__main__':

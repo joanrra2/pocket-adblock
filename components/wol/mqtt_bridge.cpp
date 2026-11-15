@@ -118,7 +118,7 @@ void MqttBridge::deviceJson(char* out, size_t cap)
 {
     snprintf(out, cap,
              "\"avty_t\":\"%s\",\"dev\":{\"ids\":[\"%s\"],\"name\":\"Pocket AdBlock\",\"mf\":\"Pocket AdBlock\","
-             "\"mdl\":\"%s\",\"sw\":\"%s\",\"cu\":\"http://%s.local/\"}",
+             "\"mdl\":\"%s\",\"sw\":\"%s\",\"cu\":\"http://%s.local/\"}",  // NOSONAR the device UI is plain HTTP on the LAN (TLS would cost ~40 KB RAM)
              statusTopic_, nodeId_, hooks_.model, hooks_.version, hostname_);
 }
 

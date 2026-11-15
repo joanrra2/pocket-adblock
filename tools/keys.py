@@ -24,16 +24,16 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 def write_key(key, path):
     if os.path.exists(path):
         sys.exit(f'{path} exists; not overwriting a key')
-    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
     pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                             serialization.NoEncryption())
-    with open(path, 'wb') as f:
+    with open(path, 'wb') as f:  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
         f.write(pem)
     print(f'wrote {path}')
 
 
 def blocklist_pubkey_line(path):
-    with open(path, 'rb') as f:
+    with open(path, 'rb') as f:  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
         key = serialization.load_pem_private_key(f.read(), password=None)
     point = key.public_key().public_bytes(serialization.Encoding.X962,
                                           serialization.PublicFormat.UncompressedPoint)

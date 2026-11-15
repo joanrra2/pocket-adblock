@@ -58,7 +58,7 @@ def norm(d: str) -> str:
 
 def read_source(src: str) -> str:
     if os.path.exists(src):
-        with open(src, errors='ignore') as f:
+        with open(src, errors='ignore') as f:  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
             return f.read()
     print(f'  downloading {src} ...', file=sys.stderr)
     with urllib.request.urlopen(src, timeout=180) as r:
@@ -163,7 +163,7 @@ def main():
     hashes = sorted({fnv(d.encode()) for d in domains})
     payload = payload_v1(hashes) if version == 1 else payload_v2(hashes)
 
-    with open(out, 'wb') as f:
+    with open(out, 'wb') as f:  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
         if not raw:
             flags_byte = 0x01 if sign_key else 0x00  # reserved[0] bit 0 = signed
             header = struct.pack('<4sBBHII32sB15s', b'SHBL', version, HASH_BYTES, 64, len(hashes),

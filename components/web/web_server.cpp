@@ -127,7 +127,7 @@ esp_err_t WebServer::notFound(httpd_req_t* req, httpd_err_code_t err)
 {
     auto* self = static_cast<WebServer*>(httpd_get_global_user_ctx(req->handle));
     if (self->d_.dns.captive()) {
-        char loc[32] = "http://";
+        char loc[32] = "http://";  // NOSONAR captive portal: OSes probe and follow plain HTTP only
         formatIp4(self->d_.wifi.apIp(), loc + 7);
         strcat(loc, "/");
         httpd_resp_set_status(req, "302 Found");
@@ -709,7 +709,7 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
     if (strcmp(section, "update") == 0) {
         field(form, "url", a, sizeof(a));
         field(form, "hours", b, 8);
-        if (a[0] && strncmp(a, "https://", 8) != 0 && strncmp(a, "http://", 7) != 0)
+        if (a[0] && strncmp(a, "https://", 8) != 0 && strncmp(a, "http://", 7) != 0)  // NOSONAR http:// allowed for LAN mirrors; lists are SHA-256/signature checked, firmware auto-install needs a signed build
             return sendError(req, "400 Bad Request", "URL must start with https://");
         const unsigned long hours = strtoul(b, nullptr, 10);
         d_.cfg.modify([&](Settings& s) {
@@ -737,7 +737,7 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
     if (strcmp(section, "fw") == 0) {
         field(form, "url", a, sizeof(Settings::fwManifestUrl));
         field(form, "auto", b, 4);
-        if (a[0] && strncmp(a, "https://", 8) != 0 && strncmp(a, "http://", 7) != 0)
+        if (a[0] && strncmp(a, "https://", 8) != 0 && strncmp(a, "http://", 7) != 0)  // NOSONAR http:// allowed for LAN mirrors; lists are SHA-256/signature checked, firmware auto-install needs a signed build
             return sendError(req, "400 Bad Request", "URL must start with https://");
         const bool autoOn = b[0] == '1';
         if (autoOn && !Updater::autoInstallAllowed())

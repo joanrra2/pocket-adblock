@@ -28,7 +28,7 @@ def main():
             images[m.group(1)] = f'{a.base_url.rstrip("/")}/{name}'
     if not images:
         raise SystemExit(f'no *-ota.bin images in {a.bins}')
-    with open(a.out, 'w') as f:
+    with open(a.out, 'w') as f:  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
         json.dump({'version': a.version.lstrip('v'), 'images': images}, f, indent=2)
     print(f'manifest {a.version}: {", ".join(images)} -> {a.out}')
 

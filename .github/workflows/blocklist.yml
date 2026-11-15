@@ -8,11 +8,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # update the "blocklist" release
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,7 +26,7 @@ jobs:
         run: |
           sign=""
           if [ -n "$BL_KEY" ]; then          # signed lists when the secret exists
-            pip install --quiet cryptography
+            pip install --quiet --only-binary :all: "cryptography==50.0.2"
             printf '%s\n' "$BL_KEY" > /tmp/bl.pem && sign="--sign=/tmp/bl.pem"
           fi
           python3 tools/build_blocklist.py blocklist.bin $sign | tee build.log   # compact SHBL v2

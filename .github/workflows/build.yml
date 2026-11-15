@@ -6,8 +6,9 @@ on:
     tags: ["v*"]
   pull_request:
 
+# Read-only by default; only the release job may write (creates the release).
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   host-tests:
@@ -60,7 +61,8 @@ jobs:
           fi
           echo "extra=$extra" >> "$GITHUB_OUTPUT"
       - name: Build
-        uses: espressif/esp-idf-ci-action@v1
+        # Pinned to a commit: this action builds the images everyone flashes (v1 branch, 2024-11-08).
+        uses: espressif/esp-idf-ci-action@9d38657f3d789ca759b2b37aaf5ceffbc42c4f0d # v1
         with:
           esp_idf_version: v6.1
           target: ${{ matrix.target }}
@@ -83,6 +85,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [host-tests, firmware]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # create the GitHub release
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -109,6 +113,7 @@ jobs:
     needs: [firmware]
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:
@@ -120,8 +125,16 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      # The flasher is served from this site, not a CDN: pinned version, checked
+      # against the npm registry's published integrity before it is used.
+      - name: ESP Web Tools (pinned, integrity-checked)
+        run: |
+          npm pack esp-web-tools@10.4.0 --silent
+          echo "3pwkeFFm5Fj7UQo8SJNYK5RXrtNCpq6X9QoI6bMT4GBZWgrJqjn0YvM9ihG74BtMoSFYXfmDtkehuxe50PTMPQ==  esp-web-tools-10.4.0.tgz" > ewt.sha512b64
+          python3 -c "import base64,hashlib;exp,f=open('ewt.sha512b64').read().split();got=base64.b64encode(hashlib.sha512(open(f,'rb').read()).digest()).decode();assert got==exp,('integrity mismatch',got)"
+          tar xzf esp-web-tools-10.4.0.tgz
       - name: Assemble site
-        run: python3 tools/make_installer.py --bins dist --version "${GITHUB_REF_NAME#v}" --out _site --repo "https://github.com/${GITHUB_REPOSITORY}"
+        run: python3 tools/make_installer.py --bins dist --version "${GITHUB_REF_NAME#v}" --out _site --repo "https://github.com/${GITHUB_REPOSITORY}" --web-tools package/dist/web
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
