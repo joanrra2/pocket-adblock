@@ -290,6 +290,31 @@ Plain HTTP on the LAN, the same trust model as the original project. Every API c
 needs HTTP Basic auth, and every change also needs an `X-Requested-With` header, which
 blocks CSRF via cached credentials. Change the default passwords. The setup AP uses WPA2.
 
+## Pocket AdBlock or Pi-hole?
+
+Both forward allowed queries to an upstream resolver (Pi-hole's default too) and
+answer blocked names locally. Measured from a PC over Wi-Fi, the same name 200 times:
+
+| Who answers | p50 | p99 |
+|---|---|---|
+| Pocket AdBlock (ESP32-S3, cached answer) | 2.0 ms | 7.1 ms |
+| Pocket AdBlock, blocked name | 1.9 ms | 5.8 ms |
+| The home router's DNS (wired) | 1.1 ms | 9.7 ms |
+| Quad9 directly | 13.0 ms | 13.2 ms |
+
+The Wi-Fi hop costs about 1 ms against a wired box; repeat lookups are ~6x faster
+than asking a public resolver. Lists update by themselves over Wi-Fi (no reflashing):
+a daily list costs one download when it changed and a 64-byte check otherwise.
+
+**Pick Pocket AdBlock** for a ~3-8 EUR device that draws well under a watt, has no SD
+card to wear out, boots in about 2 s and needs no OS updates, with lists up to ~218k
+domains (4 MB boards) or ~2.2M (16 MB ESP32-S3 boards), plus encrypted upstream,
+Wake-on-LAN and Home Assistant built in.
+
+**Pick Pi-hole** (on a Raspberry Pi or a server) if you want multi-million-domain
+lists on any hardware, regex / wildcard rules, per-group policies, long-term query
+history in a database, or a wired connection by default.
+
 ## Benchmark vs esp32-c3-adblock
 
 Same ESP32-S3 board (WROOM-2 N32R16V), same 138,896-domain list, same Wi-Fi, measured
