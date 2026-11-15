@@ -45,8 +45,9 @@ a{color:var(--ac)}
   <label for="board">Your board</label>
   <select id="board">
    <option value="esp32c3">ESP32-C3 (SuperMini and other 4 MB boards)</option>
-   <option value="esp32s3">ESP32-S3, quad flash (DevKitC N8/N16, N8R2, N16R8…)</option>
-   <option value="esp32s3-octal-flash">ESP32-S3, octal flash (WROOM-2 N16R8V / N32R16V)</option>
+   <option value="esp32s3">ESP32-S3, quad flash, 4–8 MB (DevKitC N8, N8R2, N8R8…)</option>
+   <option value="esp32s3-16mb">ESP32-S3, quad flash, 16 MB+ (DevKitC N16R8…): ~2.2M domains</option>
+   <option value="esp32s3-octal-flash">ESP32-S3, octal flash (WROOM-2 N16R8V / N32R16V): ~2.2M domains</option>
    <option value="esp32">ESP32 (classic DevKit / WROOM / WROVER, 4 MB; Pro needs a WROVER)</option>
    <option value="esp32c6">ESP32-C6</option>
   </select>
@@ -85,7 +86,7 @@ a{color:var(--ac)}
 </main>
 <script>
 // Boards with a Pro build (they usually carry PSRAM); manifests/<board>[-pro].json
-const PRO=['esp32s3','esp32s3-octal-flash','esp32'];
+const PRO=['esp32s3','esp32s3-16mb','esp32s3-octal-flash','esp32'];
 const sel=document.getElementById('board'),btn=document.getElementById('install');
 const lite=document.getElementById('ed-lite'),pro=document.getElementById('ed-pro'),na=document.getElementById('pro-na');
 const store=(k,v)=>{try{return v===undefined?localStorage.getItem(k):localStorage.setItem(k,v)}catch(e){return null}};

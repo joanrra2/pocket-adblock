@@ -1,0 +1,7 @@
+# Board profile: ESP32-S3 with 16 MB (or more) QUAD flash, e.g. ESP32-S3-DevKitC-1
+# N16R8, WROOM-1-N16R8. 2 x 1.5 MB apps + 2 x 6.4 MB blocklists (~2.2M domains each).
+#
+#   idf.py -B build-s3-16 -D SDKCONFIG=build-s3-16/sdkconfig #     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32s3-16mb.defaults" #     set-target esp32s3 build
+CONFIG_SINKHOLE_BOARD_ID="esp32s3-16mb"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"

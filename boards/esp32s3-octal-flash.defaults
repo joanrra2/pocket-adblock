@@ -11,8 +11,10 @@ CONFIG_ESPTOOLPY_OCT_FLASH=y
 CONFIG_ESPTOOLPY_FLASHMODE_OPI=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 
-# Only the first 8 MB are partitioned (2 x 1.5 MB apps, 2 x 2.4 MB blocklists,
-# ~500k domains each); that avoids 32-bit flash addressing on 32 MB parts.
-CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+# Every WROOM-2 octal module has at least 16 MB. Only the first 16 MB are
+# partitioned (2 x 1.5 MB apps, 2 x 6.4 MB blocklists, ~2.2M domains each),
+# which avoids 32-bit flash addressing on 32 MB parts. Boards updated over the
+# air keep their old partition table; a browser install moves them to this one.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_8mb.csv"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"

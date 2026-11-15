@@ -35,7 +35,9 @@ jobs:
           - { name: esp32s3-octal-flash,      target: esp32s3, flavour: lite, defaults: "sdkconfig.defaults;boards/esp32s3-octal-flash.defaults" }
           - { name: esp32,                    target: esp32,   flavour: lite, defaults: "sdkconfig.defaults" }
           - { name: esp32c6,                  target: esp32c6, flavour: lite, defaults: "sdkconfig.defaults" }
+          - { name: esp32s3-16mb,             target: esp32s3, flavour: lite, defaults: "sdkconfig.defaults;boards/esp32s3-16mb.defaults" }
           - { name: esp32s3-pro,             target: esp32s3, flavour: pro, defaults: "sdkconfig.defaults" }
+          - { name: esp32s3-16mb-pro,         target: esp32s3, flavour: pro, defaults: "sdkconfig.defaults;boards/esp32s3-16mb.defaults" }
           - { name: esp32s3-octal-flash-pro, target: esp32s3, flavour: pro, defaults: "sdkconfig.defaults;boards/esp32s3-octal-flash.defaults" }
           - { name: esp32-pro,               target: esp32,   flavour: pro, defaults: "sdkconfig.defaults" }
     steps:
