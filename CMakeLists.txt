@@ -7,7 +7,7 @@ if(NOT DEFINED PROJECT_VER)
     set(PROJECT_VER "0.1.0")
 endif()
 
-# Optional features: FEATURES.cfg (custom builds) or -D FEATURES_FILE=flavours/<lite|plus>.cfg
+# Optional features: FEATURES.cfg (custom builds) or -D FEATURES_FILE=flavours/<lite|pro>.cfg
 # for the release editions. See tools/features.cmake.
 include(tools/features.cmake)
 

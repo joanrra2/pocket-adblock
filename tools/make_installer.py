@@ -19,9 +19,9 @@ BOARDS = {  # board id -> ESP Web Tools chipFamily
     'esp32s3-octal-flash': 'ESP32-S3',
     'esp32': 'ESP32',
     'esp32c6': 'ESP32-C6',
-    'esp32s3-plus': 'ESP32-S3',
-    'esp32s3-octal-flash-plus': 'ESP32-S3',
-    'esp32-plus': 'ESP32',
+    'esp32s3-pro': 'ESP32-S3',
+    'esp32s3-octal-flash-pro': 'ESP32-S3',
+    'esp32-pro': 'ESP32',
 }
 
 

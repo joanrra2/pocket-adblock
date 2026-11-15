@@ -84,7 +84,7 @@ date by the online updater:
 | Edition | Extras | Boards | Release images / update key |
 |---|---|---|---|
 | **Lite** | none | every board (ESP32-C3, ESP32-C6, boards without PSRAM) | `pocket-adblock-<board>-…` / `<board>` |
-| **Plus** | all of the table below | ESP32-S3 with PSRAM, ESP32-WROVER | `pocket-adblock-<board>-plus-…` / `<board>-plus` |
+| **Pro** | all of the table below | ESP32-S3 with PSRAM, ESP32-WROVER | `pocket-adblock-<board>-pro-…` / `<board>-pro` |
 
 A device only installs updates of its own edition. Builds made from `FEATURES.cfg`
 are *custom*: they never pick up release images by themselves (manual upload in the
@@ -93,10 +93,10 @@ or firmware upload).
 
 | `FEATURES.cfg` | Editions | RAM | Recommended for |
 |---|---|---|---|
-| `ENABLE_LONG_HISTORY` (+ `LONG_HISTORY_ENTRIES`, 4096) | Lite off (32 queries), Plus on | 76 B per entry, PSRAM | boards with PSRAM (on in the octal S3 profile, 4096) |
-| `ENABLE_DNS_OVER_TLS` | Lite off, Plus on | ~26 KB internal while connected (closes after 2 min idle) + 6 KB task | boards with PSRAM; not the C3. Encrypted upstream (port 853); on the S3 uncached lookups were no slower than plain UDP |
-| `ENABLE_TOP_DOMAINS` (+ `TOP_DOMAINS_ENTRIES`, 2048) | Lite off, Plus on | ~60 B per counter, PSRAM only (~120 KB) | boards with PSRAM; turns itself off without it. Top allowed / blocked domains on the overview (top clients are always shown) |
-| `ENABLE_BLOOM_FILTER` (bits per entry: `menuconfig`, 10) | Lite off, Plus on | ~1.25 B per slot entry: ~270 KB (4 MB layout), ~1 MB (8 MB layout) | boards with PSRAM; not the C3 (it needs that RAM for HTTPS). On an S3: not-listed lookups 80.8 → 54.7 µs |
+| `ENABLE_LONG_HISTORY` (+ `LONG_HISTORY_ENTRIES`, 4096) | Lite off (32 queries), Pro on | 76 B per entry, PSRAM | boards with PSRAM (on in the octal S3 profile, 4096) |
+| `ENABLE_DNS_OVER_TLS` | Lite off, Pro on | ~26 KB internal while connected (closes after 2 min idle) + 6 KB task | boards with PSRAM; not the C3. Encrypted upstream (port 853); on the S3 uncached lookups were no slower than plain UDP |
+| `ENABLE_TOP_DOMAINS` (+ `TOP_DOMAINS_ENTRIES`, 2048) | Lite off, Pro on | ~60 B per counter, PSRAM only (~120 KB) | boards with PSRAM; turns itself off without it. Top allowed / blocked domains on the overview (top clients are always shown) |
+| `ENABLE_BLOOM_FILTER` (bits per entry: `menuconfig`, 10) | Lite off, Pro on | ~1.25 B per slot entry: ~270 KB (4 MB layout), ~1 MB (8 MB layout) | boards with PSRAM; not the C3 (it needs that RAM for HTTPS). On an S3: not-listed lookups 80.8 → 54.7 µs |
 
 Prebuilt images for every board are attached to each
 [release](../../releases): flash `*-full.bin` at `0x0` the first time.

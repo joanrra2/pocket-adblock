@@ -69,9 +69,9 @@ menu "DNS Sinkhole"
         string "Edition (set from the features file, don't edit)"
         default "custom"
         help
-            lite / plus for the release editions (flavours/*.cfg), custom for
+            lite / pro for the release editions (flavours/*.cfg), custom for
             builds made with FEATURES.cfg. Release images are looked up as
-            <board> (lite) or <board>-plus; custom builds never auto-install.
+            <board> (lite) or <board>-pro; custom builds never auto-install.
 
     config SINKHOLE_MAX_CLIENTS
         int "Tracked DNS clients"

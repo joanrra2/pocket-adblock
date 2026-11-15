@@ -18,6 +18,17 @@ p{color:var(--mu)}
 label{display:block;font-size:13px;color:var(--mu);margin-bottom:6px}
 select{width:100%;font:inherit;padding:10px 12px;border-radius:10px;border:1px solid var(--ln);background:var(--bg);color:var(--tx)}
 esp-web-install-button{display:block;margin-top:16px}
+.lbl{font-size:13px;color:var(--mu);margin:16px 0 6px}
+.eds{display:grid;gap:10px}
+.ed{display:block;position:relative;border:1px solid var(--ln);border-radius:12px;padding:12px 14px 12px 40px;cursor:pointer;color:var(--tx);font-size:15px;margin:0}
+.ed input{position:absolute;left:14px;top:15px;accent-color:var(--ac)}
+.ed:has(input:checked){border-color:var(--ac);background:color-mix(in srgb,var(--ac) 10%,transparent)}
+.ed:has(input:disabled){opacity:.55;cursor:not-allowed}
+.ed .tag{font-size:12px;color:var(--mu);margin-left:8px}
+.ed .d{display:block;color:var(--mu);font-size:13.5px;margin-top:4px}
+.ed ul.d{padding-left:18px}.ed ul.d li{margin:2px 0}
+.ed .na{color:var(--wa)}
+.hint{font-size:13px;margin-top:10px}
 button.go{font:inherit;font-weight:650;padding:11px 18px;border-radius:11px;border:0;background:var(--ac);color:#fff;cursor:pointer;width:100%}
 ol{padding-left:20px;color:var(--mu)}li{margin:4px 0}
 .note{color:var(--wa);font-size:14px;margin-top:12px}
@@ -35,14 +46,26 @@ a{color:var(--ac)}
    <option value="esp32c3">ESP32-C3 (SuperMini and other 4 MB boards)</option>
    <option value="esp32s3">ESP32-S3, quad flash (DevKitC N8/N16, N8R2, N16R8…)</option>
    <option value="esp32s3-octal-flash">ESP32-S3, octal flash (WROOM-2 N16R8V / N32R16V)</option>
-   <option value="esp32">ESP32 (classic DevKit / WROOM / WROVER, 4 MB)</option>
+   <option value="esp32">ESP32 (classic DevKit / WROOM / WROVER, 4 MB; Pro needs a WROVER)</option>
    <option value="esp32c6">ESP32-C6</option>
-   <optgroup label="Plus edition: all extras (boards with PSRAM)">
-    <option value="esp32s3-plus">ESP32-S3 with PSRAM, quad flash (N8R2, N16R8…) · Plus</option>
-    <option value="esp32s3-octal-flash-plus">ESP32-S3, octal flash (WROOM-2 N16R8V / N32R16V) · Plus</option>
-    <option value="esp32-plus">ESP32-WROVER (with PSRAM) · Plus</option>
-   </optgroup>
   </select>
+  <div class="lbl">Edition</div>
+  <div class="eds" role="radiogroup" aria-label="Edition">
+   <label class="ed" for="ed-lite"><input type="radio" name="edition" id="ed-lite" value="lite" checked>
+    <b>Lite</b><span class="tag">every board</span>
+    <span class="d">The full ad blocker with the smallest memory use: blocklists, cache, hidden-tracker detection, bypass protection, SafeSearch, local names, Wake-on-LAN and Home Assistant.</span></label>
+   <label class="ed" for="ed-pro"><input type="radio" name="edition" id="ed-pro" value="pro">
+    <b>Pro</b><span class="tag">boards with PSRAM</span>
+    <span class="d">Everything in Lite, plus extras that use the board's PSRAM:</span>
+    <ul class="d">
+     <li><b>Encrypted DNS</b> (DNS over TLS): your ISP can't read or change your lookups.</li>
+     <li><b>Top domains</b> blocked and allowed on the overview.</li>
+     <li><b>Long query history</b>: the last 4,096 queries instead of 32.</li>
+     <li><b>Faster lookups</b> for sites that aren't blocked (RAM bloom filter).</li>
+    </ul>
+    <span class="d na" id="pro-na"></span></label>
+  </div>
+  <p class="hint">Each edition keeps updating itself from the online releases. To switch later, just install the other one here.</p>
   <esp-web-install-button id="install">
    <button slot="activate" class="go">Connect and install</button>
    <span slot="unsupported">Your browser can't do this. Use Chrome or Edge on a computer.</span>
@@ -60,12 +83,25 @@ a{color:var(--ac)}
  </div>
 </main>
 <script>
+// Boards with a Pro build (they usually carry PSRAM); manifests/<board>[-pro].json
+const PRO=['esp32s3','esp32s3-octal-flash','esp32'];
 const sel=document.getElementById('board'),btn=document.getElementById('install');
-const saved=(()=>{try{return localStorage.getItem('board')}catch(e){return null}})();
+const lite=document.getElementById('ed-lite'),pro=document.getElementById('ed-pro'),na=document.getElementById('pro-na');
+const store=(k,v)=>{try{return v===undefined?localStorage.getItem(k):localStorage.setItem(k,v)}catch(e){return null}};
+const saved=store('board');
 if(saved&&[...sel.options].some(o=>o.value==saved))sel.value=saved;
-function apply(){btn.manifest='manifests/'+sel.value+'.json';try{localStorage.setItem('board',sel.value)}catch(e){}}
-sel.addEventListener('change',apply);apply();
-fetch('manifests/'+sel.value+'.json').then(r=>r.json()).then(m=>document.getElementById('ver').textContent='Version '+m.version+'.').catch(()=>{});
+if(store('edition')=='pro')pro.checked=true;
+function apply(){
+ const ok=PRO.includes(sel.value);
+ pro.disabled=!ok;
+ if(!ok&&pro.checked)lite.checked=true;
+ na.textContent=ok?'':'Not available for this board: it has no PSRAM.';
+ const ed=pro.checked?'pro':'lite';
+ btn.manifest='manifests/'+sel.value+(ed=='pro'?'-pro':'')+'.json';
+ store('board',sel.value);store('edition',ed);
+ fetch(btn.manifest).then(r=>r.json()).then(m=>document.getElementById('ver').textContent='Version '+m.version+'.').catch(()=>{});
+}
+sel.addEventListener('change',apply);lite.addEventListener('change',apply);pro.addEventListener('change',apply);apply();
 </script>
 </body>
 </html>

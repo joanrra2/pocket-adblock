@@ -74,7 +74,7 @@ public:
     FirmwareCheck firmwareStatus();
     static bool autoInstallAllowed();  // built with signed-image verification
     static const char* boardId();
-    // Manifest key: <board> (Lite), <board>-plus (Plus), <board>-custom (never published).
+    // Manifest key: <board> (Lite), <board>-pro (Pro), <board>-custom (never published).
     static const char* imageKey();
     static const char* flavour() { return CONFIG_SINKHOLE_FLAVOUR; }
 
