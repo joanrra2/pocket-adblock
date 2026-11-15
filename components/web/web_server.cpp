@@ -76,6 +76,9 @@ const WebServer::Route WebServer::kRoutes[] = {
     {"/api/lists", HTTP_POST, &WebServer::postLists, true},
     {"/api/records", HTTP_GET, &WebServer::getRecords, true},
     {"/api/top", HTTP_GET, &WebServer::getTop, true},
+    {"/api/history", HTTP_GET, &WebServer::getHistory, true},
+    {"/api/backup", HTTP_GET, &WebServer::getBackup, true},
+    {"/api/restore", HTTP_POST, &WebServer::postRestore, true},
     {"/api/records", HTTP_POST, &WebServer::postRecords, true},
     {"/api/blocking", HTTP_POST, &WebServer::postBlocking, true},
     {"/api/ban", HTTP_POST, &WebServer::postBan, true},
@@ -485,6 +488,168 @@ esp_err_t WebServer::getTop(httpd_req_t* req)
     }
     j.endArray().endObject();
     return j.finish();
+}
+
+// Last 24 h in 10-minute slots, oldest first, plus the current partial slot.
+esp_err_t WebServer::getHistory(httpd_req_t* req)
+{
+    static uint32_t allowed[History::kSlots], blocked[History::kSlots];  // httpd task only
+    uint32_t curA = 0, curB = 0;
+    const size_t n = d_.history.copy(allowed, blocked, d_.counters.allowed, d_.counters.blocked, curA, curB);
+    JsonWriter j(req);
+    j.beginObject().num("slotSeconds", History::kSlotSeconds);
+    j.beginArray("allowed");
+    for (size_t i = 0; i < n; i++) j.num(nullptr, allowed[i]);
+    j.endArray().beginArray("blocked");
+    for (size_t i = 0; i < n; i++) j.num(nullptr, blocked[i]);
+    j.endArray().num("currentAllowed", curA).num("currentBlocked", curB).endObject();
+    return j.finish();
+}
+
+// ------------------------------------------------------------ backup / restore
+// A small text file: header lines, then key=base64 for each stored item
+// (settings, custom lists, local names, WoL hosts, device rules). Passwords
+// are left out unless ?secrets=1; restore keeps the device's own passwords
+// for any that are missing, writes the items back and restarts.
+
+namespace {
+constexpr const char* kBackupKeys[] = {"settings", "custom_block", "custom_allow", "local_dns",
+                                       "wol_hosts", "banned", "nofilter"};
+constexpr size_t kBackupMax = 64 * 1024;
+
+void clearSecrets(Settings& s)
+{
+    memset(s.staPass, 0, sizeof(s.staPass));
+    memset(s.apPass, 0, sizeof(s.apPass));
+    memset(s.adminPass, 0, sizeof(s.adminPass));
+    memset(s.mqttPass, 0, sizeof(s.mqttPass));
+}
+}  // namespace
+
+esp_err_t WebServer::getBackup(httpd_req_t* req)
+{
+    char q[32] = "", secrets[4] = "";
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK)
+        httpd_query_key_value(q, "secrets", secrets, sizeof(secrets));
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"pocket-adblock-backup.txt\"");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+    char head[160];
+    snprintf(head, sizeof(head), "# Pocket AdBlock backup\nformat=1\nfirmware=%s\nedition=%s\nsecrets=%d\n",
+             FirmwareUpdater::version(), Updater::flavour(), secrets[0] == '1');
+    httpd_resp_sendstr_chunk(req, head);
+
+    for (const char* key : kBackupKeys) {
+        size_t len = strcmp(key, "settings") == 0 ? sizeof(Settings) : nvs::blobSize(key);
+        if (!len) continue;
+        auto* raw = static_cast<uint8_t*>(malloc(len));
+        auto* b64 = static_cast<char*>(malloc(len / 3 * 4 + 8));
+        if (!raw || !b64) {
+            free(raw);
+            free(b64);
+            httpd_resp_sendstr_chunk(req, "# out of memory\n");
+            break;
+        }
+        bool ok = true;
+        if (strcmp(key, "settings") == 0) {
+            Settings s = d_.cfg.get();
+            if (secrets[0] != '1') clearSecrets(s);
+            memcpy(raw, &s, len);
+        } else {
+            ok = nvs::loadBlob(key, raw, len, &len) == ESP_OK;
+        }
+        if (ok) {
+            base64Encode(raw, len, b64);
+            httpd_resp_sendstr_chunk(req, key);
+            httpd_resp_sendstr_chunk(req, "=");
+            httpd_resp_sendstr_chunk(req, b64);
+            httpd_resp_sendstr_chunk(req, "\n");
+        }
+        free(raw);
+        free(b64);
+    }
+    return httpd_resp_sendstr_chunk(req, nullptr);
+}
+
+esp_err_t WebServer::postRestore(httpd_req_t* req)
+{
+    if (req->content_len == 0 || req->content_len > kBackupMax)
+        return sendError(req, "400 Bad Request", "not a backup file (empty or too large)");
+    char* body = static_cast<char*>(malloc(req->content_len + 1));
+    if (!body) return sendError(req, "500 Internal Server Error", "out of memory");
+    size_t got = 0;
+    while (got < req->content_len) {
+        const int r = httpd_req_recv(req, body + got, req->content_len - got);
+        if (r <= 0) {
+            free(body);
+            return sendError(req, "400 Bad Request", "upload interrupted");
+        }
+        got += static_cast<size_t>(r);
+    }
+    body[got] = '\0';
+    if (!strstr(body, "\nformat=1\n") && strncmp(body, "format=1\n", 9) != 0) {
+        free(body);
+        return sendError(req, "400 Bad Request", "not a Pocket AdBlock backup (format=1 missing)");
+    }
+
+    // Decode everything first; write only if the whole file is valid.
+    struct Item {
+        const char* key;
+        uint8_t* data;
+        int len;
+    } items[sizeof(kBackupKeys) / sizeof(kBackupKeys[0])] = {};
+    size_t count = 0;
+    const char* why = nullptr;
+    for (char* line = strtok(body, "\n"); line && !why; line = strtok(nullptr, "\n")) {
+        char* eq = strchr(line, '=');
+        if (!eq || line[0] == '#') continue;
+        *eq = '\0';
+        const char* val = eq + 1;
+        size_t vlen = strlen(val);
+        while (vlen && (val[vlen - 1] == '\r' || val[vlen - 1] == ' ')) vlen--;
+        for (const char* key : kBackupKeys) {
+            if (strcmp(line, key) != 0) continue;
+            auto* data = static_cast<uint8_t*>(malloc(vlen / 4 * 3 + 4));
+            const int n = data ? base64Decode(val, vlen, data, vlen / 4 * 3 + 4) : -1;
+            if (n <= 0) {
+                free(data);
+                why = "a section of the file is damaged";
+                break;
+            }
+            items[count++] = {key, data, n};
+        }
+    }
+    free(body);
+
+    for (size_t i = 0; i < count && !why; i++) {
+        if (strcmp(items[i].key, "settings") != 0) continue;
+        // Settings: needs a version this firmware can migrate; empty passwords
+        // in the file keep the device's current ones.
+        uint16_t version;
+        memcpy(&version, items[i].data, sizeof(version));
+        if (items[i].len < 64 || version < 2 || version > 999) {
+            why = "the settings section is not valid";
+            break;
+        }
+        const Settings cur = d_.cfg.get();
+        auto keep = [&](size_t off, const char* curField, size_t size) {
+            if (static_cast<size_t>(items[i].len) >= off + size && items[i].data[off] == 0)
+                memcpy(items[i].data + off, curField, size);
+        };
+        keep(offsetof(Settings, staPass), cur.staPass, sizeof(cur.staPass));
+        keep(offsetof(Settings, apPass), cur.apPass, sizeof(cur.apPass));
+        keep(offsetof(Settings, adminPass), cur.adminPass, sizeof(cur.adminPass));
+        keep(offsetof(Settings, mqttPass), cur.mqttPass, sizeof(cur.mqttPass));
+    }
+    if (!why && count == 0) why = "the file contains nothing to restore";
+    for (size_t i = 0; i < count && !why; i++)
+        if (nvs::saveBlob(items[i].key, items[i].data, static_cast<size_t>(items[i].len)) != ESP_OK)
+            why = "could not write the settings";
+    for (size_t i = 0; i < count; i++) free(items[i].data);
+    if (why) return sendError(req, "400 Bad Request", why);
+    FirmwareUpdater::restartIn(1500);  // every part reloads its data at boot
+    return sendOk(req, "restored; restarting");
 }
 
 esp_err_t WebServer::getRecords(httpd_req_t* req)

@@ -195,6 +195,16 @@ domain plus a 65 KB index, so slots hold more and lookups are faster:
 Raw headerless lists from esp32-c3-adblock (`--raw`) and v1 lists are still accepted.
 Blocking a domain also blocks its subdomains. The **Always allow** list wins over every blocklist.
 
+**Which list.** *Settings → Updates → Blocklist* picks one of the weekly lists this
+project publishes: **Light** (StevenBlack, ~56k domains, fewest false positives),
+**Normal** (default, + HaGeZi Light, ~140k) or **Aggressive** (+ HaGeZi Pro, ~280k,
+8 MB boards only: the device refuses a list bigger than its slot before writing
+anything). *Custom URL* takes any SHBL or raw list.
+
+**Backup and restore.** *Settings → Backup and restore* downloads one text file
+with the settings, custom lists, local names, Wake-on-LAN computers and device
+rules (passwords only if you tick the box) and restores it on any board.
+
 **Automatic updates.** The device checks its blocklist URL 10 minutes after
 booting and then every *Settings → Updates → interval* (24 h by default). It
 reads the 64-byte header first: if checksum and size match the active list it

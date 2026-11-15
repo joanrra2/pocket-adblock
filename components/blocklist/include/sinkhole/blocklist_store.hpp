@@ -52,6 +52,9 @@ public:
     // The update being written has the same header (checksum, count, format) as
     // the active list: write() stopped after 64 bytes, nothing touched flash.
     bool unchanged() const { return unchanged_; }
+    // The header announced more domains than this board's slot holds.
+    bool tooBig() const { return tooBig_; }
+    uint32_t tooBigCount() const { return tooBigCount_; }
 
 private:
     struct Mapped {
@@ -84,6 +87,8 @@ private:
     // writer state
     std::atomic<bool> writing_{false};
     bool unchanged_ = false;
+    bool tooBig_ = false;
+    uint32_t tooBigCount_ = 0;
     int writeSlot_ = -1;
     size_t erasedUpTo_ = 0;
     size_t payloadBytes_ = 0;

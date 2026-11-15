@@ -48,6 +48,8 @@ private:
     MqttBridge mqtt_{config_, wol_, mqttHooks()};
     BootButton button_{wifi_};
     StatusLed led_;
+    History history_;
+    void startHistory();
     WebServer web_;
 };
 

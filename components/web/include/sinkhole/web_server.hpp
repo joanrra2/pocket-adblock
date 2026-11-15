@@ -40,6 +40,7 @@ struct WebDeps {
     WolService& wol;
     MqttBridge& mqtt;
     StatusLed& led;
+    History& history;
     void (*applyUpstream)(void* ctx);
     void* appCtx;
 };
@@ -74,6 +75,9 @@ private:
     esp_err_t postLists(httpd_req_t* req);
     esp_err_t getRecords(httpd_req_t* req);
     esp_err_t getTop(httpd_req_t* req);
+    esp_err_t getHistory(httpd_req_t* req);
+    esp_err_t getBackup(httpd_req_t* req);
+    esp_err_t postRestore(httpd_req_t* req);
     esp_err_t postRecords(httpd_req_t* req);
     esp_err_t postBlocking(httpd_req_t* req);
     esp_err_t postBan(httpd_req_t* req);

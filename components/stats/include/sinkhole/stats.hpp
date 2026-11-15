@@ -170,6 +170,29 @@ private:
     std::atomic<uint8_t> privacy_{0};
 };
 
+// Last 24 h of allowed / blocked queries in 10-minute slots (~1.2 KB), fed by
+// sampling the running counters. Lives in RAM: it starts over after a reboot.
+class History {
+public:
+    static constexpr size_t kSlots = 144;
+    static constexpr uint32_t kSlotSeconds = 600;
+
+    void sample(uint32_t allowedTotal, uint32_t blockedTotal);  // every kSlotSeconds
+    // Oldest first; returns how many full slots there are (<= kSlots) and the
+    // counts since the last sample (the current, partial slot).
+    size_t copy(uint32_t* allowed, uint32_t* blocked, uint32_t allowedTotal, uint32_t blockedTotal,
+                uint32_t& curAllowed, uint32_t& curBlocked);
+
+private:
+    Mutex mu_;
+    uint32_t allowed_[kSlots]{};
+    uint32_t blocked_[kSlots]{};
+    size_t head_ = 0;
+    size_t filled_ = 0;
+    uint32_t lastAllowed_ = 0;
+    uint32_t lastBlocked_ = 0;
+};
+
 struct Counters {
     std::atomic<uint32_t> blocked{0};
     std::atomic<uint32_t> allowed{0};

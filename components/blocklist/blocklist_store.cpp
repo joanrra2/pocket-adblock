@@ -209,6 +209,7 @@ esp_err_t BlocklistStore::beginWrite()
     erasedUpTo_ = 0;
     payloadBytes_ = 0;
     unchanged_ = false;
+    tooBig_ = false;
     headLen_ = 0;
     mode_ = Mode::Detect;
     expectedPayload_ = 0;
@@ -278,6 +279,12 @@ esp_err_t BlocklistStore::write(const uint8_t* data, size_t len)
             BlocklistHeader h;
             memcpy(&h, headBuf_, sizeof(h));
             expectedPayload_ = headerLooksValid(h) ? payloadSize(h.version, h.count) : 0;
+            // Too big for this board's slot? Say so now instead of failing at the end.
+            if (expectedPayload_ && kHdr + expectedPayload_ > slots_[writeSlot_]->size) {
+                tooBig_ = true;
+                tooBigCount_ = h.count;
+                return ESP_ERR_INVALID_SIZE;
+            }
             // Same list as the active one? Stop here: no download, no flash wear.
             int active;
             {

@@ -74,6 +74,16 @@ esp_err_t saveBlob(const char* key, const void* data, size_t len)
     return err;
 }
 
+size_t blobSize(const char* key)
+{
+    nvs_handle_t h;
+    if (nvs_open(kNamespace, NVS_READONLY, &h) != ESP_OK) return 0;
+    size_t n = 0;
+    if (nvs_get_blob(h, key, nullptr, &n) != ESP_OK) n = 0;
+    nvs_close(h);
+    return n;
+}
+
 esp_err_t loadU8(const char* key, uint8_t& out)
 {
     nvs_handle_t h;

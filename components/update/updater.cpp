@@ -245,6 +245,10 @@ void Updater::fetchBlocklist()
             err = store_.finishWrite(why, sizeof(why));
         } else {
             const bool same = store_.unchanged();
+            if (store_.tooBig())
+                snprintf(why, sizeof(why), "list too big for this board: %lu domains, room for %lu",
+                         static_cast<unsigned long>(store_.tooBigCount()),
+                         static_cast<unsigned long>(store_.info().capacity));
             store_.abortWrite();
             if (same) {  // stopped after the header: nothing to do
                 {

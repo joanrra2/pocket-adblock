@@ -17,7 +17,7 @@ constexpr uint64_t kHealthyAfterUs = 60ULL * 1000 * 1000;
 
 App::App()
     : web_(WebDeps{config_, wifi_, store_, custom_, allow_, filter_, clients_, queryLog_, counters_,
-                   dns_, updater_, firmware_, wol_, mqtt_, led_, &App::applyUpstream, this})
+                   dns_, updater_, firmware_, wol_, mqtt_, led_, history_, &App::applyUpstream, this})
 {
 }
 
@@ -60,6 +60,7 @@ void App::start()
         ESP_LOGW(TAG, "status LED: GPIO%d can't be used, LED off", s.ledPin);
     led_.start(&App::ledState, this);
 
+    startHistory();
     startRollbackGuard();
     ESP_LOGI(TAG, "ready");
 }
@@ -172,6 +173,21 @@ size_t App::hookStats(void* ctx, char* out, size_t cap)
                            static_cast<unsigned>(self->store_.info().count),
                            static_cast<unsigned>(self->clients_.activeCount(3600)));
     return n > 0 ? static_cast<size_t>(n) : 0;
+}
+
+// 24 h graph: sample the counters every 10 minutes.
+void App::startHistory()
+{
+    esp_timer_create_args_t args{};
+    args.name = "history";
+    args.arg = this;
+    args.callback = [](void* arg) {
+        auto* self = static_cast<App*>(arg);
+        self->history_.sample(self->counters_.allowed, self->counters_.blocked);
+    };
+    esp_timer_handle_t t = nullptr;
+    if (esp_timer_create(&args, &t) == ESP_OK)
+        esp_timer_start_periodic(t, static_cast<uint64_t>(History::kSlotSeconds) * 1000 * 1000);
 }
 
 // A freshly flashed image boots as PENDING_VERIFY. If it still runs and the DNS

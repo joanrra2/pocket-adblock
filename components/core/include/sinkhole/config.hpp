@@ -131,6 +131,7 @@ namespace nvs {
 esp_err_t init();  // nvs_flash_init with erase-on-version-mismatch
 esp_err_t loadBlob(const char* key, void* data, size_t len, size_t* outLen = nullptr);
 esp_err_t saveBlob(const char* key, const void* data, size_t len);
+size_t blobSize(const char* key);  // 0 if missing
 esp_err_t loadU8(const char* key, uint8_t& out);
 esp_err_t saveU8(const char* key, uint8_t v);
 }  // namespace nvs

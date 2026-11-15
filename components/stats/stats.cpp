@@ -227,6 +227,31 @@ void QueryLog::begin()
     top_.begin();
 }
 
+void History::sample(uint32_t allowedTotal, uint32_t blockedTotal)
+{
+    LockGuard g(mu_);
+    allowed_[head_] = allowedTotal - lastAllowed_;
+    blocked_[head_] = blockedTotal - lastBlocked_;
+    lastAllowed_ = allowedTotal;
+    lastBlocked_ = blockedTotal;
+    head_ = (head_ + 1) % kSlots;
+    if (filled_ < kSlots) filled_++;
+}
+
+size_t History::copy(uint32_t* allowed, uint32_t* blocked, uint32_t allowedTotal, uint32_t blockedTotal,
+                     uint32_t& curAllowed, uint32_t& curBlocked)
+{
+    LockGuard g(mu_);
+    for (size_t i = 0; i < filled_; i++) {
+        const size_t k = (head_ + kSlots - filled_ + i) % kSlots;
+        allowed[i] = allowed_[k];
+        blocked[i] = blocked_[k];
+    }
+    curAllowed = allowedTotal - lastAllowed_;
+    curBlocked = blockedTotal - lastBlocked_;
+    return filled_;
+}
+
 void TopDomains::begin()
 {
 #if CONFIG_SINKHOLE_TOP_DOMAINS

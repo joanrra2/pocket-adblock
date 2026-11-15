@@ -50,6 +50,49 @@ inline void urlDecode(char* s)
 }
 
 // "aa:bb:cc:dd:ee:ff" or "aa-bb-..." -> 6 bytes.
+// Base64 (RFC 4648) for settings backups. encode: out needs 4*ceil(n/3)+1.
+inline size_t base64Encode(const uint8_t* in, size_t n, char* out)
+{
+    static constexpr char kAlphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t o = 0;
+    for (size_t i = 0; i < n; i += 3) {
+        const uint32_t v = static_cast<uint32_t>(in[i]) << 16 | (i + 1 < n ? in[i + 1] << 8 : 0) | (i + 2 < n ? in[i + 2] : 0);
+        out[o++] = kAlphabet[v >> 18 & 63];
+        out[o++] = kAlphabet[v >> 12 & 63];
+        out[o++] = i + 1 < n ? kAlphabet[v >> 6 & 63] : '=';
+        out[o++] = i + 2 < n ? kAlphabet[v & 63] : '=';
+    }
+    out[o] = '\0';
+    return o;
+}
+
+// Decodes in place-safe into out (cap bytes); returns the length or -1.
+inline int base64Decode(const char* in, size_t n, uint8_t* out, size_t cap)
+{
+    auto val = [](char c) -> int {
+        if (c >= 'A' && c <= 'Z') return c - 'A';
+        if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+        if (c >= '0' && c <= '9') return c - '0' + 52;
+        if (c == '+') return 62;
+        if (c == '/') return 63;
+        return -1;
+    };
+    if (n % 4) return -1;
+    size_t o = 0;
+    for (size_t i = 0; i < n; i += 4) {
+        int v[4];
+        for (int k = 0; k < 4; k++) v[k] = in[i + k] == '=' ? 0 : val(in[i + k]);
+        if (v[0] < 0 || v[1] < 0 || v[2] < 0 || v[3] < 0) return -1;
+        const uint32_t w = static_cast<uint32_t>(v[0]) << 18 | v[1] << 12 | v[2] << 6 | v[3];
+        const int bytes = in[i + 2] == '=' ? 1 : in[i + 3] == '=' ? 2 : 3;
+        if (o + bytes > cap) return -1;
+        out[o++] = static_cast<uint8_t>(w >> 16);
+        if (bytes > 1) out[o++] = static_cast<uint8_t>(w >> 8);
+        if (bytes > 2) out[o++] = static_cast<uint8_t>(w);
+    }
+    return static_cast<int>(o);
+}
+
 inline bool parseMac(const char* s, uint8_t mac[6])
 {
     unsigned v[6];
