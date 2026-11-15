@@ -171,6 +171,14 @@ esp_err_t Config::load()
     } else {
         s_ = stored;
     }
+    // Early builds defaulted to the upstream project's list; follow the new
+    // default (this project's weekly list) unless the user picked another URL.
+    static constexpr const char* kOldDefaultList =
+        "https://github.com/M-Abozaid/esp32-c3-adblock/releases/download/blocklist/blocklist.bin";
+    if (strcmp(s_.blocklistUrl, kOldDefaultList) == 0 && strcmp(CONFIG_SINKHOLE_BLOCKLIST_URL, kOldDefaultList) != 0) {
+        copyStr(s_.blocklistUrl, CONFIG_SINKHOLE_BLOCKLIST_URL);
+        saveLocked();
+    }
     // Defensive: blobs from a buggy build could miss terminators.
     s_.hostname[sizeof(s_.hostname) - 1] = '\0';
     s_.staSsid[sizeof(s_.staSsid) - 1] = '\0';

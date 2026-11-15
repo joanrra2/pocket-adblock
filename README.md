@@ -195,6 +195,14 @@ domain plus a 65 KB index, so slots hold more and lookups are faster:
 Raw headerless lists from esp32-c3-adblock (`--raw`) and v1 lists are still accepted.
 Blocking a domain also blocks its subdomains. The **Always allow** list wins over every blocklist.
 
+**Automatic updates.** The device checks its blocklist URL 10 minutes after
+booting and then every *Settings → Updates → interval* (24 h by default). It
+reads the 64-byte header first: if checksum and size match the active list it
+stops there ("already up to date": no download, no flash write); otherwise the
+new list goes into the other slot, is verified and then swapped in. The default
+URL is this project's list, rebuilt by GitHub Actions every Monday
+(`.github/workflows/blocklist.yml`). *Update now* triggers a check by hand.
+
 ## Wake-on-LAN
 
 Add a host under **Wake-on-LAN** (name, MAC, optional IP for the online indicator)

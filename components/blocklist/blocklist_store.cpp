@@ -208,6 +208,7 @@ esp_err_t BlocklistStore::beginWrite()
     }
     erasedUpTo_ = 0;
     payloadBytes_ = 0;
+    unchanged_ = false;
     headLen_ = 0;
     mode_ = Mode::Detect;
     expectedPayload_ = 0;
@@ -277,6 +278,19 @@ esp_err_t BlocklistStore::write(const uint8_t* data, size_t len)
             BlocklistHeader h;
             memcpy(&h, headBuf_, sizeof(h));
             expectedPayload_ = headerLooksValid(h) ? payloadSize(h.version, h.count) : 0;
+            // Same list as the active one? Stop here: no download, no flash wear.
+            int active;
+            {
+                LockGuard g(mu_);
+                active = activeSlot_;
+            }
+            BlocklistHeader cur;
+            if (expectedPayload_ && active >= 0 && esp_partition_read(slots_[active], 0, &cur, sizeof(cur)) == ESP_OK &&
+                cur.count == h.count && cur.version == h.version &&
+                memcmp(cur.sha256, h.sha256, sizeof(h.sha256)) == 0) {
+                unchanged_ = true;
+                return ESP_ERR_INVALID_STATE;  // aborts the download
+            }
         } else {
             mode_ = Mode::Raw;  // those 64 bytes were already payload
             esp_err_t err = payloadWrite(headBuf_, kHdr);

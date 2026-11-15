@@ -26,7 +26,7 @@ menu "DNS Sinkhole"
 
     config SINKHOLE_BLOCKLIST_URL
         string "Default blocklist URL"
-        default "https://github.com/M-Abozaid/esp32-c3-adblock/releases/download/blocklist/blocklist.bin"
+        default "https://github.com/joanrra2/pocket-adblock/releases/download/blocklist/blocklist.bin"
         help
             Raw (headerless) lists from esp32-c3-adblock and SHBL v1 lists from
             tools/build_blocklist.py are both accepted. Leave empty to disable.

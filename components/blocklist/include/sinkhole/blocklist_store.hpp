@@ -49,6 +49,9 @@ public:
     esp_err_t finishWrite(char* why, size_t whyLen);
     void abortWrite();
     bool writing() const { return writing_.load(); }
+    // The update being written has the same header (checksum, count, format) as
+    // the active list: write() stopped after 64 bytes, nothing touched flash.
+    bool unchanged() const { return unchanged_; }
 
 private:
     struct Mapped {
@@ -80,6 +83,7 @@ private:
 
     // writer state
     std::atomic<bool> writing_{false};
+    bool unchanged_ = false;
     int writeSlot_ = -1;
     size_t erasedUpTo_ = 0;
     size_t payloadBytes_ = 0;

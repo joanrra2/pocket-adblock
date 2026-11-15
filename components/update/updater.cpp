@@ -15,6 +15,9 @@ namespace {
 constexpr const char* TAG = "update";
 constexpr uint32_t kRetryAfterFailureS = 15 * 60;
 constexpr uint32_t kFirstFetchDelayS = 20;     // let Wi-Fi/DNS settle after boot
+// With a list already stored, check this long after boot (then every interval):
+// unchanged lists cost a 64-byte download, so devices that reboot often still update.
+constexpr uint32_t kBootCheckDelayS = 10 * 60;
 constexpr uint32_t kFirstFwCheckS = 120;
 constexpr uint32_t kFwCheckEveryS = 24 * 3600;
 constexpr int kMaxRedirects = 5;
@@ -197,7 +200,7 @@ bool Updater::blocklistDue()
         // Never tried since boot: fetch soon if there is no list at all,
         // otherwise wait one interval (the stored list survives reboots).
         if (store_.info().count == 0) return now >= kFirstFetchDelayS;
-        return now >= static_cast<uint32_t>(c.hours) * 3600;
+        return now >= kBootCheckDelayS;
     }
     const uint32_t wait = st.lastOk ? static_cast<uint32_t>(c.hours) * 3600 : kRetryAfterFailureS;
     return now - st.lastAttempt >= wait;
@@ -238,10 +241,21 @@ void Updater::fetchBlocklist()
             url,
             [](void* ctx, const uint8_t* d, size_t n) { return static_cast<BlocklistStore*>(ctx)->write(d, n); },
             &store_, why, sizeof(why), bytes);
-        if (err == ESP_OK)
+        if (err == ESP_OK) {
             err = store_.finishWrite(why, sizeof(why));
-        else
+        } else {
+            const bool same = store_.unchanged();
             store_.abortWrite();
+            if (same) {  // stopped after the header: nothing to do
+                {
+                    LockGuard g(mu_);
+                    status_.running = false;
+                }
+                report(true, "already up to date", bytes);
+                ESP_LOGI(TAG, "blocklist: unchanged, kept the active list");
+                return;
+            }
+        }
     }
     {
         LockGuard g(mu_);
