@@ -107,6 +107,10 @@ Prebuilt images for every board are attached to each
 
 ## First setup
 
+<p align="center"><img src="docs/media/setup-en.gif" width="800" alt="Setup walkthrough: setup Wi-Fi, home Wi-Fi, admin password, DNS on the router, Windows, Android, iPhone and Linux, then the Overview"></p>
+
+<p align="center">85-second walkthrough · <a href="docs/media/setup-en.mp4">MP4</a> · En español: <a href="docs/media/setup-es.gif">GIF</a> · <a href="docs/media/setup-es.mp4">MP4</a></p>
+
 1. Join the Wi-Fi **`Sinkhole-XXXX`** (password `sinkhole-setup`). Phones show
    "Sign in to network" and open the setup page by themselves (captive portal);
    otherwise open **http://192.168.4.1**. Log in as `admin` / `sinkhole`.
@@ -116,6 +120,18 @@ Prebuilt images for every board are attached to each
    you while the default admin password is still set.
 4. Point your router's DHCP DNS, or individual devices, at the device's address
    (also reachable as **http://sinkhole.local**).
+
+### Point devices at it
+
+The router is the best place: every device is covered at once (*LAN / DHCP server →
+DNS server* = the device's address, second DNS empty). One device at a time:
+
+| | Where |
+|---|---|
+| Windows 11 | *Settings → Network & internet → Wi-Fi* (or Ethernet) *→ Hardware properties → DNS server assignment → Edit → Manual*, IPv4 on, Preferred DNS |
+| Android | *Settings → Network & internet → Internet →* ⚙ next to your Wi-Fi *→ Edit → Advanced options → IP settings: Static*, DNS 1. Also set *Private DNS* to Off or Automatic. Menu names vary by brand |
+| iPhone / iPad | *Settings → Wi-Fi →* ⓘ *→ Configure DNS → Manual*, remove the others, *Add Server* |
+| Linux (NetworkManager) | `nmcli con mod "<connection>" ipv4.dns <address> ipv4.ignore-auto-dns yes` then `nmcli con up "<connection>"`; or *Settings → Wi-Fi →* ⚙ *→ IPv4*, DNS Automatic off |
 
 ### Make sure nothing bypasses it (IPv6!)
 
