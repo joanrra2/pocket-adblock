@@ -161,7 +161,7 @@ by IP address can't be stopped by DNS: set it to "use the system's DNS" / off.
 Settings also has **Reconnect now** and **Forget** for the uplink.
 
 By default the blocklist checks for a new version every 6 h; this project rebuilds
-its lists daily. You can pick another list or URL, or upload your own, under **Updates**.
+its lists daily (see [How blocklists are updated](#how-blocklists-are-updated)). You can pick another list or URL, or upload your own, under **Updates**.
 
 ### Local names
 
@@ -206,13 +206,31 @@ anything). *Custom URL* takes any SHBL or raw list.
 with the settings, custom lists, local names, Wake-on-LAN computers and device
 rules (passwords only if you tick the box) and restores it on any board.
 
-**Automatic updates.** The device checks its blocklist URL 10 minutes after
-booting and then every *Settings → Updates → interval* (6 h by default). It
-reads the 64-byte header first: if checksum and size match the active list it
-stops there ("already up to date": no download, no flash write); otherwise the
-new list goes into the other slot, is verified and then swapped in. The default
-URL is this project's list, rebuilt by GitHub Actions every day
-(`.github/workflows/blocklist.yml`). *Update now* triggers a check by hand.
+### How blocklists are updated
+
+No reflashing: lists travel separately from the firmware, over the air.
+
+1. **Daily build.** Every day at 04:41 UTC a GitHub Actions job
+   (`.github/workflows/blocklist.yml`) downloads the sources (StevenBlack hosts,
+   HaGeZi Light / Pro), builds the three lists (`blocklist-light.bin`,
+   `blocklist.bin`, `blocklist-aggressive.bin`), signs them when the signing key is
+   configured, checks each one fits its slot, and replaces the files on the
+   [`blocklist` release](https://github.com/joanrra2/pocket-adblock/releases/tag/blocklist).
+2. **Device check.** The device asks for its list URL 10 minutes after booting and
+   then every *Settings → Updates → interval* (6 h by default, so a new daily list
+   arrives within a few hours). *Update now* checks at once.
+3. **Nothing changed? Nothing downloaded.** It reads only the 64-byte header first.
+   Same checksum and size as the active list → "already up to date": no download,
+   no flash write (most checks end here, so frequent checks cost no flash wear).
+   A list bigger than the board's slot is refused here too, before anything is written.
+4. **Write, verify, swap.** A new list is streamed into the inactive slot (there are
+   two, A and B), its SHA-256 (and signature, on signed builds) is verified, and only
+   then does the filter switch to it. A failed or cut download leaves the active
+   list untouched; blocking never stops during an update.
+
+Your own **Always block** / **Always allow** lists are kept in NVS and are not
+touched by list updates. *Custom URL* works the same way with any SHBL or raw list
+(build one with `tools/build_blocklist.py`); *Upload* puts a file in directly.
 
 ## Status LED
 
@@ -338,6 +356,34 @@ writing) was built for the S3 with an added PlatformIO env; ours is the default 
 | Blocked queries while uncached names wait on the upstream, p50 / max | 47 / 315 ms (stuck behind each lookup) | **1.9 / 5.9 ms** |
 | Firmware image | 1,222,688 B | **1,021,808 B** |
 | Free internal heap at runtime | 210 KB | 198 KB (+ cache and history in PSRAM) |
+
+## Lite vs Pro: memory and speed
+
+Measured on v0.4.1 with the same ESP32-S3 (WROOM-2 N32R16V, 16 MB layout), the
+default Normal list (~140k domains) and `tools/dns_bench.py` from a wired PC over
+the board's Wi-Fi. "Lite, no PSRAM" is the Lite build with PSRAM switched off,
+which is what an ESP32-C3 or a plain ESP32 gets.
+
+| | Lite, no PSRAM | Lite | Pro |
+|---|---|---|---|
+| Firmware image | 1,063,440 B | 1,072,400 B | 1,074,816 B |
+| Static internal RAM (DIRAM used of 341,760 B) | 177,352 B | 183,010 B | 190,818 B |
+| Free internal heap, idle / after the benchmark | 167 KB / 173 KB | 179 KB / 185 KB | 176 KB / 177 KB |
+| Free PSRAM | — | 14.6 MB | 11.3 MB |
+| Answer cache | 90 entries, internal | 4096, PSRAM | 4096, PSRAM |
+| Blocked query, p50 / p99 | 1.98 / 7.83 ms | 1.98 / 5.41 ms | 1.99 / 10.18 ms |
+| Cached answer, p50 | 1.96 ms | 2.02 ms | 1.96 ms |
+| Throughput, 16 parallel clients | 692 q/s | 671 q/s | 675 q/s |
+| Blocked while uncached names wait on the upstream, p50 / max | 2.0 / 7.7 ms | 2.0 / 5.7 ms | 1.95 / 5.8 ms |
+| Uncached (forwarded) lookup, p50 | 42.6 ms | 43.0 ms | 41.3 ms |
+| Filter time per query | 43 µs | 48 µs | 42 µs |
+
+Speed is the same in all three: a query costs well under 0.1 ms of CPU, the rest is
+Wi-Fi. Small differences between runs are Wi-Fi noise (p99 moves by a few ms from
+run to run). Uncached lookups depend on your upstream. What Pro adds costs memory,
+not speed: DNS over TLS (~26 KB internal while connected), top-domains counters and
+the bloom filter (PSRAM). The per-client rate limit was off during the runs: one PC
+sending everything would otherwise hit it.
 
 ## Architecture
 
