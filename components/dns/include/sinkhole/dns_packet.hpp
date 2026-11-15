@@ -90,6 +90,20 @@ inline size_t buildBlocked(uint8_t* buf, size_t cap, const Question& q)
     return q.end + 12 + rdlen;
 }
 
+// Rewrites the query in `buf` into an empty reply with the given RCODE
+// (5 = REFUSED for rate-limited clients). Returns reply length.
+inline size_t buildRcode(uint8_t* buf, const Question& q, uint8_t rcode)
+{
+    const bool rd = buf[2] & 0x01;
+    buf[2] = static_cast<uint8_t>(0x80 | (rd ? 0x01 : 0));
+    buf[3] = static_cast<uint8_t>(0x80 | (rcode & 0x0F));
+    wr16(buf + 4, 1);
+    wr16(buf + 6, 0);
+    wr16(buf + 8, 0);
+    wr16(buf + 10, 0);
+    return q.end;
+}
+
 // Rewrites the query in `buf` into an NXDOMAIN reply (question only), the
 // answer canary domains expect. Returns reply length.
 inline size_t buildNxdomain(uint8_t* buf, const Question& q)

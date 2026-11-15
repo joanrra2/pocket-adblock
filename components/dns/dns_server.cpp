@@ -137,6 +137,13 @@ void DnsServer::onClientPacket(int sock)
     const ClientAddr client = v6 ? ClientAddr::fromV6(reinterpret_cast<const uint8_t*>(&from.v6.sin6_addr))
                                  : ClientAddr::fromV4(from.v4.sin_addr.s_addr);
     const uint32_t clientIp = client.v4();
+    // Per-client rate limit (a looping or misbehaving device must not starve
+    // everyone else): REFUSED until its one-minute window resets.
+    if (!clients_.withinRate(client, rateLimit_)) {
+        counters_.rateLimited++;
+        reply(from, v6, buf_, dns::buildRcode(buf_, q, 5));
+        return;
+    }
     if (captive_ && !v6) {
         const uint32_t apIp = apIp_, mask = apMask_;
         if (apIp && (clientIp & mask) == (apIp & mask)) {

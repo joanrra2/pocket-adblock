@@ -281,6 +281,7 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
         .num("dropped", d_.counters.dropped.load())
         .num("bypassBlocked", d_.counters.bypassBlocked.load())
         .num("cnameBlocked", d_.counters.cnameBlocked.load())
+        .num("rateLimited", d_.counters.rateLimited.load())
         .boolean("dotOn", s.dot && DotProxy::available())
         .boolean("dotConnected", d_.dns.dot().connected())
         .num("dotQueries", d_.dns.dot().queries())
@@ -380,6 +381,7 @@ esp_err_t WebServer::getClients(httpd_req_t* req)
             .num("allowed", snap[i].allowed)
             .num("seenAgo", now - snap[i].lastSeen)
             .boolean("banned", snap[i].banned)
+            .num("refused", snap[i].refused)
             .endObject();
     }
     j.endArray();
@@ -604,6 +606,7 @@ esp_err_t WebServer::getSettings(httpd_req_t* req)
         .boolean("guardEncrypted", s.bypassGuard & 2)
         .boolean("cnameCheck", s.cnameCheck)
         .num("privacy", s.privacy)
+        .num("rateLimit", s.rateLimit)
         .boolean("safeGoogle", s.safeSearch & 1)
         .boolean("safeBing", s.safeSearch & 2)
         .str("safeYoutube", (s.safeSearch & 8) ? "strict" : (s.safeSearch & 4) ? "moderate" : "off")
@@ -738,13 +741,18 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         field(form, "youtube", yt, sizeof(yt));
         const uint8_t ss = static_cast<uint8_t>((g[0] == '1' ? 1 : 0) | (bi[0] == '1' ? 2 : 0) |
                                                 (strcmp(yt, "moderate") == 0 ? 4 : 0) | (strcmp(yt, "strict") == 0 ? 8 : 0));
-        char pv[4] = "";
+        char pv[4] = "", rate[8] = "";
         field(form, "privacy", pv, sizeof(pv));
+        const bool hasRate = field(form, "rate", rate, sizeof(rate));
+        const unsigned long rl = strtoul(rate, nullptr, 10);
+        const uint16_t perMin = static_cast<uint16_t>(rl > 60000 ? 60000 : rl);
         const uint8_t privacy = static_cast<uint8_t>(pv[0] == '2' ? 2 : pv[0] == '1' ? 1 : 0);
-        d_.cfg.modify([ss, privacy](Settings& s) {
+        d_.cfg.modify([&](Settings& s) {
             s.safeSearch = ss;
             s.privacy = privacy;
+            if (hasRate) s.rateLimit = perMin;
         });
+        if (hasRate) d_.dns.setRateLimit(perMin);
         d_.dns.setSafeSearch(ss);
         d_.log.setPrivacy(privacy);
         return sendOk(req);

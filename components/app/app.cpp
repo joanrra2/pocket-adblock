@@ -110,6 +110,7 @@ void App::applyUpstream(void* ctx)
     self->dns_.setCnameCheck(s.cnameCheck);
     self->dns_.setSafeSearch(s.safeSearch);
     self->queryLog_.setPrivacy(s.privacy);
+    self->dns_.setRateLimit(s.rateLimit);
 
     char ip[16], ip2[16] = "none";
     formatIp4(up, ip);

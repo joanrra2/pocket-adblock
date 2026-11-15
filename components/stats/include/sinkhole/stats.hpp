@@ -48,6 +48,9 @@ struct ClientInfo {
     uint32_t allowed;
     uint32_t lastSeen;  // uptime seconds
     bool banned;
+    uint32_t rateStart;  // rate-limit window start (uptime s)
+    uint16_t rateCount;  // queries in that window
+    uint32_t refused;    // queries refused by the rate limit
 };
 
 class ClientTable {
@@ -59,6 +62,9 @@ public:
 
     // Counts one query; returns true if the client is banned (IPv4 clients only).
     bool record(const ClientAddr& addr, bool blocked);
+    // Counts one query against the client's per-minute budget; false when
+    // over `perMinute` (the query should be refused). 0 = no limit.
+    bool withinRate(const ClientAddr& addr, uint16_t perMinute);
     bool isBanned(uint32_t ip);
     esp_err_t setBanned(uint32_t ip, bool banned);
 
@@ -69,6 +75,7 @@ public:
 
 private:
     ClientInfo* findLocked(const ClientAddr& addr);
+    ClientInfo* findOrAddLocked(const ClientAddr& addr);
     esp_err_t saveBannedLocked();
 
     Mutex mu_;
@@ -164,6 +171,7 @@ struct Counters {
     std::atomic<uint32_t> dropped{0};  // pending table full / malformed
     std::atomic<uint32_t> bypassBlocked{0};  // canary / encrypted-DNS lookups answered NXDOMAIN
     std::atomic<uint32_t> cnameBlocked{0};   // allowed names that were aliases of blocked ones
+    std::atomic<uint32_t> rateLimited{0};    // queries refused by the per-client rate limit
 };
 
 }  // namespace sinkhole

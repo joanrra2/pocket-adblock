@@ -62,6 +62,8 @@ public:
     void setGuard(uint8_t flags) { guard_ = flags; }
     // Block allowed names whose answer is a CNAME to a blocked domain.
     void setCnameCheck(bool on) { cnameCheck_ = on; }
+    // Queries per minute per client before REFUSED (0 = off).
+    void setRateLimit(uint16_t perMinute) { rateLimit_ = perMinute; }
     uint32_t upstream() const { return upstream_; }
     uint32_t pendingCount() const { return pendingInUse_; }
     bool running() const { return running_; }
@@ -125,6 +127,7 @@ private:
     std::atomic<bool> captive_{false};
     std::atomic<uint8_t> guard_{0};
     std::atomic<bool> cnameCheck_{false};
+    std::atomic<uint16_t> rateLimit_{0};
     std::atomic<bool> flushCache_{false};
     std::atomic<uint8_t> safe_{0};
     std::atomic<uint32_t> safeRefreshAt_{0};  // uptime seconds
