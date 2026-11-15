@@ -22,6 +22,26 @@ constexpr uint32_t kFirstFwCheckS = 120;
 constexpr uint32_t kFwCheckEveryS = 24 * 3600;
 constexpr int kMaxRedirects = 5;
 
+// The project's own daily lists, biggest first. A board whose slot can't hold
+// the chosen one (a backup from a 16 MB board restored on a 4 MB one, a URL
+// typed by hand) steps down to the next instead of failing every check.
+constexpr const char* kListSizes[] = {"blocklist-extended.bin", "blocklist-aggressive.bin", "blocklist.bin"};
+
+// Writes url with the next smaller list's file name; false when url is not one
+// of those lists (custom lists are left alone) or already the smallest.
+bool smallerList(const char* url, char* out, size_t cap)
+{
+    const char* name = strrchr(url, '/');
+    if (!name) return false;
+    name++;
+    for (size_t i = 0; i + 1 < sizeof(kListSizes) / sizeof(kListSizes[0]); i++) {
+        if (strcmp(name, kListSizes[i]) != 0) continue;
+        const int n = snprintf(out, cap, "%.*s%s", static_cast<int>(name - url), url, kListSizes[i + 1]);
+        return n > 0 && static_cast<size_t>(n) < cap;
+    }
+    return false;
+}
+
 bool isRedirect(int status)
 {
     return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
@@ -233,6 +253,7 @@ void Updater::fetchBlocklist()
     }
     char why[96] = "ok";
     uint32_t bytes = 0;
+    bool tooBig = false;
     esp_err_t err = store_.beginWrite();
     if (err != ESP_OK) {
         snprintf(why, sizeof(why), "another blocklist update is running");
@@ -245,7 +266,8 @@ void Updater::fetchBlocklist()
             err = store_.finishWrite(why, sizeof(why));
         } else {
             const bool same = store_.unchanged();
-            if (store_.tooBig())
+            tooBig = store_.tooBig();
+            if (tooBig)
                 snprintf(why, sizeof(why), "list too big for this board: %lu domains, room for %lu",
                          static_cast<unsigned long>(store_.tooBigCount()),
                          static_cast<unsigned long>(store_.info().capacity));
@@ -264,6 +286,20 @@ void Updater::fetchBlocklist()
     {
         LockGuard g(mu_);
         status_.running = false;
+    }
+    char smaller[sizeof(Settings::blocklistUrl)];
+    if (err != ESP_OK && tooBig && smallerList(url, smaller, sizeof(smaller))) {
+        // Nothing was written; the active list keeps filtering. Switch for good
+        // and fetch the smaller list right away.
+        cfg_.modify([&](Settings& s) {
+            if (strcmp(s.blocklistUrl, url) == 0) copyStr(s.blocklistUrl, smaller);
+        });
+        ESP_LOGW(TAG, "blocklist: %s; switching to %s", why, strrchr(smaller, '/') + 1);
+        snprintf(why, sizeof(why), "too big for this board: switched to %s", strrchr(smaller, '/') + 1);
+        report(false, why, bytes);
+        manual_ = true;
+        task_.notify();
+        return;
     }
     if (err == ESP_OK) {
         char msg[96];

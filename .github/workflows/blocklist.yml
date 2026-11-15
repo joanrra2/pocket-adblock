@@ -20,10 +20,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build (fails if a source is unreachable)
+      - name: Build (fails if a source of the main lists is unreachable)
         env:
           BL_KEY: ${{ secrets.BLOCKLIST_SIGNING_KEY }}
         run: |
+          set -o pipefail   # a failed build must not hide behind tee
           sign=""
           if [ -n "$BL_KEY" ]; then          # signed lists when the secret exists
             pip install --quiet --only-binary :all: "cryptography==50.0.2"
@@ -35,25 +36,46 @@ jobs:
           python3 tools/build_blocklist.py blocklist.bin $sign | tee build.log   # compact SHBL v2
           # Light: StevenBlack only (fewest false positives).
           python3 tools/build_blocklist.py blocklist-light.bin $sign "$SB" | tee build-light.log
-          # Aggressive: StevenBlack + HaGeZi Pro, 8 MB boards only (~280k domains).
+          # Aggressive: StevenBlack + HaGeZi Pro, 8 MB boards and up (~280k domains).
           python3 tools/build_blocklist.py blocklist-aggressive.bin $sign "$SB" "$HZ/pro-onlydomains.txt" | tee build-aggressive.log
+          # Extended: Aggressive + HaGeZi Threat Intelligence Feeds (malware, phishing,
+          # scams), 16 MB boards (~1.65M). Optional: if it fails, yesterday's file stays
+          # published and the other lists still go out.
+          python3 tools/build_blocklist.py blocklist-extended.bin $sign "$SB" "$HZ/pro-onlydomains.txt" "$HZ/tif-onlydomains.txt" \
+            | tee build-extended.log || { rm -f blocklist-extended.bin; echo "::warning::Extended list not built"; }
           rm -f /tmp/bl.pem
-      - name: Sanity checks
+      - name: Sanity checks (size fits the smallest board each list is offered to)
         run: |
-          size=$(stat -c%s blocklist.bin)
-          payload=$(( size - 64 - 1024 - 65536 ))
-          grep -q "signed" build.log && payload=$(( payload - 64 ))   # signature trailer
-          test $(( payload % 3 )) -eq 0
-          test $(( payload / 3 )) -gt 50000       # >50k domains: catches a silently shrunk list
-          test "$size" -le $((0xB0000))           # fits a 4 MB-layout slot (704 KB)
-          test "$(stat -c%s blocklist-light.bin)" -le $((0xB0000))
-          test "$(stat -c%s blocklist-aggressive.bin)" -le $((0x270000))   # 8 MB-layout slot
+          domains() { grep 'hash entries' "$1" | grep -oE '[0-9,]+' | head -1 | tr -d ,; }
+          # file  log  max bytes (slot of the smallest layout it is for)  min domains (catches a shrunk list)
+          check() {
+            size=$(stat -c%s "$1"); n=$(domains "$2")
+            echo "$1: $size bytes, $n domains (max $3 bytes, min $4 domains)"
+            [ "$size" -le "$3" ] && [ "$n" -ge "$4" ]
+          }
+          check blocklist.bin            build.log            $((0xB0000))  50000    # 4 MB layout slot
+          check blocklist-light.bin      build-light.log      $((0xB0000))  30000    # 4 MB layout slot
+          check blocklist-aggressive.bin build-aggressive.log $((0x270000)) 150000   # 8 MB layout slot
+          if [ -f blocklist-extended.bin ] && \
+             ! check blocklist-extended.bin build-extended.log $((0x670000)) 800000; then  # 16 MB layout slot
+            rm blocklist-extended.bin
+            echo "::warning::Extended list out of bounds: not published today"
+          fi
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes="Auto-built $(date -u +%F). Normal (blocklist.bin): $(grep 'hash entries' build.log | grep -oE '[0-9,]+' | head -1) domains · Light: $(grep 'hash entries' build-light.log | grep -oE '[0-9,]+' | head -1) · Aggressive (8 MB boards): $(grep 'hash entries' build-aggressive.log | grep -oE '[0-9,]+' | head -1)"
+          n() { grep 'hash entries' "$1" | grep -oE '[0-9,]+' | head -1; }
+          files="blocklist.bin blocklist-light.bin blocklist-aggressive.bin"
+          ext=""
+          if [ -f blocklist-extended.bin ]; then
+            files="$files blocklist-extended.bin"
+            ext=" · Extended (16 MB boards): $(n build-extended.log)"
+          fi
+          notes="Auto-built $(date -u +%F). Normal (blocklist.bin): $(n build.log) domains · Light: $(n build-light.log) · Aggressive (8 MB boards): $(n build-aggressive.log)$ext
+
+          Built from [StevenBlack/hosts](https://github.com/StevenBlack/hosts) (MIT) and [HaGeZi DNS Blocklists](https://github.com/hagezi/dns-blocklists) (GPL-3.0): Light, Pro and Threat Intelligence Feeds. These files are hashed derivatives of those lists, under the same licenses; tools/build_blocklist.py rebuilds them from the sources."
           gh release view blocklist >/dev/null 2>&1 || \
             gh release create blocklist --title "Daily blocklist" --notes "$notes" --latest=false
           gh release edit blocklist --notes "$notes"
-          gh release upload blocklist blocklist.bin blocklist-light.bin blocklist-aggressive.bin --clobber
+          gh release upload blocklist $files --clobber

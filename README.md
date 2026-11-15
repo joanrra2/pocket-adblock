@@ -44,7 +44,7 @@ PSRAM, and takes advantage of PSRAM when the board has it.
 
 | Board | Status | Notes |
 |---|---|---|
-| ESP32-S3 with octal flash + PSRAM (WROOM-2 N16R8V / N32R16V) | tested | use the `esp32s3-octal-flash` profile, 8 MB layout |
+| ESP32-S3 with octal flash + PSRAM (WROOM-2 N16R8V / N32R16V) | tested | use the `esp32s3-octal-flash` profile, 16 MB layout |
 | ESP32-S3 (quad flash, with or without PSRAM) | builds in CI | PSRAM used when present |
 | ESP32-C3 (SuperMini etc., 4 MB, no PSRAM) | builds in CI | the original $2 target |
 | ESP32 (classic), ESP32-C6 | builds in CI | |
@@ -97,7 +97,7 @@ or firmware upload).
 | `ENABLE_LONG_HISTORY` (+ `LONG_HISTORY_ENTRIES`, 4096) | Lite off (32 queries), Pro on | 76 B per entry, PSRAM | boards with PSRAM (on in the octal S3 profile, 4096) |
 | `ENABLE_DNS_OVER_TLS` | Lite off, Pro on | ~26 KB internal while connected (closes after 2 min idle) + 6 KB task | boards with PSRAM; not the C3. Encrypted upstream (port 853); on the S3 uncached lookups were no slower than plain UDP |
 | `ENABLE_TOP_DOMAINS` (+ `TOP_DOMAINS_ENTRIES`, 2048) | Lite off, Pro on | ~60 B per counter, PSRAM only (~120 KB) | boards with PSRAM; turns itself off without it. Top allowed / blocked domains on the overview (top clients are always shown) |
-| `ENABLE_BLOOM_FILTER` (bits per entry: `menuconfig`, 10) | Lite off, Pro on | ~1.25 B per slot entry: ~270 KB (4 MB layout), ~1 MB (8 MB layout) | boards with PSRAM; not the C3 (it needs that RAM for HTTPS). On an S3: not-listed lookups 80.8 → 54.7 µs |
+| `ENABLE_BLOOM_FILTER` (bits per entry: `menuconfig`, 10) | Lite off, Pro on | ~1.25 B per slot entry: ~270 KB (4 MB layout), ~1 MB (8 MB), ~2.7 MB (16 MB) | boards with PSRAM; not the C3 (it needs that RAM for HTTPS). On an S3: not-listed lookups 80.8 → 54.7 µs |
 
 Prebuilt images for every board are attached to each
 [release](../../releases): flash `*-full.bin` at `0x0` the first time.
@@ -198,9 +198,27 @@ Blocking a domain also blocks its subdomains. The **Always allow** list wins ove
 
 **Which list.** *Settings → Updates → Blocklist* picks one of the daily lists this
 project publishes: **Light** (StevenBlack, ~56k domains, fewest false positives),
-**Normal** (default, + HaGeZi Light, ~140k) or **Aggressive** (+ HaGeZi Pro, ~280k,
-8 MB boards only: the device refuses a list bigger than its slot before writing
-anything). *Custom URL* takes any SHBL or raw list.
+**Normal** (default, + HaGeZi Light, ~140k), **Aggressive** (+ HaGeZi Pro, ~280k,
+8 MB boards and up) or **Extended** (Aggressive + HaGeZi Threat Intelligence
+Feeds, ~1.65M, 16 MB boards: the extra 1.4M domains are malware, phishing and
+scam sites, so it breaks no more sites than Aggressive). *Custom URL* takes any
+SHBL or raw list.
+
+| List | Sources | Domains | File | Smallest layout |
+|---|---|---|---|---|
+| Light | StevenBlack | ~56k | ~230 KB | 4 MB |
+| Normal (default) | + HaGeZi Light | ~140k | ~490 KB | 4 MB |
+| Aggressive | StevenBlack + HaGeZi Pro | ~280k | ~900 KB | 8 MB |
+| Extended | Aggressive + HaGeZi TIF | ~1.65M | ~5 MB | 16 MB |
+
+Lists that don't fit are greyed out in the picker. If one ends up configured
+anyway (a backup from a bigger board, a URL typed by hand), the device reads its
+header, writes nothing, keeps filtering with the list it has and switches itself
+to the next smaller list (Extended → Aggressive → Normal). Custom lists that
+don't fit are refused the same way, with the reason shown under *Updates*.
+
+The lists are derived from [StevenBlack/hosts](https://github.com/StevenBlack/hosts)
+(MIT) and [HaGeZi DNS Blocklists](https://github.com/hagezi/dns-blocklists) (GPL-3.0).
 
 **Backup and restore.** *Settings → Backup and restore* downloads one text file
 with the settings, custom lists, local names, Wake-on-LAN computers and device
@@ -212,9 +230,10 @@ No reflashing: lists travel separately from the firmware, over the air.
 
 1. **Daily build.** Every day at 04:41 UTC a GitHub Actions job
    (`.github/workflows/blocklist.yml`) downloads the sources (StevenBlack hosts,
-   HaGeZi Light / Pro), builds the three lists (`blocklist-light.bin`,
-   `blocklist.bin`, `blocklist-aggressive.bin`), signs them when the signing key is
-   configured, checks each one fits its slot, and replaces the files on the
+   HaGeZi Light / Pro / Threat Intelligence Feeds), builds the four lists
+   (`blocklist-light.bin`, `blocklist.bin`, `blocklist-aggressive.bin`,
+   `blocklist-extended.bin`), signs them when the signing key is configured, checks
+   each one fits the smallest board it is offered to and has not shrunk, and replaces the files on the
    [`blocklist` release](https://github.com/joanrra2/pocket-adblock/releases/tag/blocklist).
 2. **Device check.** The device asks for its list URL 10 minutes after booting and
    then every *Settings → Updates → interval* (6 h by default, so a new daily list
@@ -222,7 +241,8 @@ No reflashing: lists travel separately from the firmware, over the air.
 3. **Nothing changed? Nothing downloaded.** It reads only the 64-byte header first.
    Same checksum and size as the active list → "already up to date": no download,
    no flash write (most checks end here, so frequent checks cost no flash wear).
-   A list bigger than the board's slot is refused here too, before anything is written.
+   A list bigger than the board's slot is refused here too, before anything is
+   written (one of this project's lists steps down to the next smaller one).
 4. **Write, verify, swap.** A new list is streamed into the inactive slot (there are
    two, A and B), its SHA-256 (and signature, on signed builds) is verified, and only
    then does the filter switch to it. A failed or cut download leaves the active
