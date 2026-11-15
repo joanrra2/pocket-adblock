@@ -76,10 +76,17 @@ jobs:
           mkdir -p dist
           sudo cp build/merged.bin "dist/pocket-adblock-${{ matrix.name }}-full.bin"
           sudo cp build/pocket-adblock.bin "dist/pocket-adblock-${{ matrix.name }}-ota.bin"
+          # Separate flash images for the browser installer (keeps settings on update).
+          sudo python3 tools/collect_parts.py build "${{ matrix.name }}" parts
+          sudo chown -R "$(id -u):$(id -g)" dist parts
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
+          name: fw-${{ matrix.name }}
           path: dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parts-${{ matrix.name }}
+          path: parts/
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -91,6 +98,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
+          pattern: fw-*
           path: dist
           merge-multiple: true
       - name: Update manifest
@@ -123,7 +131,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
+          pattern: fw-*
           path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: parts-*
+          path: parts
           merge-multiple: true
       # The flasher is served from this site, not a CDN: pinned version, checked
       # against the npm registry's published integrity before it is used.
@@ -134,7 +148,7 @@ jobs:
           python3 -c "import base64,hashlib;exp,f=open('ewt.sha512b64').read().split();got=base64.b64encode(hashlib.sha512(open(f,'rb').read()).digest()).decode();assert got==exp,('integrity mismatch',got)"
           tar xzf esp-web-tools-10.4.0.tgz
       - name: Assemble site
-        run: python3 tools/make_installer.py --bins dist --version "${GITHUB_REF_NAME#v}" --out _site --repo "https://github.com/${GITHUB_REPOSITORY}" --web-tools package/dist/web
+        run: python3 tools/make_installer.py --bins dist --version "${GITHUB_REF_NAME#v}" --out _site --repo "https://github.com/${GITHUB_REPOSITORY}" --web-tools package/dist/web --parts parts
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

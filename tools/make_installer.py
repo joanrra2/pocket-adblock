@@ -32,6 +32,7 @@ def main():
     ap.add_argument('--out', required=True)
     ap.add_argument('--repo', default='https://github.com/', help='source repository URL')
     ap.add_argument('--web-tools', help='esp-web-tools dist/web folder, served as vendor/esp-web-tools')
+    ap.add_argument('--parts', help='folder of <board>/<offset>.bin images (tools/collect_parts.py)')
     a = ap.parse_args()
 
     os.makedirs(os.path.join(a.out, 'manifests'), exist_ok=True)  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
@@ -46,16 +47,28 @@ def main():
 
     made = []
     for board, family in BOARDS.items():
-        name = f'pocket-adblock-{board}-full.bin'
-        src = os.path.join(a.bins, name)
-        if not os.path.exists(src):
-            continue
-        shutil.copy(src, os.path.join(a.out, 'firmware', name))
+        # Preferred: separate images at their offsets, so the settings area (NVS)
+        # is only erased when the user ticks "erase". Fallback: the merged image.
+        pdir = os.path.join(a.parts, board) if a.parts else ''
+        if pdir and os.path.isdir(pdir):
+            dest = os.path.join(a.out, 'firmware', board)
+            os.makedirs(dest, exist_ok=True)  # NOSONAR - developer/CI tool: paths are arguments
+            parts = []
+            for fname in sorted(os.listdir(pdir), key=lambda n: int(n[:-4], 16)):
+                shutil.copy(os.path.join(pdir, fname), os.path.join(dest, fname))
+                parts.append({'path': f'../firmware/{board}/{fname}', 'offset': int(fname[:-4], 16)})
+        else:
+            name = f'pocket-adblock-{board}-full.bin'
+            src = os.path.join(a.bins, name)
+            if not os.path.exists(src):
+                continue
+            shutil.copy(src, os.path.join(a.out, 'firmware', name))
+            parts = [{'path': f'../firmware/{name}', 'offset': 0}]
         manifest = {
             'name': 'pocket-adblock',
             'version': a.version,
             'new_install_prompt_erase': True,
-            'builds': [{'chipFamily': family, 'parts': [{'path': f'../firmware/{name}', 'offset': 0}]}],
+            'builds': [{'chipFamily': family, 'parts': parts}],
         }
         with open(os.path.join(a.out, 'manifests', f'{board}.json'), 'w') as f:  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
             json.dump(manifest, f, indent=2)
