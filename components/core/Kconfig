@@ -151,6 +151,21 @@ menu "DNS Sinkhole"
             Recommended: boards with PSRAM (ESP32-S3 / WROVER). Not recommended on
             the ESP32-C3: it needs that RAM for HTTPS updates.
 
+    config SINKHOLE_TOP_DOMAINS
+        bool "Top domains statistics (PSRAM only)"
+        default n
+        help
+            Counts the most-queried allowed and blocked domains since boot and shows
+            them on the overview. ~60 bytes of PSRAM per counter; turns itself off
+            on boards without PSRAM. Top clients are always available (they use
+            the client table that already exists).
+
+    config SINKHOLE_TOP_DOMAINS_ENTRIES
+        int "Domain counters"
+        depends on SINKHOLE_TOP_DOMAINS
+        default 2048
+        range 256 16384
+
     config SINKHOLE_BLOOM_FILTER
         bool "RAM bloom filter in front of the flash blocklist (uses extra RAM)"
         default n

@@ -91,6 +91,32 @@ struct QueryFilter {
     const char* text = nullptr;  // substring of the domain, nullptr = any
 };
 
+// Most-queried domains since boot (CONFIG_SINKHOLE_TOP_DOMAINS, PSRAM only).
+// 4-way set-associative counters: a new name replaces the smallest count in
+// its set, so frequent names stay and one-off names churn. Approximate, O(1).
+class TopDomains {
+public:
+    struct Item {
+        char name[52];
+        uint32_t count;
+    };
+    void begin();
+    bool enabled() const { return sets_ != 0; }
+    size_t capacity() const { return sets_ * kWays; }
+    void recordLocked(const char* name, bool blocked);              // caller holds the log lock
+    size_t topLocked(bool blocked, Item* out, size_t max) const;   // highest first
+
+private:
+    static constexpr size_t kWays = 4;
+    struct Entry {
+        uint32_t key;    // FNV-1a of the name, low bit = blocked
+        uint32_t count;  // 0 = empty
+        char name[52];
+    };
+    Entry* e_ = nullptr;
+    size_t sets_ = 0;
+};
+
 class QueryLog {
 public:
     static constexpr size_t kSmall = 32;
@@ -108,6 +134,12 @@ public:
     size_t page(size_t& cursor, const QueryFilter& f, QueryEntry* out, size_t max);
     size_t capacity() const { return cap_; }
     bool inPsram() const { return psram_; }
+    bool topEnabled() const { return top_.enabled(); }
+    size_t top(bool blocked, TopDomains::Item* out, size_t max)
+    {
+        LockGuard g(mu_);
+        return top_.topLocked(blocked, out, max);
+    }
 
 private:
     Mutex mu_;
@@ -117,6 +149,7 @@ private:
     bool psram_ = false;
     size_t head_ = 0;
     size_t count_ = 0;
+    TopDomains top_;
 };
 
 struct Counters {

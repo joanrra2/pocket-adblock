@@ -168,11 +168,66 @@ void QueryLog::begin()
     ESP_LOGI("stats", "query history: %u entries in %s", static_cast<unsigned>(cap_),
              psram_ ? "PSRAM" : "internal RAM");
 #endif
+    top_.begin();
+}
+
+void TopDomains::begin()
+{
+#if CONFIG_SINKHOLE_TOP_DOMAINS
+    Region r = allocTable(sizeof(Entry), CONFIG_SINKHOLE_TOP_DOMAINS_ENTRIES, 0);  // PSRAM only
+    if (r.count >= kWays) {
+        e_ = static_cast<Entry*>(r.ptr);
+        sets_ = r.count / kWays;
+    }
+    ESP_LOGI("stats", "top domains: %u counters%s", static_cast<unsigned>(sets_ * kWays),
+             sets_ ? " in PSRAM" : " (off: needs PSRAM)");
+#endif
+}
+
+void TopDomains::recordLocked(const char* name, bool blocked)
+{
+    if (!sets_) return;
+    uint32_t h = 2166136261u;
+    for (const char* c = name; *c; c++) h = (h ^ static_cast<uint8_t>(*c)) * 16777619u;
+    const uint32_t key = (h & ~1u) | (blocked ? 1u : 0u);
+    Entry* set = &e_[(key >> 1) % sets_ * kWays];
+    Entry* victim = &set[0];
+    for (size_t w = 0; w < kWays; w++) {
+        Entry& e = set[w];
+        if (e.count && e.key == key && strncmp(e.name, name, sizeof(e.name) - 1) == 0) {
+            e.count++;
+            return;
+        }
+        if (e.count < victim->count) victim = &e;
+    }
+    victim->key = key;
+    victim->count = 1;
+    strncpy(victim->name, name, sizeof(victim->name) - 1);
+    victim->name[sizeof(victim->name) - 1] = '\0';
+}
+
+size_t TopDomains::topLocked(bool blocked, Item* out, size_t max) const
+{
+    size_t n = 0;
+    for (size_t i = 0; i < sets_ * kWays; i++) {
+        const Entry& e = e_[i];
+        if (!e.count || (e.key & 1u) != (blocked ? 1u : 0u)) continue;
+        if (n == max && e.count <= out[n - 1].count) continue;
+        size_t pos = n < max ? n++ : max - 1;  // insertion sort, highest first
+        while (pos > 0 && out[pos - 1].count < e.count) {
+            out[pos] = out[pos - 1];
+            pos--;
+        }
+        memcpy(out[pos].name, e.name, sizeof(out[pos].name));
+        out[pos].count = e.count;
+    }
+    return n;
 }
 
 void QueryLog::add(const ClientAddr& addr, const char* domain, bool blocked)
 {
     LockGuard g(mu_);
+    top_.recordLocked(domain, blocked);
     QueryEntry& e = ring_[head_];
     e.uptime = uptimeSeconds();
     e.addr = addr;

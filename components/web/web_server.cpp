@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -73,6 +74,7 @@ const WebServer::Route WebServer::kRoutes[] = {
     {"/api/lists", HTTP_GET, &WebServer::getLists, true},
     {"/api/lists", HTTP_POST, &WebServer::postLists, true},
     {"/api/records", HTTP_GET, &WebServer::getRecords, true},
+    {"/api/top", HTTP_GET, &WebServer::getTop, true},
     {"/api/records", HTTP_POST, &WebServer::postRecords, true},
     {"/api/blocking", HTTP_POST, &WebServer::postBlocking, true},
     {"/api/ban", HTTP_POST, &WebServer::postBan, true},
@@ -349,9 +351,13 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
     return j.finish();
 }
 
+namespace {
+ClientInfo sClientSnap[ClientTable::kCapacity];  // httpd task only (shared by the client views)
+}
+
 esp_err_t WebServer::getClients(httpd_req_t* req)
 {
-    static ClientInfo snap[ClientTable::kCapacity];  // httpd task only
+    ClientInfo* snap = sClientSnap;
     char addr[46];
     const size_t n = d_.clients.snapshot(snap, ClientTable::kCapacity);
     const uint32_t now = uptimeSeconds();
@@ -427,6 +433,46 @@ esp_err_t WebServer::getLists(httpd_req_t* req)
     for (size_t i = 0; d_.allow.at(i, name); i++) j.str(nullptr, name);
     j.endArray();
     j.endObject();
+    return j.finish();
+}
+
+// Top domains (allowed / blocked, when built with CONFIG_SINKHOLE_TOP_DOMAINS)
+// and the busiest clients since boot.
+esp_err_t WebServer::getTop(httpd_req_t* req)
+{
+    static TopDomains::Item items[10];  // httpd task only
+    char addr[46];
+    JsonWriter j(req);
+    j.beginObject().boolean("domains", d_.log.topEnabled());
+    for (const bool blocked : {false, true}) {
+        const size_t n = d_.log.top(blocked, items, 10);
+        j.beginArray(blocked ? "blocked" : "allowed");
+        for (size_t i = 0; i < n; i++) j.beginObject().str("name", items[i].name).num("count", items[i].count).endObject();
+        j.endArray();
+    }
+    const size_t n = d_.clients.snapshot(sClientSnap, ClientTable::kCapacity);
+    size_t order[5];
+    size_t k = 0;
+    for (size_t i = 0; i < n; i++) {  // top 5 by total queries
+        const uint32_t t = sClientSnap[i].blocked + sClientSnap[i].allowed;
+        size_t pos = k < 5 ? k++ : 4;
+        if (k == 5 && pos == 4 && t <= sClientSnap[order[4]].blocked + sClientSnap[order[4]].allowed) continue;
+        while (pos > 0 && sClientSnap[order[pos - 1]].blocked + sClientSnap[order[pos - 1]].allowed < t) {
+            order[pos] = order[pos - 1];
+            pos--;
+        }
+        order[pos] = i;
+    }
+    j.beginArray("clients");
+    for (size_t i = 0; i < k; i++) {
+        const ClientInfo& c = sClientSnap[order[i]];
+        j.beginObject()
+            .str("ip", (c.addr.format(addr), addr))
+            .num("queries", c.blocked + c.allowed)
+            .num("blocked", c.blocked)
+            .endObject();
+    }
+    j.endArray().endObject();
     return j.finish();
 }
 

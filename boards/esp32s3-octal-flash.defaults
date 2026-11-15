@@ -21,3 +21,5 @@ CONFIG_SINKHOLE_QUERY_HISTORY_ENTRIES=4096
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_8mb.csv"
 # Encrypted upstream: the TLS session fits easily next to 8 MB of PSRAM.
 CONFIG_SINKHOLE_DNS_OVER_TLS=y
+# Top domains statistics in PSRAM (2048 counters, ~120 KB).
+CONFIG_SINKHOLE_TOP_DOMAINS=y
