@@ -51,6 +51,7 @@ struct ClientInfo {
     uint32_t rateStart;  // rate-limit window start (uptime s)
     uint16_t rateCount;  // queries in that window
     uint32_t refused;    // queries refused by the rate limit
+    bool noFilter;       // per-device rule: never blocked
 };
 
 class ClientTable {
@@ -64,7 +65,9 @@ public:
     bool record(const ClientAddr& addr, bool blocked);
     // Counts one query against the client's per-minute budget; false when
     // over `perMinute` (the query should be refused). 0 = no limit.
-    bool withinRate(const ClientAddr& addr, uint16_t perMinute);
+    bool withinRate(const ClientAddr& addr, uint16_t perMinute, bool* noFilter = nullptr);
+    // Per-device rule (IPv4): queries from this device are never blocked.
+    esp_err_t setNoFilter(uint32_t ip, bool on);
     bool isBanned(uint32_t ip);
     esp_err_t setBanned(uint32_t ip, bool banned);
 
@@ -77,12 +80,15 @@ private:
     ClientInfo* findLocked(const ClientAddr& addr);
     ClientInfo* findOrAddLocked(const ClientAddr& addr);
     esp_err_t saveBannedLocked();
+    static esp_err_t setInList(uint32_t* list, size_t& count, uint32_t ip, bool on, const char* key);
 
     Mutex mu_;
     ClientInfo clients_[kCapacity]{};
     size_t count_ = 0;
     uint32_t banned_[kMaxBanned]{};
     size_t bannedCount_ = 0;
+    uint32_t noFilter_[kMaxBanned]{};
+    size_t noFilterCount_ = 0;
 };
 
 struct QueryEntry {

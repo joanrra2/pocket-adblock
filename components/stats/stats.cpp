@@ -23,6 +23,7 @@ void ClientAddr::format(char out[46]) const
 
 namespace {
 constexpr const char* kBannedKey = "banned";
+constexpr const char* kNoFilterKey = "nofilter";
 
 struct ArpLookup {
     ClientInfo* clients;
@@ -60,6 +61,9 @@ esp_err_t ClientTable::load()
     size_t n = 0;
     nvs::loadBlob(kBannedKey, banned_, sizeof(banned_), &n);
     bannedCount_ = n / sizeof(uint32_t);
+    n = 0;
+    nvs::loadBlob(kNoFilterKey, noFilter_, sizeof(noFilter_), &n);
+    noFilterCount_ = n / sizeof(uint32_t);
     return ESP_OK;
 }
 
@@ -70,12 +74,13 @@ ClientInfo* ClientTable::findLocked(const ClientAddr& addr)
     return nullptr;
 }
 
-bool ClientTable::withinRate(const ClientAddr& addr, uint16_t perMinute)
+bool ClientTable::withinRate(const ClientAddr& addr, uint16_t perMinute, bool* noFilter)
 {
-    if (!perMinute) return true;
     const uint32_t now = uptimeSeconds();
     LockGuard g(mu_);
     ClientInfo* c = findOrAddLocked(addr);
+    if (noFilter) *noFilter = c->noFilter;
+    if (!perMinute) return true;
     if (now - c->rateStart >= 60) {
         c->rateStart = now;
         c->rateCount = 0;
@@ -105,6 +110,8 @@ ClientInfo* ClientTable::findOrAddLocked(const ClientAddr& addr)
         const uint32_t ip = addr.v4();
         for (size_t i = 0; ip && i < bannedCount_; i++)
             if (banned_[i] == ip) c->banned = true;
+        for (size_t i = 0; ip && i < noFilterCount_; i++)
+            if (noFilter_[i] == ip) c->noFilter = true;
         c->rateStart = uptimeSeconds();
         c->lastSeen = c->rateStart;
     }
@@ -147,6 +154,29 @@ esp_err_t ClientTable::setBanned(uint32_t ip, bool banned)
         return ESP_OK;
     }
     return saveBannedLocked();
+}
+
+esp_err_t ClientTable::setInList(uint32_t* list, size_t& count, uint32_t ip, bool on, const char* key)
+{
+    size_t idx = count;
+    for (size_t i = 0; i < count; i++)
+        if (list[i] == ip) idx = i;
+    if (on && idx == count) {
+        if (count >= kMaxBanned) return ESP_ERR_NO_MEM;
+        list[count++] = ip;
+    } else if (!on && idx < count) {
+        list[idx] = list[--count];
+    } else {
+        return ESP_OK;
+    }
+    return nvs::saveBlob(key, list, count * sizeof(uint32_t));
+}
+
+esp_err_t ClientTable::setNoFilter(uint32_t ip, bool on)
+{
+    LockGuard g(mu_);
+    if (ClientInfo* c = findLocked(ClientAddr::fromV4(ip))) c->noFilter = on;
+    return setInList(noFilter_, noFilterCount_, ip, on, kNoFilterKey);
 }
 
 esp_err_t ClientTable::saveBannedLocked()

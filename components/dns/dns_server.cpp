@@ -139,7 +139,8 @@ void DnsServer::onClientPacket(int sock)
     const uint32_t clientIp = client.v4();
     // Per-client rate limit (a looping or misbehaving device must not starve
     // everyone else): REFUSED until its one-minute window resets.
-    if (!clients_.withinRate(client, rateLimit_)) {
+    bool noFilter = false;  // per-device rule: never blocked
+    if (!clients_.withinRate(client, rateLimit_, &noFilter)) {
         counters_.rateLimited++;
         reply(from, v6, buf_, dns::buildRcode(buf_, q, 5));
         return;
@@ -180,7 +181,7 @@ void DnsServer::onClientPacket(int sock)
 
     // Bypass guard (canary domains / encrypted-DNS resolvers): NXDOMAIN, so
     // browsers and phones keep using this server. Respects pause and allow list.
-    if (const uint8_t g = forwardTo ? 0 : guard_.load()) {
+    if (const uint8_t g = (forwardTo || noFilter) ? 0 : guard_.load()) {
         const guard::Hit hit = guard::check(q.name, q.nameLen, g);
         if (hit != guard::Hit::None && filter_.enabled() &&
             (hit == guard::Hit::Canary || !filter_.isAllowed(q.name, q.nameLen))) {
@@ -194,7 +195,7 @@ void DnsServer::onClientPacket(int sock)
     }
 
     const int64_t t0 = esp_timer_get_time();
-    const bool blocked = !forwardTo && filter_.isBlocked(q.name, q.nameLen);
+    const bool blocked = !forwardTo && !noFilter && filter_.isBlocked(q.name, q.nameLen);
     // Rolling average of the filter cost (allow/custom/blocklist), published
     // every 256 queries; only this task writes the accumulators.
     filterSumUs_ += static_cast<uint32_t>(esp_timer_get_time() - t0);
@@ -220,7 +221,7 @@ void DnsServer::onClientPacket(int sock)
     if (size_t hit = cache_.lookup(ckey, buf_, q.end, out_, sizeof(out_))) {
         // Cached answers are re-checked too, so allow-list and setting changes
         // apply at once (only answers that carry aliases cost anything).
-        if (cnameCloaked(out_, hit, q.end)) {
+        if (!noFilter && cnameCloaked(out_, hit, q.end)) {
             countCnameBlocked(client, q.name);
             reply(from, v6, buf_, dns::buildBlocked(buf_, sizeof(buf_), q));
             return;
@@ -258,6 +259,7 @@ void DnsServer::onClientPacket(int sock)
     p->client = from;
     p->clientV6 = v6;
     p->internal = -1;
+    p->noFilter = noFilter;
     p->deadline = xTaskGetTickCount() + kTimeout;
     pendingInUse_++;
 
@@ -326,7 +328,7 @@ void DnsServer::onUpstreamPacket()
         // CNAME cloaking: an allowed name that is an alias of a blocked one
         // (metrics.shop.com -> shop.eulerian.net) is blocked too. Not cached,
         // so allow-list changes apply at once.
-        if (qend && rcode == 0 && cnameCloaked(buf_, static_cast<size_t>(len), qend)) {
+        if (!p.noFilter && qend && rcode == 0 && cnameCloaked(buf_, static_cast<size_t>(len), qend)) {
             dns::Question q{};
             q.end = qend;
             q.qtype = dns::rd16(buf_ + qend - 4);

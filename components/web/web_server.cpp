@@ -382,6 +382,7 @@ esp_err_t WebServer::getClients(httpd_req_t* req)
             .num("seenAgo", now - snap[i].lastSeen)
             .boolean("banned", snap[i].banned)
             .num("refused", snap[i].refused)
+            .boolean("noFilter", snap[i].noFilter)
             .endObject();
     }
     j.endArray();
@@ -575,9 +576,16 @@ esp_err_t WebServer::postBan(httpd_req_t* req)
     if (readForm(req, form, sizeof(form)) < 0 || !field(form, "ip", ipStr, sizeof(ipStr)) ||
         !parseIp4(ipStr, ip))
         return sendError(req, "400 Bad Request", "valid ip is required");
-    field(form, "banned", banned, sizeof(banned));
-    esp_err_t err = d_.clients.setBanned(ip, banned[0] == '1');
-    return err == ESP_OK ? sendOk(req) : sendError(req, "409 Conflict", "ban list is full");
+    // nofilter=1/0: per-device "no blocking" rule; otherwise banned=1/0.
+    char nofilter[4] = "";
+    esp_err_t err;
+    if (field(form, "nofilter", nofilter, sizeof(nofilter))) {
+        err = d_.clients.setNoFilter(ip, nofilter[0] == '1');
+    } else {
+        field(form, "banned", banned, sizeof(banned));
+        err = d_.clients.setBanned(ip, banned[0] == '1');
+    }
+    return err == ESP_OK ? sendOk(req) : sendError(req, "409 Conflict", "the list is full");
 }
 
 esp_err_t WebServer::getSettings(httpd_req_t* req)

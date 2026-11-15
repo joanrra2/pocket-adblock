@@ -92,6 +92,7 @@ private:
         uint8_t failedMask;    // which upstreams answered with an error
         bool clientV6;
         int8_t internal;  // >= 0: our own lookup of a SafeSearch endpoint
+        bool noFilter;    // client exempt from blocking (no CNAME check on the answer)
         ClientSockAddr client;
         TickType_t deadline;
     };
