@@ -17,7 +17,7 @@ constexpr uint64_t kHealthyAfterUs = 60ULL * 1000 * 1000;
 
 App::App()
     : web_(WebDeps{config_, wifi_, store_, custom_, allow_, filter_, clients_, queryLog_, counters_,
-                   dns_, updater_, firmware_, wol_, mqtt_, &App::applyUpstream, this})
+                   dns_, updater_, firmware_, wol_, mqtt_, led_, &App::applyUpstream, this})
 {
 }
 
@@ -54,6 +54,11 @@ void App::start()
     wol_.begin();
     mqtt_.start();
     button_.start();
+
+    // Status LED: off unless a board preset / pin was chosen in Settings.
+    if (s.ledKind && led_.configure(static_cast<StatusLed::Kind>(s.ledKind), s.ledPin, s.ledActiveLow, s.ledBrightness) != ESP_OK)
+        ESP_LOGW(TAG, "status LED: GPIO%d can't be used, LED off", s.ledPin);
+    led_.start(&App::ledState, this);
 
     startRollbackGuard();
     ESP_LOGI(TAG, "ready");
@@ -112,6 +117,21 @@ void App::applyUpstream(void* ctx)
         ESP_LOGI(TAG, "upstream DNS over TLS: %s:853", s.dotHost);
     else
         ESP_LOGI(TAG, "upstream DNS %s, backup %s", ip, ip2);
+}
+
+// What the status LED shows, most important first (called every 50 ms).
+StatusLed::State App::ledState(void* ctx)
+{
+    auto* self = static_cast<App*>(ctx);
+    const WifiStatus ws = self->wifi_.status();
+    if (ws.state == LinkState::NotConfigured) return StatusLed::State::Setup;
+    if (ws.state != LinkState::Connected) return StatusLed::State::Offline;
+    const UpdateStatus us = self->updater_.status();
+    if (us.running || self->updater_.firmwareStatus().installing) return StatusLed::State::Updating;
+    if (!self->dns_.running() || self->store_.info().count == 0 || (us.lastAttempt && !us.lastOk))
+        return StatusLed::State::Failure;
+    if (!self->filter_.enabled()) return StatusLed::State::Paused;
+    return StatusLed::State::Ok;
 }
 
 // What the MQTT bridge may read / control (Home Assistant entities).

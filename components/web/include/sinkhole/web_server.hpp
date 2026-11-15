@@ -18,6 +18,7 @@
 #include "sinkhole/domain_list.hpp"
 #include "sinkhole/stats.hpp"
 #include "sinkhole/updaters.hpp"
+#include "sinkhole/status_led.hpp"
 #include "sinkhole/wifi_manager.hpp"
 #include "sinkhole/wol.hpp"
 
@@ -38,6 +39,7 @@ struct WebDeps {
     FirmwareUpdater& firmware;
     WolService& wol;
     MqttBridge& mqtt;
+    StatusLed& led;
     void (*applyUpstream)(void* ctx);
     void* appCtx;
 };

@@ -203,6 +203,24 @@ new list goes into the other slot, is verified and then swapped in. The default
 URL is this project's list, rebuilt by GitHub Actions every Monday
 (`.github/workflows/blocklist.yml`). *Update now* triggers a check by hand.
 
+## Status LED
+
+*Settings → Status LED* shows the device state on the board's LED. The chip can't
+tell how its board is wired, so you pick the board: the list only shows presets
+for the detected chip (ESP32-S3 DevKitC-1 v1.0 / v1.1, S3-Zero, XIAO S3; C3
+SuperMini, C3-DevKitM-1, C3-Zero; C6-DevKitC-1, XIAO C6; ESP32 DevKit, LOLIN32),
+or choose *Custom* with type, GPIO and polarity. *Save and test* cycles the
+colours so you can confirm. Pins used by flash or PSRAM are refused. Off by default.
+
+| State | Plain LED | RGB LED |
+|---|---|---|
+| Setup access point | slow blink | yellow, slow |
+| No Wi-Fi / uplink | very slow blink | teal, very slow |
+| Downloading list / firmware | medium blink | blue |
+| Failure (no list, last update failed) | fast blink | red, fast |
+| Blocking paused | short flash every 3 s | orange flash |
+| All good | off | dim green |
+
 ## Wake-on-LAN
 
 Add a host under **Wake-on-LAN** (name, MAC, optional IP for the online indicator)

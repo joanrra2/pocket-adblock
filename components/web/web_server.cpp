@@ -588,6 +588,11 @@ esp_err_t WebServer::getSettings(httpd_req_t* req)
         .ip("upstreamIp", s.upstreamIp)
         .ip("backupIp", s.upstreamIp2)
         .boolean("dotAvailable", DotProxy::available())
+        .str("chip", CONFIG_IDF_TARGET)
+        .str("ledKind", s.ledKind == 2 ? "rgb" : s.ledKind == 1 ? "plain" : "off")
+        .num("ledPin", s.ledPin)
+        .boolean("ledLow", s.ledActiveLow)
+        .num("ledBrightness", s.ledBrightness)
         .boolean("dot", s.dot)
         .str("dotHost", s.dotHost)
         .boolean("guardCanary", s.bypassGuard & 1)
@@ -681,6 +686,31 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
             if (dotHost[0]) copyStr(s.dotHost, dotHost);
         });
         if (d_.applyUpstream) d_.applyUpstream(d_.appCtx);
+        return sendOk(req);
+    }
+    if (strcmp(section, "led") == 0) {
+        // kind=off|plain|rgb, pin, low=1 (active low), brightness 1..255, test=1
+        char kind[8] = "", pin[8] = "", low[4] = "", bright[8] = "", test[4] = "";
+        field(form, "kind", kind, sizeof(kind));
+        field(form, "pin", pin, sizeof(pin));
+        field(form, "low", low, sizeof(low));
+        field(form, "brightness", bright, sizeof(bright));
+        field(form, "test", test, sizeof(test));
+        const auto k = strcmp(kind, "rgb") == 0     ? StatusLed::Kind::Rgb
+                       : strcmp(kind, "plain") == 0 ? StatusLed::Kind::Plain
+                                                    : StatusLed::Kind::Off;
+        const int gpio = pin[0] ? atoi(pin) : -1;
+        const unsigned long br = strtoul(bright, nullptr, 10);
+        const uint8_t level = static_cast<uint8_t>(br < 1 ? 24 : br > 255 ? 255 : br);
+        if (d_.led.configure(k, gpio, low[0] == '1', level) != ESP_OK)
+            return sendError(req, "400 Bad Request", "this pin can't drive an LED (used by flash/PSRAM or not an output)");
+        d_.cfg.modify([&](Settings& s) {
+            s.ledKind = static_cast<uint8_t>(k);
+            s.ledPin = static_cast<int8_t>(gpio);
+            s.ledActiveLow = low[0] == '1';
+            s.ledBrightness = level;
+        });
+        if (test[0] == '1' && k != StatusLed::Kind::Off) d_.led.test();
         return sendOk(req);
     }
     if (strcmp(section, "guard") == 0) {

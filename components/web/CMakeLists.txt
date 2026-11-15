@@ -1,6 +1,6 @@
 idf_component_register(SRCS "web_server.cpp" "json_writer.cpp"
                        INCLUDE_DIRS "include"
-                       REQUIRES core blocklist dns stats update net wol esp_http_server
+                       REQUIRES core blocklist dns stats update net wol led esp_http_server
                        PRIV_REQUIRES log esp_system)
 
 # The UI lives in /www as plain HTML; it is gzipped at build time and embedded.

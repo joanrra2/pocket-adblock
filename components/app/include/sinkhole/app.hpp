@@ -8,6 +8,7 @@
 #include "sinkhole/domain_filter.hpp"
 #include "sinkhole/domain_list.hpp"
 #include "sinkhole/stats.hpp"
+#include "sinkhole/status_led.hpp"
 #include "sinkhole/updaters.hpp"
 #include "sinkhole/web_server.hpp"
 #include "sinkhole/wifi_manager.hpp"
@@ -24,6 +25,7 @@ private:
     static void onUplinkChange(void* ctx, bool connected);
     static void applyUpstream(void* ctx);
     MqttHooks mqttHooks();
+    static StatusLed::State ledState(void* ctx);
     static bool hookBlocking(void* ctx);
     static void hookSetBlocking(void* ctx, bool on);
     static size_t hookStats(void* ctx, char* out, size_t cap);
@@ -45,6 +47,7 @@ private:
     WolService wol_{wifi_};
     MqttBridge mqtt_{config_, wol_, mqttHooks()};
     BootButton button_{wifi_};
+    StatusLed led_;
     WebServer web_;
 };
 

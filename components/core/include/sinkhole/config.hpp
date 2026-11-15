@@ -74,6 +74,12 @@ struct Settings {
     // ---- v11 ----
     bool dot;           // DNS over TLS upstream (CONFIG_SINKHOLE_DNS_OVER_TLS builds)
     char dotHost[64];   // e.g. dns.quad9.net
+
+    // ---- v12 ----
+    uint8_t ledKind;      // StatusLed::Kind: 0 off, 1 plain, 2 RGB (WS2812)
+    int8_t ledPin;        // -1 = none
+    bool ledActiveLow;
+    uint8_t ledBrightness;  // RGB only, 1..255
 };
 
 enum TxPower : uint8_t { TxAuto = 0, TxFull = 1, TxReduced = 2 };
@@ -82,7 +88,7 @@ class Config {
 public:
     // Bump when fields are appended to Settings, and add the previous version's
     // byte length to Config::validBytes() so stored settings migrate.
-    static constexpr uint16_t kVersion = 11;
+    static constexpr uint16_t kVersion = 12;
 
     esp_err_t load();  // defaults if missing / older version
     Settings get();    // copy, thread-safe (~1 KB: avoid on small stacks)
