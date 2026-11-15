@@ -80,6 +80,7 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
  main{padding-bottom:96px}
  .hero{justify-content:center;text-align:center}
 }
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 </style>
 </head>
 <body>
@@ -137,14 +138,14 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
   <div class="grid" id="topgrid"><div class="card"><h2>Top clients</h2><div id="topc" class="list"></div></div>
    <div class="card" id="topdcard" hidden><h2>Top domains</h2><div class="seg" id="toptabs"><button data-a="toptab" data-v="blocked" class="on">Blocked</button><button data-a="toptab" data-v="allowed">Allowed</button></div><div id="topd" class="list mt"></div></div></div>
   <div class="card"><h2>Live queries</h2>
-   <div class="row"><input id="ff" placeholder="Filter by domain or client IP"><div class="seg"><button data-a="feedmode" data-v="all" class="on">All</button><button data-a="feedmode" data-v="blocked">Blocked</button></div></div>
+   <div class="row"><label class="sr" for="ff">Filter by domain or client IP</label><input id="ff" placeholder="Filter by domain or client IP"><div class="seg"><button data-a="feedmode" data-v="all" class="on">All</button><button data-a="feedmode" data-v="blocked">Blocked</button></div></div>
    <div class="list mt" id="feed"></div></div>
  </section>
 
  <section id="lists" hidden>
   <div class="card"><div class="seg" id="ltabs"><button data-a="ltab" data-v="block" class="on">Blocked domains</button><button data-a="ltab" data-v="allow">Always allowed</button></div>
    <p class="mu mt" id="lhelp"></p>
-   <form class="row mt" data-f="adddomain"><input name="domain" placeholder="ads.example.com" autocomplete="off" required><button class="btn p">Add</button></form>
+   <form class="row mt" data-f="adddomain"><label class="sr" for="f-adddomain-domain">Domain</label><input id="f-adddomain-domain" name="domain" placeholder="ads.example.com" autocomplete="off" required><button class="btn p">Add</button></form>
    <div class="chips mt" id="chips"></div></div>
  </section>
 
@@ -155,7 +156,7 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
  <section id="wake" hidden>
   <div class="hosts" id="hosts"></div>
   <div class="card mt"><h2>Add a computer</h2>
-   <form data-f="woladd"><div class="row"><input name="name" placeholder="Name, e.g. office-pc" required><input name="mac" placeholder="MAC aa:bb:cc:dd:ee:ff" required><input name="ip" placeholder="IP (optional, shows online state)"><button class="btn p">Save</button></div></form>
+   <form data-f="woladd"><div class="row"><label class="sr" for="f-woladd-name">Name</label><input id="f-woladd-name" name="name" placeholder="Name, e.g. office-pc" required><label class="sr" for="f-woladd-mac">MAC address</label><input id="f-woladd-mac" name="mac" placeholder="MAC aa:bb:cc:dd:ee:ff" required><label class="sr" for="f-woladd-ip">IP address</label><input id="f-woladd-ip" name="ip" placeholder="IP (optional, shows online state)"><button class="btn p">Save</button></div></form>
    <p class="mu mt">The PC needs wired Ethernet with Wake-on-LAN enabled in BIOS/UEFI and on its network adapter. Wake it, then connect with AnyDesk, RustDesk or RDP.</p></div>
   <div class="card"><h2>Wake from anywhere</h2><p class="mu">Publish any message to <code id="mtopic">sinkhole/wol/&lt;name&gt;/set</code> on your MQTT broker. No open ports needed. <span id="mstate"></span></p></div>
  </section>
@@ -164,17 +165,17 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
   <div class="grid">
    <div class="card"><h2>Blocklist</h2><dl class="kv" id="blinfo"></dl>
     <div class="bar mt"><u id="blbar" style="width:0;background:var(--ac)"></u></div>
-    <form data-f="upd"><label>Update URL</label><input name="url" placeholder="https://…/blocklist.bin">
-     <label>Check every (hours, 0 = never)</label><div class="row"><input name="hours" type="number" min="0" max="720" style="max-width:120px"><button class="btn">Save</button></div></form>
+    <form data-f="upd"><label for="f-upd-url">Update URL</label><input id="f-upd-url" name="url" placeholder="https://…/blocklist.bin">
+     <label for="f-upd-hours">Check every (hours, 0 = never)</label><div class="row"><input id="f-upd-hours" name="hours" type="number" min="0" max="720" style="max-width:120px"><button class="btn">Save</button></div></form>
     <div class="row mt"><button class="btn p" data-a="fetch">Download now</button></div>
-    <label>Or upload a .bin built with tools/build_blocklist.py</label><div class="row"><input type="file" id="blf" accept=".bin"><button class="btn" data-a="upload" data-v="bl">Upload</button></div><div class="prog" id="blp"></div></div>
+    <label for="blf">Or upload a .bin built with tools/build_blocklist.py</label><div class="row"><input type="file" id="blf" accept=".bin"><button class="btn" data-a="upload" data-v="bl">Upload</button></div><div class="prog" id="blp"></div></div>
    <div class="card"><h2>Firmware</h2><dl class="kv" id="fwinfo"></dl>
-    <label>Upload a firmware image (pocket-adblock.bin)</label><div class="row"><input type="file" id="fwf" accept=".bin"><button class="btn p" data-a="upload" data-v="fw">Install</button></div><div class="prog" id="fwp"></div>
+    <label for="fwf">Upload a firmware image (pocket-adblock.bin)</label><div class="row"><input type="file" id="fwf" accept=".bin"><button class="btn p" data-a="upload" data-v="fw">Install</button></div><div class="prog" id="fwp"></div>
     <p class="mu mt">The device restarts into the new image and goes back to the previous one automatically if it doesn't come up healthy within a minute.</p>
     <h2 class="mt">Online updates</h2><div class="mu" id="fwupd"></div>
     <div class="row mt"><button class="btn" data-a="fwcheck">Check now</button><button class="btn p" data-a="fwinstall" id="fwinst" hidden>Install</button></div>
-    <form data-f="fw"><label>Update manifest URL</label><input name="url" placeholder="https://github.com/joanrra2/pocket-adblock/releases/latest/download/manifest.json">
-     <label style="display:flex;gap:8px;align-items:center;color:var(--tx)"><input type="checkbox" name="auto" value="1" style="width:auto"> <span>Install updates automatically</span></label>
+    <form data-f="fw"><label for="f-fw-url">Update manifest URL</label><input id="f-fw-url" name="url" placeholder="https://github.com/joanrra2/pocket-adblock/releases/latest/download/manifest.json">
+     <label for="f-fw-auto" style="display:flex;gap:8px;align-items:center;color:var(--tx)"><input id="f-fw-auto" type="checkbox" name="auto" value="1" style="width:auto"> <span>Install updates automatically</span></label>
      <p class="k" id="fwautonote"></p>
      <div class="row mt"><button class="btn">Save</button></div></form>
     <div class="row mt"><button class="btn d" data-a="reboot">Restart device</button></div></div>
@@ -186,27 +187,27 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
    <div class="card"><h2>Your Wi-Fi</h2><div class="mu" id="wst"></div>
     <div class="row mt"><button class="btn" data-a="scan" id="scanb">Scan networks</button><span class="k" id="scanm"></span></div>
     <div class="list" id="nets"></div>
-    <form data-f="wifi"><label>Network</label><input name="ssid" required><label>Password</label><input name="pass" type="password" autocomplete="current-password">
+    <form data-f="wifi"><label for="f-wifi-ssid">Network</label><input id="f-wifi-ssid" name="ssid" required><label for="f-wifi-pass">Password</label><input id="f-wifi-pass" name="pass" type="password" autocomplete="current-password">
      <div class="row mt"><button class="btn p">Connect</button><button class="btn" type="button" data-a="reconnect">Reconnect</button><button class="btn d" type="button" data-a="forget">Forget</button></div></form>
-    <form data-f="radio"><label>Transmit power <span id="txnow"></span></label><div class="row"><select name="tx" style="flex:1"><option value="auto">Auto (drops to 8.5 dBm if the link keeps failing)</option><option value="full">Full</option><option value="reduced">Reduced, 8.5 dBm</option></select><button class="btn">Save</button></div></form></div>
+    <form data-f="radio"><label for="f-radio-tx">Transmit power <span id="txnow"></span></label><div class="row"><select id="f-radio-tx" name="tx" style="flex:1"><option value="auto">Auto (drops to 8.5 dBm if the link keeps failing)</option><option value="full">Full</option><option value="reduced">Reduced, 8.5 dBm</option></select><button class="btn">Save</button></div></form></div>
    <div class="card"><h2>Setup access point</h2><div class="mu" id="ast"></div>
-    <form data-f="ap"><label>Name (empty = Sinkhole-XXXX)</label><input name="ssid">
-     <label>New password (8+ characters, empty = keep)</label><input name="pass" type="password" autocomplete="new-password">
-     <label>Turn on</label><select name="always"><option value="0">When your Wi-Fi is down (recommended)</option><option value="1">Always</option></select>
+    <form data-f="ap"><label for="f-ap-ssid">Name (empty = Sinkhole-XXXX)</label><input id="f-ap-ssid" name="ssid">
+     <label for="f-ap-pass">New password (8+ characters, empty = keep)</label><input id="f-ap-pass" name="pass" type="password" autocomplete="new-password">
+     <label for="f-ap-always">Turn on</label><select id="f-ap-always" name="always"><option value="0">When your Wi-Fi is down (recommended)</option><option value="1">Always</option></select>
      <div class="row mt"><button class="btn p">Save</button></div></form>
     <p class="k mt">Holding BOOT for 3 s also turns it on for 15 minutes; 10 s resets all settings.</p></div>
    <div class="card"><h2>IP address</h2>
-    <form data-f="ip"><label>Mode</label><select name="mode"><option value="dhcp">Automatic (DHCP)</option><option value="static">Static</option></select>
-     <div class="row"><div style="flex:1"><label>Address</label><input name="ip"></div><div style="flex:1"><label>Netmask</label><input name="mask"></div></div>
-     <div class="row"><div style="flex:1"><label>Gateway</label><input name="gw"></div><div style="flex:1"><label>DNS for the device itself</label><input name="dns" placeholder="= gateway"></div></div>
+    <form data-f="ip"><label for="f-ip-mode">Mode</label><select id="f-ip-mode" name="mode"><option value="dhcp">Automatic (DHCP)</option><option value="static">Static</option></select>
+     <div class="row"><div style="flex:1"><label for="f-ip-ip">Address</label><input id="f-ip-ip" name="ip"></div><div style="flex:1"><label for="f-ip-mask">Netmask</label><input id="f-ip-mask" name="mask"></div></div>
+     <div class="row"><div style="flex:1"><label for="f-ip-gw">Gateway</label><input id="f-ip-gw" name="gw"></div><div style="flex:1"><label for="f-ip-dns">DNS for the device itself</label><input id="f-ip-dns" name="dns" placeholder="= gateway"></div></div>
      <div class="row mt"><button class="btn p">Apply</button></div></form>
     <p class="k mt">Prefer a DHCP reservation in your router if it has one. A wrong static address makes the device unreachable: hold BOOT for 3 s to get the setup access point back.</p></div>
    <div class="card"><h2>Upstream DNS</h2>
-    <form data-f="dns"><label>Forward allowed queries to</label><select name="mode"><option value="builtin">Quad9 (built-in)</option><option value="router">My router (DHCP)</option><option value="custom">Custom address</option></select>
-     <label>Custom IPv4</label><input name="ip" placeholder="1.1.1.1">
-     <label>Backup resolver (optional)</label><input name="backup" placeholder="e.g. 1.1.1.1, empty = none">
-     <div id="dotbox" hidden><label class="ck mt"><input type="checkbox" name="dot" value="1"> <span>Encrypt with DNS over TLS</span></label>
-     <label>TLS server name</label><input name="dotHost" placeholder="dns.quad9.net">
+    <form data-f="dns"><label for="f-dns-mode">Forward allowed queries to</label><select id="f-dns-mode" name="mode"><option value="builtin">Quad9 (built-in)</option><option value="router">My router (DHCP)</option><option value="custom">Custom address</option></select>
+     <label for="f-dns-ip">Custom IPv4</label><input id="f-dns-ip" name="ip" placeholder="1.1.1.1">
+     <label for="f-dns-backup">Backup resolver (optional)</label><input id="f-dns-backup" name="backup" placeholder="e.g. 1.1.1.1, empty = none">
+     <div id="dotbox" hidden><label for="f-dns-dot" class="ck mt"><input id="f-dns-dot" type="checkbox" name="dot" value="1"> <span>Encrypt with DNS over TLS</span></label>
+     <label for="f-dns-dothost">TLS server name</label><input id="f-dns-dothost" name="dotHost" placeholder="dns.quad9.net">
      <p class="k">Allowed queries go to this server over an encrypted connection (port 853), so your ISP can't read or change them. Replaces the address and backup above while on. Examples: dns.quad9.net, one.one.one.one, dns.google.</p></div>
      <p class="k">With a backup, each query goes to both at once and the first answer wins: no waiting when one is down or slow. Both providers then see your queries.</p>
      <div class="row mt"><button class="btn p">Save</button></div></form>
@@ -216,31 +217,31 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
    <div class="card"><h2>Local names</h2>
     <p class="mu">Give devices on your network a name, or send every name under a suffix (like lan or in-addr.arpa) to another DNS server such as your router, so its device names and reverse lookups work.</p>
     <div id="recs" class="mt"></div>
-    <form data-f="recadd" class="mt"><div class="row"><select name="kind" style="flex:0 0 auto;width:auto"><option value="address">Name → address</option><option value="forward">Suffix → DNS server</option></select><input name="name" placeholder="nas.home" required><input name="ip" placeholder="192.168.1.10" required><button class="btn p">Add</button></div></form></div>
+    <form data-f="recadd" class="mt"><div class="row"><label class="sr" for="f-recadd-kind">Type</label><select id="f-recadd-kind" name="kind" style="flex:0 0 auto;width:auto"><option value="address">Name → address</option><option value="forward">Suffix → DNS server</option></select><label class="sr" for="f-recadd-name">Name</label><input id="f-recadd-name" name="name" placeholder="nas.home" required><label class="sr" for="f-recadd-ip">Address</label><input id="f-recadd-ip" name="ip" placeholder="192.168.1.10" required><button class="btn p">Add</button></div></form></div>
    <div class="card"><h2>Extra protection</h2>
     <form data-f="guard">
-     <label class="ck"><input type="checkbox" name="canary" value="1"> <span>Tell browsers and phones to use this DNS</span></label>
+     <label for="f-guard-canary" class="ck"><input id="f-guard-canary" type="checkbox" name="canary" value="1"> <span>Tell browsers and phones to use this DNS</span></label>
      <p class="k">Answers the official signals so Firefox turns off its automatic DNS-over-HTTPS and Apple turns off iCloud Private Relay on this network.</p>
-     <label class="ck"><input type="checkbox" name="encrypted" value="1"> <span>Block known encrypted-DNS servers</span></label>
+     <label for="f-guard-encrypted" class="ck"><input id="f-guard-encrypted" type="checkbox" name="encrypted" value="1"> <span>Block known encrypted-DNS servers</span></label>
      <p class="k">Stops apps from looking up Google, Cloudflare, Quad9 and other DNS-over-HTTPS servers. A phone with "Private DNS" set to one of them loses Internet until it is set to Automatic or Off. Allowed domains still pass.</p>
-     <label class="ck"><input type="checkbox" name="cname" value="1"> <span>Catch trackers hidden behind a site's own domain</span></label>
+     <label for="f-guard-cname" class="ck"><input id="f-guard-cname" type="checkbox" name="cname" value="1"> <span>Catch trackers hidden behind a site's own domain</span></label>
      <p class="k">Some trackers sit on a subdomain of the site (metrics.shop.com) that points to a tracking company. Answers whose aliases (CNAME) lead to a blocked domain are blocked too.</p>
-     <label class="ck"><input type="checkbox" name="google" value="1"> <span>SafeSearch on Google</span></label>
-     <label class="ck"><input type="checkbox" name="bing" value="1"> <span>SafeSearch on Bing</span></label>
-     <label>YouTube restricted mode</label><select name="youtube"><option value="off">Off</option><option value="moderate">Moderate</option><option value="strict">Strict</option></select>
+     <label for="f-guard-google" class="ck"><input id="f-guard-google" type="checkbox" name="google" value="1"> <span>SafeSearch on Google</span></label>
+     <label for="f-guard-bing" class="ck"><input id="f-guard-bing" type="checkbox" name="bing" value="1"> <span>SafeSearch on Bing</span></label>
+     <label for="f-guard-youtube">YouTube restricted mode</label><select id="f-guard-youtube" name="youtube"><option value="off">Off</option><option value="moderate">Moderate</option><option value="strict">Strict</option></select>
      <p class="k">For families: explicit results are filtered for every device on the network and can't be turned off in the browser. Stays on while ad blocking is paused.</p>
      <div class="row mt"><button class="btn p">Save</button><span class="k" id="bypassn"></span></div></form></div>
    <div class="card"><h2>Remote wake (MQTT)</h2>
-    <form data-f="mqtt"><label>Broker URI</label><input name="uri" placeholder="mqtts://broker.example.com:8883">
-     <div class="row"><div style="flex:1"><label>User</label><input name="user"></div><div style="flex:1"><label>Password (empty = keep)</label><input name="pass" type="password" autocomplete="new-password"></div></div>
-     <label>Topic prefix</label><input name="prefix" placeholder="sinkhole">
-     <label class="ck"><input type="checkbox" name="ha" value="1"> <span>Show in Home Assistant (MQTT discovery)</span></label><div class="row mt"><button class="btn p">Save</button><span class="k">applies after restart</span></div></form></div>
+    <form data-f="mqtt"><label for="f-mqtt-uri">Broker URI</label><input id="f-mqtt-uri" name="uri" placeholder="mqtts://broker.example.com:8883">
+     <div class="row"><div style="flex:1"><label for="f-mqtt-user">User</label><input id="f-mqtt-user" name="user"></div><div style="flex:1"><label for="f-mqtt-pass">Password (empty = keep)</label><input id="f-mqtt-pass" name="pass" type="password" autocomplete="new-password"></div></div>
+     <label for="f-mqtt-prefix">Topic prefix</label><input id="f-mqtt-prefix" name="prefix" placeholder="sinkhole">
+     <label for="f-mqtt-ha" class="ck"><input id="f-mqtt-ha" type="checkbox" name="ha" value="1"> <span>Show in Home Assistant (MQTT discovery)</span></label><div class="row mt"><button class="btn p">Save</button><span class="k">applies after restart</span></div></form></div>
    <div class="card"><h2>Admin login</h2>
-    <form data-f="admin"><label>User</label><input name="user" required autocomplete="username"><label>New password (8+ characters)</label><input name="pass" type="password" required minlength="8" autocomplete="new-password">
+    <form data-f="admin"><label for="f-admin-user">User</label><input id="f-admin-user" name="user" required autocomplete="username"><label for="f-admin-pass">New password (8+ characters)</label><input id="f-admin-pass" name="pass" type="password" required minlength="8" autocomplete="new-password">
      <div class="row mt"><button class="btn p">Change</button></div></form></div>
    <div class="card"><h2>Language</h2><div class="seg"><button data-a="lang" data-v="en">English</button><button data-a="lang" data-v="es">Español</button></div></div>
    <div class="card"><h2>Device name</h2>
-    <form data-f="hostname"><label>Hostname</label><div class="row"><input name="hostname" required><span class="mu">.local</span></div><div class="row mt"><button class="btn p">Save</button><span class="k">applies after restart</span></div></form></div>
+    <form data-f="hostname"><label for="f-hostname-hostname">Hostname</label><div class="row"><input id="f-hostname-hostname" name="hostname" required><span class="mu">.local</span></div><div class="row mt"><button class="btn p">Save</button><span class="k">applies after restart</span></div></form></div>
   </div>
  </section>
 </main>
@@ -351,7 +352,7 @@ const kv=rows=>rows.map(([k,v])=>`<dt>${tr(k)}</dt><dd>${v}</dd>`).join('');
 function renderStatus(s){
  const d=s.dns,w=s.wifi,b=s.blocklist,total=d.blocked+d.allowed,pct=total?d.blocked/total*100:0;
  $('#bypassn').textContent=[d.bypassBlocked?tr('{0} bypass attempts stopped',n(d.bypassBlocked)):'',d.cnameBlocked?tr('{0} hidden trackers caught',n(d.cnameBlocked)):''].filter(Boolean).join(' · ');
- $('#ver').textContent=tr('v{0} · up {1}',s.version+(s.edition&&s.edition!='lite'?' '+(s.edition=='plus'?'Plus':tr('custom')):''),ago(s.uptime));
+ $('#ver').textContent=tr('v{0} · up {1}',s.version+(s.edition&&s.edition!='lite'?' '+(s.edition=='pro'?'Pro':tr('custom')):''),ago(s.uptime));
  const st=d.blocking?['Protecting','ok']:d.resumeIn?['Paused','wa']:['Off','bad'];
  $('#pill').textContent=tr(st[0]);$('#pill').className='pill '+st[1];
  $('#pct').textContent=pct.toFixed(pct<10?1:0)+'%';

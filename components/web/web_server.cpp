@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdint>
 #include <cstring>
 #include <initializer_list>
 
@@ -218,8 +219,9 @@ esp_err_t WebServer::getIndex(httpd_req_t* req)
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
-    return httpd_resp_send(req, reinterpret_cast<const char*>(index_html_gz_start),
-                           index_html_gz_end - index_html_gz_start);
+    // Start and end are two linker symbols around the same embedded file.
+    const auto size = reinterpret_cast<uintptr_t>(index_html_gz_end) - reinterpret_cast<uintptr_t>(index_html_gz_start);
+    return httpd_resp_send(req, reinterpret_cast<const char*>(index_html_gz_start), static_cast<ssize_t>(size));
 }
 
 esp_err_t WebServer::getStatus(httpd_req_t* req)
