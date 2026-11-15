@@ -147,17 +147,27 @@ void WolService::setResultLocked(int i, const char* text)
     hosts_[i].resultAt = uptimeSeconds();
 }
 
-esp_err_t WolService::wakeAndVerify(const char* name)
+esp_err_t WolService::wakeAndVerify(const char* name, bool* verifying)
 {
+    if (verifying) *verifying = false;
     WolHost h;
     {
         LockGuard g(mu_);
         const int i = findLocked(name);
         if (i < 0) return ESP_ERR_NOT_FOUND;
-        if (hosts_[i].waking) return ESP_OK;  // already on it
+        if (hosts_[i].waking) {  // already on it
+            if (verifying) *verifying = true;
+            return ESP_OK;
+        }
         h = hosts_[i].host;
     }
-    if (!h.ip) return wake(name);  // nothing to verify against
+    if (!h.ip) {  // nothing to verify against: just send
+        const esp_err_t err = wake(name);
+        LockGuard g(mu_);
+        const int i = findLocked(name);
+        if (i >= 0 && err == ESP_OK) setResultLocked(i, "magic packet sent");
+        return err;
+    }
     if (check(h) || check(h)) {  // one lost packet must not trigger a wake
         LockGuard g(mu_);
         const int i = findLocked(name);
@@ -171,6 +181,7 @@ esp_err_t WolService::wakeAndVerify(const char* name)
     LockGuard g(mu_);
     const int i = findLocked(name);
     if (i >= 0 && err == ESP_OK) {
+        if (verifying) *verifying = true;
         hosts_[i].waking = true;
         hosts_[i].wakeDeadline = uptimeSeconds() + kVerifySeconds;
         setResultLocked(i, "waking");

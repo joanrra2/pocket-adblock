@@ -1244,10 +1244,12 @@ esp_err_t WebServer::postWol(httpd_req_t* req)
 
     if (strcmp(action, "wake") == 0) {
         if (name[0]) {
-            esp_err_t err = d_.wol.wakeAndVerify(name);
+            bool verifying = false;
+            esp_err_t err = d_.wol.wakeAndVerify(name, &verifying);
             if (err == ESP_ERR_INVALID_STATE) return sendOk(req, "already online");
-            return err == ESP_OK ? sendOk(req, "waking; checking until it answers")
-                                 : sendError(req, "404 Not Found", "unknown host");
+            if (err == ESP_ERR_NOT_FOUND) return sendError(req, "404 Not Found", "unknown host");
+            if (err != ESP_OK) return sendError(req, "500 Internal Server Error", "send failed");
+            return sendOk(req, verifying ? "waking; checking until it answers" : "magic packet sent");
         }
         uint8_t mac[6];
         if (!parseMac(macStr, mac)) return sendError(req, "400 Bad Request", "name or mac required");

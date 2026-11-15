@@ -65,9 +65,10 @@ public:
     esp_err_t wake(const char* name);
     // Checks first (no packet when already online), wakes, then checks every
     // 3 s (resending at 20 s and 60 s) until online or kVerifySeconds pass.
-    // The outcome is in WolHostState::result. Hosts without an IP just wake.
+    // The outcome is in WolHostState::result. Hosts without an IP just wake
+    // (*verifying = false: there is nothing to check against).
     // ESP_ERR_INVALID_STATE: already online, nothing sent.
-    esp_err_t wakeAndVerify(const char* name);
+    esp_err_t wakeAndVerify(const char* name, bool* verifying = nullptr);
     static constexpr uint32_t kVerifySeconds = 180;
     esp_err_t wakeMac(const uint8_t mac[6]);
 
