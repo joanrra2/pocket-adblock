@@ -80,7 +80,7 @@ def main():
             ap.error('unicast mode needs --mac (the MAC of the card that reaches the device)')
         mac = a.mac
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        probe.connect((a.server, 67))
+        probe.connect((a.server, 67))  # NOSONAR - developer test tool: sends DHCP packets to the device address given on the command line
         myip = probe.getsockname()[0]
         probe.close()
         dst = a.server
