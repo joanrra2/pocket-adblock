@@ -1,8 +1,11 @@
 #pragma once
 // Answer cache for forwarded queries. A hit is answered locally in microseconds
-// instead of waiting for an upstream round trip, which is the one place where
-// PSRAM clearly improves latency: big cache in PSRAM when present, small one in
-// internal RAM otherwise (sized once at boot, see memory.hpp).
+// instead of waiting for an upstream round trip.
+//
+// With PSRAM: one big table of full-size (512 B) slots in PSRAM. Without it the
+// same internal-RAM budget is split into two tables, because 97% of real
+// answers are <= 160 bytes: many small slots plus a few full-size ones, about
+// 2.8x more answers than equal 512-byte slots would hold.
 //
 // Only touched by the DNS task, so it needs no locking.
 
@@ -15,6 +18,7 @@ namespace sinkhole {
 class DnsCache {
 public:
     static constexpr size_t kMaxResponse = 512;
+    static constexpr size_t kSmallResponse = 160;
 
     void begin();
 
@@ -32,23 +36,42 @@ public:
         return k ? k : 1;  // 0 marks an empty slot
     }
 
-    size_t capacity() const { return sets_ * 2; }
+    size_t capacity() const { return small_.sets * small_.ways + large_.sets * large_.ways; }
     bool inPsram() const { return psram_; }
     uint32_t hits() const { return hits_; }
     uint32_t misses() const { return misses_; }
 
 private:
-    struct Entry {
+    struct Hdr {
         uint32_t key;
         uint32_t storedAt;  // uptime seconds
         uint32_t ttl;       // seconds
         uint16_t len;
         uint16_t qend;
-        uint8_t data[kMaxResponse];
+    };
+    // Set-associative table of Hdr + `room` bytes of answer: 2-way for the big
+    // PSRAM table, fully associative (one set) for the small internal ones,
+    // where scanning ~90 headers is cheap and no two names fight for a slot.
+    struct Table {
+        uint8_t* mem = nullptr;
+        size_t stride = 0;
+        size_t room = 0;
+        size_t sets = 0;
+        size_t ways = 2;
+        Hdr* way(uint32_t key, size_t w) const
+        {
+            return reinterpret_cast<Hdr*>(mem + ((key % sets) * ways + w) * stride);
+        }
+        static uint8_t* data(Hdr* h) { return reinterpret_cast<uint8_t*>(h + 1); }
     };
 
-    Entry* entries_ = nullptr;
-    size_t sets_ = 0;  // 2-way set associative
+    bool setup(Table& t, size_t room, size_t entries, bool psram, bool fullyAssociative);
+    size_t lookupIn(Table& t, uint32_t key, const uint8_t* query, size_t qend, uint8_t* out, size_t cap,
+                    uint32_t now);
+    static void forget(Table& t, uint32_t key);
+
+    Table small_;
+    Table large_;
     bool psram_ = false;
     std::atomic<uint32_t> hits_{0};
     std::atomic<uint32_t> misses_{0};

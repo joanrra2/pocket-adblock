@@ -20,7 +20,8 @@ PSRAM, and takes advantage of PSRAM when the board has it.
   forced into safe mode for every device, using each provider's official safe endpoint
   (looked up through the upstream every 6 h, since addresses change). Stays on when
   ad blocking is paused.
-- **DNS answer cache** (4096 entries in PSRAM on boards that have it, 32 in internal RAM otherwise).
+- **DNS answer cache** (4096 entries in PSRAM on boards that have it; 90 in ~17 KB of internal RAM
+  otherwise, sized for real answers: 97% are 160 bytes or less).
   Answers with TTL 0 or a few seconds (some resolvers, Quad9 at times, send them) are still
   cached for 30 s, while clients see the upstream's own TTL
   (`SINKHOLE_DNS_CACHE_MIN_TTL`, 0 turns this off).
