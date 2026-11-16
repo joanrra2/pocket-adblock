@@ -301,7 +301,7 @@ Add a host under **Wake-on-LAN** (name, MAC, optional IP and port) and press **W
 its network adapter.
 
 **From anywhere:** set an MQTT broker in Settings (TLS recommended, e.g. a free
-HiveMQ Cloud or your Home Assistant's Mosquitto). Then:
+EMQX Cloud Serverless or HiveMQ Cloud deployment, or your Home Assistant's Mosquitto). Then:
 
 | Topic | Direction | Payload |
 |---|---|---|
@@ -322,6 +322,9 @@ online. Under *Wake-on-LAN → Phone app*, the device shows a QR code with the b
 address, port and topic prefix: scan it in the Android app, or with the iPhone camera to
 open the web app already filled in. The code never contains a password; give the phone
 its own broker login and type its password in the app.
+
+Step by step, from creating a free EMQX Cloud broker to the first wake, with a
+two-minute video: [Pocket Wake setup guide](https://github.com/joanrra2/pocket-wake/blob/main/docs/SETUP.md).
 
 ### Home Assistant
 
