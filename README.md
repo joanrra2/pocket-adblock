@@ -47,7 +47,8 @@ PSRAM, and takes advantage of PSRAM when the board has it.
 | ESP32-S3 with octal flash + PSRAM (WROOM-2 N16R8V / N32R16V) | tested | use the `esp32s3-octal-flash` profile, 16 MB layout |
 | ESP32-S3 (quad flash, with or without PSRAM) | builds in CI | PSRAM used when present |
 | ESP32-C3 (SuperMini etc., 4 MB, no PSRAM) | builds in CI | the original $2 target |
-| ESP32 (classic), ESP32-C6 | builds in CI | |
+| ESP32 (classic), ESP32-C6 (4 MB) | builds in CI | |
+| ESP32-C6 with 8 MB flash (DevKitC-1 N8, WROOM-1 N8) | builds in CI | use the `esp32c6-8mb` profile, 8 MB layout (~830k domains, fits the Aggressive list) |
 
 Power it from a stable USB supply. Many routers have a spare USB port that is enough.
 
@@ -64,6 +65,11 @@ Requires [ESP-IDF v6.1](https://docs.espressif.com/projects/esp-idf/en/v6.1/).
 # ESP32-C3 / generic S3 / ESP32 (4 MB layout)
 idf.py set-target esp32c3
 idf.py build flash monitor
+```
+
+```bash
+# ESP32-C6 with 8 MB flash (e.g. DevKitC-1 N8): bigger blocklist slots
+idf.py -B build-c6-8 -D SDKCONFIG=build-c6-8/sdkconfig   -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32c6-8mb.defaults"   set-target esp32c6 build flash monitor
 ```
 
 ```bash
