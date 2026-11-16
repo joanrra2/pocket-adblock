@@ -316,6 +316,13 @@ HiveMQ Cloud or your Home Assistant's Mosquitto). Then:
 mosquitto_pub -h broker -p 8883 -u user -P pass -t sinkhole/wol/office-pc/set -m wake
 ```
 
+**Phone app:** [Pocket Wake](https://github.com/joanrra2/pocket-wake) (Android, and a web
+app for iPhone and any browser) wakes these hosts from your phone and shows when they come
+online. Under *Wake-on-LAN → Phone app*, the device shows a QR code with the broker
+address, port and topic prefix: scan it in the Android app, or with the iPhone camera to
+open the web app already filled in. The code never contains a password; give the phone
+its own broker login and type its password in the app.
+
 ### Home Assistant
 
 With **Show in Home Assistant** ticked (default) and the broker your Home Assistant

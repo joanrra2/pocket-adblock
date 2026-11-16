@@ -70,6 +70,7 @@ label.ck{display:flex;gap:8px;align-items:center;color:var(--tx);font-size:14px}
 .spark{width:100%;height:70px;display:block}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--tx);color:var(--bg);padding:10px 16px;border-radius:12px;font-weight:600;display:none;z-index:9;max-width:90vw}
 .toast.e{background:var(--bad);color:#fff}
+.qrw{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start}.qrbox{width:220px;max-width:100%;flex:none;background:#fff;border-radius:12px;padding:4px}.qrbox svg{display:block;width:100%;height:auto}
 code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
 [hidden]{display:none!important}
 @media (max-width:760px){
@@ -163,6 +164,14 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
    <form data-f="woladd"><div class="row"><label class="sr" for="f-woladd-name">Name</label><input id="f-woladd-name" name="name" placeholder="Name, e.g. office-pc" required><label class="sr" for="f-woladd-mac">MAC address</label><input id="f-woladd-mac" name="mac" placeholder="MAC aa:bb:cc:dd:ee:ff" required><label class="sr" for="f-woladd-ip">IP address</label><input id="f-woladd-ip" name="ip" placeholder="IP (optional, shows online state)"><label class="sr" for="f-woladd-port">Port to check</label><input id="f-woladd-port" name="port" type="number" min="1" max="65535" placeholder="Port (optional): 3389 RDP, 22 SSH" style="max-width:150px"><button class="btn p">Save</button></div></form>
    <p class="mu mt">The PC needs wired Ethernet with Wake-on-LAN enabled in BIOS/UEFI and on its network adapter. Wake it, then connect with AnyDesk, RustDesk or RDP.</p></div>
   <div class="card"><h2>Wake from anywhere</h2><p class="mu">Publish any message to <code id="mtopic">sinkhole/wol/&lt;name&gt;/set</code> on your MQTT broker. No open ports needed. <span id="mstate"></span></p></div>
+  <div class="card"><h2>Phone app</h2>
+   <p class="mu" id="qrnone" hidden>Set up a broker in <a href="#settings">Settings</a> first, then scan the code shown here.</p>
+   <div class="qrw" id="qrbody" hidden><div class="qrbox" id="qrbox"></div>
+    <div style="flex:1;min-width:min(100%,260px)"><p class="mu">Scan this with Pocket Wake to fill in the broker address, port and topic prefix. Android app: Broker settings → Scan. iPhone: point the Camera at it to open the web app.</p>
+     <p class="k mt">The code never contains a password. Give the phone its own broker login, then type its password in the app.</p>
+     <form data-f="qr" class="mt"><label for="f-qr-user">Phone's broker user (optional)</label><input id="f-qr-user" name="user" autocomplete="off" placeholder="e.g. phone">
+      <div class="row"><div style="flex:1"><label for="f-qr-ws">Web app port (WebSocket over TLS)</label><input id="f-qr-ws" name="ws" type="number" min="1" max="65535" placeholder="8084"></div><div style="flex:1"><label for="f-qr-path">WebSocket path</label><input id="f-qr-path" name="path" placeholder="/mqtt"></div></div></form>
+     <div class="row mt"><button class="btn s" type="button" data-a="qrcopy">Copy link</button><button class="btn s" type="button" data-a="qropen">Open the web app</button></div></div></div></div>
  </section>
 
  <section id="system" hidden>
@@ -310,7 +319,7 @@ const ES={
 'With a backup, each query goes to both at once and the first answer wins: no waiting when one is down or slow. Both providers then see your queries.':'Con respaldo, cada consulta va a ambos a la vez y gana la primera respuesta: sin esperas si uno falla o va lento. Ambos proveedores verán tus consultas.',
 'Ads still showing on some devices?':'¿Siguen saliendo anuncios en algunos dispositivos?','Devices also get DNS servers over':'Los dispositivos también reciben servidores DNS por',
 'from the router, and use them instead of this one. In the router, turn off IPv6 DNS advertisement (RDNSS/DHCPv6) or point it at this device. Also switch off "Secure DNS" / "DNS over HTTPS" in browsers, which bypasses every local DNS server.':'del router y los usan en lugar de este. En el router, desactiva el anuncio de DNS IPv6 (RDNSS/DHCPv6) o apúntalo a este dispositivo. Desactiva también el "DNS seguro" / "DNS sobre HTTPS" de los navegadores, que se salta cualquier DNS local.',
-'Remote wake (MQTT)':'Encendido remoto (MQTT)','This device also answers DNS over IPv6, at the addresses shown under Network on the overview.':'Este dispositivo también responde DNS por IPv6, en las direcciones que aparecen en Red, en el resumen.','Broker URI':'URI del broker','User':'Usuario','Password (empty = keep)':'Contraseña (vacío = mantener)','Topic prefix':'Prefijo de tema',
+'Remote wake (MQTT)':'Encendido remoto (MQTT)','Phone app':'App del móvil','first, then scan the code shown here.':'primero y luego escanea el código que aparecerá aquí.','Scan this with Pocket Wake to fill in the broker address, port and topic prefix. Android app: Broker settings → Scan. iPhone: point the Camera at it to open the web app.':'Escanéalo con Pocket Wake para rellenar la dirección del broker, el puerto y el prefijo de tema. App de Android: Ajustes del broker → Escanear. iPhone: apunta la Cámara para abrir la app web.','The code never contains a password. Give the phone its own broker login, then type its password in the app.':'El código nunca incluye una contraseña. Dale al móvil su propio usuario del broker y escribe su contraseña en la app.',"Phone's broker user (optional)":'Usuario del broker del móvil (opcional)','e.g. phone':'p. ej. movil','Web app port (WebSocket over TLS)':'Puerto de la app web (WebSocket con TLS)','WebSocket path':'Ruta WebSocket','Copy link':'Copiar enlace','Open the web app':'Abrir la app web','Copy this link':'Copia este enlace','Link copied':'Enlace copiado','This device also answers DNS over IPv6, at the addresses shown under Network on the overview.':'Este dispositivo también responde DNS por IPv6, en las direcciones que aparecen en Red, en el resumen.','Broker URI':'URI del broker','User':'Usuario','Password (empty = keep)':'Contraseña (vacío = mantener)','Topic prefix':'Prefijo de tema',
 'applies after restart':'se aplica tras reiniciar','Admin login':'Acceso de administrador','New password (8+ characters)':'Nueva contraseña (8+ caracteres)','Change':'Cambiar',
 'Device name':'Nombre del dispositivo','Hostname':'Nombre de host','Wake-on-LAN':'Wake-on-LAN',
 // dynamic text
@@ -480,6 +489,78 @@ async function loadWol(){
   <div class="row mt"><button class="btn p s" data-a="wake" data-v="${esc(x.name)}">${tr('Wake')}</button><button class="btn s d" data-a="wolrm" data-v="${esc(x.name)}">${tr('Remove')}</button>
   ${x.wokeAgo>=0?'<span class="k">'+tr('woken {0} ago',ago(x.wokeAgo))+'</span>':''}</div></div>`).join(''):'<div class="card mu">'+tr('No computers yet. Add one below.')+'</div>';
 }
+// Phone app setup code: a link to the Pocket Wake web app with the broker settings (never a password).
+// QR code, byte mode, error correction M. Returns rows of booleans (true = dark).
+// Follows the structure of Project Nayuki's QR Code generator (MIT).
+function qrEncode(text){
+ const ECC=[0,10,16,26,18,24,16,18,22,22,26,30,22,22,24,24,28,28,26,26,26,26,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28],
+  BLK=[0,1,1,1,2,2,4,4,4,5,5,5,8,9,9,10,10,11,13,14,16,17,17,18,20,21,23,25,26,28,29,31,33,35,37,38,40,43,45,47,49];
+ const bytes=[...new TextEncoder().encode(text)];
+ const raw=v=>{let r=(16*v+128)*v+64;if(v>=2){const a=(v/7|0)+2;r-=(25*a-10)*a-55;if(v>=7)r-=36}return r};
+ let ver=1;
+ for(;;ver++){if(ver>40)throw Error('too long');if(4+(ver<10?8:16)+8*bytes.length<=((raw(ver)>>3)-ECC[ver]*BLK[ver])*8)break}
+ const cap=(raw(ver)>>3)-ECC[ver]*BLK[ver],bits=[];
+ const put=(v,n)=>{for(let i=n-1;i>=0;i--)bits.push(v>>>i&1)};
+ put(4,4);put(bytes.length,ver<10?8:16);bytes.forEach(b=>put(b,8));
+ put(0,Math.min(4,cap*8-bits.length));put(0,(8-bits.length%8)%8);
+ const data=[];for(let i=0;i<bits.length;i+=8)data.push(parseInt(bits.slice(i,i+8).join(''),2));
+ for(let p=0xEC;data.length<cap;p^=0xEC^0x11)data.push(p);
+ // Reed-Solomon over GF(256), polynomial 0x11D
+ const mul=(x,y)=>{let z=0;for(let i=7;i>=0;i--){z=(z<<1)^((z>>>7)*0x11D);z^=(y>>>i&1)*x}return z};
+ const deg=ECC[ver],div=Array(deg).fill(0);div[deg-1]=1;
+ for(let i=0,root=1;i<deg;i++){for(let j=0;j<deg;j++){div[j]=mul(div[j],root);if(j+1<deg)div[j]^=div[j+1]}root=mul(root,2)}
+ const rem=d=>{const r=Array(deg).fill(0);for(const b of d){const f=b^r.shift();r.push(0);div.forEach((c,i)=>r[i]^=mul(c,f))}return r};
+ const nb=BLK[ver],total=raw(ver)>>3,nShort=nb-total%nb,shortLen=total/nb|0,blocks=[];
+ for(let i=0,k=0;i<nb;i++){const d=data.slice(k,k+shortLen-deg+(i<nShort?0:1));k+=d.length;const e=rem(d);if(i<nShort)d.push(0);blocks.push(d.concat(e))}
+ const cw=[];for(let i=0;i<blocks[0].length;i++)blocks.forEach((b,j)=>{if(i!=shortLen-deg||j>=nShort)cw.push(b[i])});
+ // Function patterns
+ const n=ver*4+17,m=[...Array(n)].map(()=>Array(n).fill(false)),fn=[...Array(n)].map(()=>Array(n).fill(false));
+ const set=(x,y,d)=>{m[y][x]=d;fn[y][x]=true};
+ for(let i=0;i<n;i++){set(6,i,i%2==0);set(i,6,i%2==0)}
+ for(const[cx,cy]of[[3,3],[n-4,3],[3,n-4]])for(let dy=-4;dy<=4;dy++)for(let dx=-4;dx<=4;dx++){const x=cx+dx,y=cy+dy,d=Math.max(Math.abs(dx),Math.abs(dy));if(x>=0&&x<n&&y>=0&&y<n)set(x,y,d!=2&&d!=4)}
+ if(ver>1){const a=(ver/7|0)+2,step=ver==32?26:Math.ceil((ver*4+4)/(a*2-2))*2,pos=[6];for(let p=n-7;pos.length<a;p-=step)pos.splice(1,0,p);
+  pos.forEach((x,i)=>pos.forEach((y,j)=>{if(!(i==0&&j==0||i==0&&j==a-1||i==a-1&&j==0))for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++)set(x+dx,y+dy,Math.max(Math.abs(dx),Math.abs(dy))!=1)}))}
+ const fmt=mask=>{const d=mask;let r=d;for(let i=0;i<10;i++)r=(r<<1)^((r>>>9)*0x537);const b=(d<<10|r)^0x5412,g=i=>(b>>>i&1)==1;
+  for(let i=0;i<6;i++)set(8,i,g(i));set(8,7,g(6));set(8,8,g(7));set(7,8,g(8));for(let i=9;i<15;i++)set(14-i,8,g(i));
+  for(let i=0;i<8;i++)set(n-1-i,8,g(i));for(let i=8;i<15;i++)set(8,n-15+i,g(i));set(8,n-8,true)};
+ fmt(0);
+ if(ver>=7){let r=ver;for(let i=0;i<12;i++)r=(r<<1)^((r>>>11)*0x1F25);const b=ver<<12|r;for(let i=0;i<18;i++){const d=(b>>>i&1)==1,a=n-11+i%3,c=i/3|0;set(a,c,d);set(c,a,d)}}
+ // Data, in the zigzag order
+ for(let i=0,right=n-1;right>=1;right-=2){if(right==6)right=5;for(let v=0;v<n;v++)for(let j=0;j<2;j++){const x=right-j,y=((right+1)&2)==0?n-1-v:v;if(!fn[y][x]&&i<cw.length*8){m[y][x]=(cw[i>>>3]>>>(7-(i&7))&1)==1;i++}}}
+ // Masks: pick the one with the lowest penalty
+ const MASK=[(x,y)=>(x+y)%2==0,(x,y)=>y%2==0,x=>x%3==0,(x,y)=>(x+y)%3==0,(x,y)=>((x/3|0)+(y/2|0))%2==0,(x,y)=>x*y%2+x*y%3==0,(x,y)=>(x*y%2+x*y%3)%2==0,(x,y)=>((x+y)%2+x*y%3)%2==0];
+ const flip=k=>{for(let y=0;y<n;y++)for(let x=0;x<n;x++)if(!fn[y][x]&&MASK[k](x,y))m[y][x]=!m[y][x]};
+ const score=()=>{let s=0,dark=0;const lines=[];
+  for(let y=0;y<n;y++){lines.push(m[y].map(Number).join(''));lines.push(m.map(r=>+r[y]).join(''))}
+  for(const l of lines){for(const run of l.match(/0+|1+/g))if(run.length>=5)s+=run.length-2;s+=40*((l.match(/(?=10111010000|00001011101)/g)||[]).length)}
+  for(let y=0;y<n;y++)for(let x=0;x<n;x++){if(m[y][x])dark++;if(x<n-1&&y<n-1&&m[y][x]==m[y][x+1]&&m[y][x]==m[y+1][x]&&m[y][x]==m[y+1][x+1])s+=3}
+  return s+10*(Math.ceil(Math.abs(dark*20-n*n*10)/(n*n))-1)};
+ let best=0,bestScore=Infinity;
+ for(let k=0;k<8;k++){flip(k);fmt(k);const sc=score();if(sc<bestScore){best=k;bestScore=sc}flip(k)}
+ flip(best);fmt(best);
+ return m;
+}
+// SVG with a 4-module quiet zone; always dark on white so any camera reads it.
+function qrSvg(text){
+ const m=qrEncode(text),n=m.length;let d='';
+ m.forEach((r,y)=>r.forEach((v,x)=>{if(v)d+=`M${x+4} ${y+4}h1v1h-1z`}));
+ return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n+8} ${n+8}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+const WAKE_APP='https://joanrra2.github.io/pocket-wake/';
+let QRS=null;
+function qrBroker(uri){const m=/^(mqtts?|wss?|ssl|tcp):\/\/(\[[^\]]+\]|[^\/:?#]+)(?::(\d+))?/i.exec(uri||'');if(!m)return null;
+ const sch=m[1].toLowerCase(),tls=/^(mqtts|ssl|wss)$/.test(sch),port=+(m[3]||(tls?8883:1883)),ws=sch.startsWith('ws');
+ return{host:m[2].replace(/^\[|\]$/g,''),tls,port:ws?(tls?8883:1883):port,ws:ws?port:0}}
+function qrLink(){const b=QRS&&qrBroker(QRS.uri);if(!b)return'';const f=$('form[data-f="qr"]'),u=f.user.value.trim();
+ const q=new URLSearchParams({v:1,host:b.host,port:b.port,tls:b.tls?1:0,wsport:f.ws.value||b.ws||8084,wspath:f.path.value.trim()||'/mqtt',prefix:QRS.prefix||'sinkhole'});
+ if(u)q.set('user',u);return WAKE_APP+'#setup?'+q}
+function renderQr(){const l=qrLink();$('#qrnone').hidden=!!l;$('#qrbody').hidden=!l;if(l){$('#qrbox').innerHTML=qrSvg(l);$('#qrbox').title=l}}
+async function loadQr(){const s=await api('/api/settings');QRS={uri:s.mqttUri,prefix:s.mqttPrefix};
+ const f=$('form[data-f="qr"]');try{const o=JSON.parse(localStorage.getItem('qr')||'{}');for(const k of['user','ws','path'])if(o[k]&&!f[k].value)f[k].value=o[k]}catch(e){}renderQr()}
+$('form[data-f="qr"]').addEventListener('input',e=>{const f=e.currentTarget;try{localStorage.setItem('qr',JSON.stringify({user:f.user.value,ws:f.ws.value,path:f.path.value}))}catch(x){}renderQr()});
+async function qrCopy(){const l=qrLink();if(!l)return;
+ try{await navigator.clipboard.writeText(l)}catch(e){const t=document.createElement('textarea');t.value=l;document.body.append(t);t.select();const ok=document.execCommand('copy');t.remove();if(!ok)return prompt(tr('Copy this link'),l)}
+ toast(tr('Link copied'))}
 // Status LED presets per chip: [label, kind, gpio, activeLow]
 const LEDS={esp32s3:[['ESP32-S3-DevKitC-1 v1.0 (RGB)','rgb',48,0],['ESP32-S3-DevKitC-1 v1.1 (RGB)','rgb',38,0],['Waveshare ESP32-S3-Zero (RGB)','rgb',21,0],['Seeed XIAO ESP32-S3 (orange)','plain',21,1]],
  esp32c3:[['ESP32-C3 SuperMini (blue)','plain',8,1],['ESP32-C3-DevKitM-1 (RGB)','rgb',8,0],['Waveshare ESP32-C3-Zero (RGB)','rgb',10,0]],
@@ -588,6 +669,8 @@ const A={
  reconnect:()=>act('/api/wifi',{action:'reconnect'}),
  forget:()=>confirm(tr('Forget this Wi-Fi? The setup access point will turn on.'))&&act('/api/wifi',{action:'forget'},()=>{refresh();loadSettings()}),
  lang:v=>{try{localStorage.setItem('lang',v)}catch(e){}location.reload()},
+ qrcopy:qrCopy,
+ qropen:()=>{const l=qrLink();if(l)open(l,'_blank','noopener')},
 };
 const F={
  adddomain:(d,f)=>act('/api/lists',{action:'add',list:ltab,domain:d.domain},()=>{f.reset();loadLists()}),
@@ -606,6 +689,7 @@ const F={
  ip:d=>(d.mode=='dhcp'||confirm(tr('Switch the device to {0}? You will need to open it at that address.',d.ip)))&&act('/api/settings',{section:'ip',...d}),
  upd:d=>act('/api/settings',{section:'update',...d}),
  fw:d=>act('/api/settings',{section:'fw',url:d.url||'',auto:d.auto?1:0}),
+ qr:()=>renderQr(),
 };
 document.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(el&&A[el.dataset.a]){e.preventDefault();A[el.dataset.a](el.dataset.v,el)}});
 document.addEventListener('submit',e=>{const f=e.target;if(F[f.dataset.f]){e.preventDefault();F[f.dataset.f](Object.fromEntries(new FormData(f)),f)}});
@@ -616,7 +700,7 @@ function route(){
  $$('nav a').forEach(a=>a.classList.toggle('on',a.hash=='#'+tab));
  $$('main section').forEach(s=>s.hidden=s.id!=tab);
  $('#title').textContent=tr(T[tab]);
- refresh();if(tab=='settings'||tab=='system')loadSettings().catch(()=>{});
+ refresh();if(tab=='settings'||tab=='system')loadSettings().catch(()=>{});if(tab=='wake')loadQr().catch(()=>{});
 }
 i18nDom();
 addEventListener('hashchange',route);
