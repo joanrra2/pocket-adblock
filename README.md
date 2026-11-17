@@ -12,6 +12,8 @@ PSRAM, and takes advantage of PSRAM when the board has it.
 - **~216k domains on a 4 MB C3, ~2.5M on 16 MB boards** stored in flash as a fuse filter
   over 40-bit hashes, memory-mapped: 3 flash reads per name. No file system, no RAM index.
 - **Non-blocking DNS forwarding**: one slow upstream lookup never stalls other clients.
+- **Built for page loads**: 32 lookups arriving at once are all answered within ~20 ms
+  (~1,500 queries/s), and an expired cached answer is served at once while it refreshes.
 - **Hidden trackers caught (CNAME cloaking)**: a site's own subdomain that is an alias of
   a blocked tracker (`smetrics.ikea.com` → `…2o7.net`) is blocked too, also for cached answers.
 - **Bypass protection**: Firefox's automatic DNS-over-HTTPS and iCloud Private Relay are
@@ -412,19 +414,45 @@ history in a database, or a wired connection by default.
 
 ## Benchmark vs esp32-c3-adblock
 
-Same ESP32-S3 board (WROOM-2 N32R16V), same 138,896-domain list, same Wi-Fi, measured
-from a wired PC with `tools/dns_bench.py`. The original (Arduino, commit at the time of
-writing) was built for the S3 with an added PlatformIO env; ours is the default build
-(no bloom filter).
+Same ESP32-S3 board (WROOM-2 N32R16V), same Wi-Fi, the same Normal list (140,566
+domains for the original; 121,183 for ours, which drops subdomains of listed names),
+measured from a wired PC with `tools/dns_bench.py`. The original (Arduino, commit at
+the time of writing) was built for the S3 with an added PlatformIO env; ours is the
+Pro edition.
 
 | | esp32-c3-adblock | pocket-adblock |
 |---|---|---|
-| Blocked query, p50 / p99 | 5.05 / 10.96 ms | **1.87 / 5.90 ms** |
-| Same allowed name again, p50 | 18.99 ms (forwarded every time) | **1.87 ms** (answer cache) |
-| Throughput, 16 parallel clients | 347 queries/s | **697 queries/s** |
-| Blocked queries while uncached names wait on the upstream, p50 / max | 47 / 315 ms (stuck behind each lookup) | **1.9 / 5.9 ms** |
-| Firmware image | 1,222,688 B | **1,021,808 B** |
-| Free internal heap at runtime | 210 KB | 198 KB (+ cache and history in PSRAM) |
+| Blocked query, p50 / p99 | 5.01 / 9.17 ms | **1.92 / 5.86 ms** |
+| Same allowed name again, p50 | 18.98 ms (forwarded every time) | **2.10 ms** (answer cache) |
+| Throughput, 16 parallel clients | 345 queries/s | **1,472 queries/s** |
+| 32 lookups at once (a page load), 20 times | most lost, clients retry after ~1 s | **none lost**, all answered in ~19 ms |
+| Blocked queries while uncached names wait on the upstream, p50 / max | 47 / 402 ms (stuck behind each lookup) | **1.9 / 6.6 ms** |
+| Firmware image | 1,222,688 B | **1,089,680 B** |
+| Normal list file | 702,830 B | **430,180 B** |
+| Free internal heap at runtime | 210 KB | 125 KB (+ cache and history in PSRAM) |
+
+## Speed: what changed in 0.5
+
+The device spends ~0.4 ms on a query; the rest of the ~2 ms a client sees is Wi-Fi.
+Measured on the ESP32-S3 against the same build without these changes, back to back
+(the "no PSRAM" column is the Lite build with PSRAM off, as on an ESP32-C3):
+
+| | before, Pro | 0.5, Pro | before, no PSRAM | 0.5, no PSRAM |
+|---|---|---|---|---|
+| Throughput, 16 parallel clients | 663 q/s, 30 lost | **1,472 q/s, 1 lost** | 642-690 q/s, 30 lost | **1,534-1,555 q/s, 0-1 lost** |
+| 32 lookups at once, 20 times | 495 of 640 lost | **none lost** | ~500 lost | **none lost** |
+| Device time per blocked query | 639 us | **436 us** | 620 us | **413 us** |
+| First lookup after a cached answer expired | ~17 ms (upstream) | **2.3 ms** | same | same |
+| DNS up after boot with a 1.6M-domain v2 list | 13.0 s | **2.1 s** | - | - |
+| Lowest free internal heap during the tests | - | - | 82-90 KB | 64 KB |
+
+What does it: a 32-datagram queue per UDP socket (lwIP's 6 dropped most of a page
+load), every queued query read per wake-up, non-blocking sockets, lwIP core locking,
+the DNS task on its own core, one client-table lookup per query, -O2 for the per-query
+code, a query-log search that no longer holds the lock the DNS task needs, serve-stale
+with background refresh, and the bloom filter built after Wi-Fi is up. A list download
+still slows DNS while flash is being written (blocked queries ~5-30 ms for ~40 s).
+Build with `CONFIG_SINKHOLE_PERF=y` to see per-stage timings at `/api/perf`.
 
 ## Lite vs Pro: memory and speed
 
