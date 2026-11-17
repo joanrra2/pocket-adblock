@@ -3,8 +3,8 @@
 // off in every release build). Each client query or upstream reply is timed
 // with the CPU cycle counter as laps: mark(stage) charges the time since the
 // previous mark to that stage, so preemption by Wi-Fi / lwIP lands in the
-// stage it interrupted, as it would for a real client. A query whose task
-// moved to the other core in between is dropped (the counters are per core).
+// stage it interrupted, as it would for a real client. A query seen on the
+// other core at any mark is dropped (the counters are per core).
 // GET /api/perf returns the stats in ns; ?reset=1 starts a new window.
 
 #include <atomic>
@@ -78,6 +78,7 @@ private:
     int core_;
     Stage total_;
     bool done_ = false;
+    bool moved_ = false;  // ran on the other core at some point: dropped
 };
 
 uint32_t cyclesToNs(uint64_t cycles);

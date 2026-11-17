@@ -71,6 +71,7 @@ Lap::Lap() : core_(xPortGetCoreID()), total_(QOther)
 
 void Lap::mark(Stage s)
 {
+    if (xPortGetCoreID() != core_) moved_ = true;  // the two cores' counters differ
     const uint32_t now = esp_cpu_get_cycle_count();
     acc_[s] += now - last_;
     last_ = now;
@@ -81,7 +82,7 @@ void Lap::finish(Stage total)
     if (done_) return;
     done_ = true;
     const uint32_t end = esp_cpu_get_cycle_count();
-    if (xPortGetCoreID() != core_) return;  // cycle counters are per core
+    if (moved_ || xPortGetCoreID() != core_) return;  // cycle counters are per core
     Recorder& r = Recorder::instance();
     for (int i = 0; i < kStages; i++)
         if (acc_[i]) r.add(static_cast<Stage>(i), acc_[i]);
