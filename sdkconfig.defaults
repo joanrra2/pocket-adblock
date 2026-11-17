@@ -30,6 +30,9 @@ CONFIG_LWIP_IPV6_AUTOCONFIG=y
 # its address out twice; LanDhcp caps the pool at this size. Heap only, and
 # only for clients that actually got a lease (~90 bytes each).
 CONFIG_LWIP_DHCPS_MAX_STATION_NUM=64
+# Datagrams queued per UDP socket (IDF default 6). A page load sends 20-50
+# lookups at once; past the queue lwIP drops them and clients retry after ~1 s.
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=32
 
 # ---- tasks ----
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
