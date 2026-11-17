@@ -441,7 +441,7 @@ Measured on the ESP32-S3 against the same build without these changes, back to b
 |---|---|---|---|---|
 | Throughput, 16 parallel clients | 663 q/s, 30 lost | **1,472 q/s, 1 lost** | 642-690 q/s, 30 lost | **1,534-1,555 q/s, 0-1 lost** |
 | 32 lookups at once, 20 times | 495 of 640 lost | **none lost** | ~500 lost | **none lost** |
-| Device time per blocked query | 639 us | **436 us** | 620 us | **413 us** |
+| Device time per blocked query | 639 µs | **436 µs** | 620 µs | **413 µs** |
 | First lookup after a cached answer expired | ~17 ms (upstream) | **2.3 ms** | same | same |
 | DNS up after boot with a 1.6M-domain v2 list | 13.0 s | **2.1 s** | - | - |
 | Lowest free internal heap during the tests | - | - | 82-90 KB | 64 KB |
