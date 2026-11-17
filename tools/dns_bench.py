@@ -9,6 +9,10 @@ Tests (each with fresh random names so caches can't help unless intended):
   throughput  16 parallel clients sending blocked queries for 5 s
   hol         blocked-query latency while uncached names wait on the upstream
               (a resolver that forwards one query at a time stalls here)
+  burst       a page load: 32 blocked names sent at once from one socket, 20 times;
+              how many are lost and how long until the last answer arrives
+  cached      200 sequential queries spread over 50 allowed names (answer cache,
+              including names whose answers carry CNAMEs)
 Uncached upstream traffic is kept small (~40 names) to stay polite to public resolvers.
 """
 import argparse
@@ -91,7 +95,67 @@ def test_throughput(server, workers=16, seconds=5.0):
         t.join()
     r = stats(lat, len(lat))
     r['qps'] = round(r['answered'] / (time.perf_counter() - t0), 1)
+    r['lost'] = len(lat) - r['answered']
     return r
+
+
+def test_burst(server, size=32, rounds=20):
+    """Like a browser loading a page: many lookups at once. A resolver that can
+    only queue a few packets drops the rest, and those clients retry after ~1 s."""
+    s = new_sock()
+    lost, last, firsts = 0, [], []
+    for _ in range(rounds):
+        want = {}
+        t0 = time.perf_counter()
+        for _ in range(size):
+            tid = random.randint(0, 0xFFFF)
+            name = f'{rnd()}.doubleclick.net'
+            pkt = struct.pack('>HHHHHH', tid, 0x0100, 1, 0, 0, 0)
+            pkt += b''.join(bytes([len(p)]) + p.encode() for p in name.split('.')) + b'\0' + struct.pack('>HH', 1, 1)
+            want[tid] = True
+            s.sendto(pkt, server)
+        got, t_last, t_first = 0, None, None
+        deadline = t0 + TIMEOUT
+        while got < size and time.perf_counter() < deadline:
+            s.settimeout(max(0.001, deadline - time.perf_counter()))
+            try:
+                data, _ = s.recvfrom(2048)
+            except socket.timeout:
+                break
+            tid = struct.unpack('>H', data[:2])[0]
+            if want.pop(tid, None):
+                got += 1
+                t_last = (time.perf_counter() - t0) * 1000
+                t_first = t_first or t_last
+        lost += size - got
+        if got == size:
+            last.append(t_last)
+        if t_first:
+            firsts.append(t_first)
+        time.sleep(0.2)
+    r = {'rounds': rounds, 'size': size, 'lost': lost, 'complete_rounds': len(last)}
+    if last:
+        r['all_answered_p50'] = round(statistics.median(last), 2)
+        r['all_answered_max'] = round(max(last), 2)
+    return r
+
+
+def test_cached(server, n=200):
+    """Allowed names answered from the cache (each looked up once first)."""
+    names = ['example.com', 'wikipedia.org', 'github.com', 'www.microsoft.com', 'www.apple.com',
+             'www.amazon.com', 'www.bbc.co.uk', 'www.cloudflare.com', 'www.mozilla.org', 'www.python.org',
+             'en.wikipedia.org', 'www.reddit.com', 'www.youtube.com', 'www.netflix.com', 'www.spotify.com',
+             'outlook.office.com', 'www.linkedin.com', 'www.paypal.com', 'www.ebay.com', 'www.twitch.tv',
+             'www.nytimes.com', 'www.theguardian.com', 'www.elpais.com', 'www.lavanguardia.com', 'www.rtve.es',
+             'www.wordpress.com', 'stackoverflow.com', 'www.debian.org', 'www.kernel.org', 'www.gnu.org',
+             'www.adobe.com', 'www.dropbox.com', 'www.zoom.us', 'www.slack.com', 'www.whatsapp.com',
+             'www.instagram.com', 'www.facebook.com', 'www.x.com', 'www.tiktok.com', 'www.pinterest.com',
+             'www.imdb.com', 'www.booking.com', 'www.airbnb.com', 'www.uber.com', 'www.tesla.com',
+             'www.samsung.com', 'www.sony.com', 'www.intel.com', 'www.amd.com', 'www.nvidia.com']
+    s = new_sock()
+    for name in names:
+        query(s, server, name)  # warm up (forwarded once)
+    return stats([query(s, server, names[i % len(names)]) for i in range(n)], n)
 
 
 def test_hol(server, uncached=40, blocked=200):

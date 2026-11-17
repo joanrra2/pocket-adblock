@@ -95,6 +95,15 @@ menu "DNS Sinkhole"
         default 64
         range 8 512
 
+    config SINKHOLE_PERF
+        bool "Time each DNS stage (development aid, GET /api/perf)"
+        default n
+        help
+            Times every query stage with the CPU cycle counter (~0.3 us per
+            query, ~7 KB of RAM) and serves the stats at /api/perf
+            (?reset=1 starts a new window). For measuring optimizations;
+            leave it off in normal builds.
+
     config SINKHOLE_DNS_MAX_PENDING
         int "Concurrent upstream DNS queries"
         default 32

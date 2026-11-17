@@ -10,6 +10,7 @@
 #include "sinkhole/bypass_guard.hpp"
 #include "sinkhole/dns_packet.hpp"
 #include "sinkhole/dot_proxy.hpp"
+#include "sinkhole/perf.hpp"
 
 namespace sinkhole {
 
@@ -122,17 +123,20 @@ void DnsServer::reply(const ClientSockAddr& to, bool v6, const uint8_t* data, si
 
 void DnsServer::onClientPacket(int sock)
 {
+    SINKHOLE_PERF_LAP(lap, perf::QOther);
     ClientSockAddr from{};
     const bool v6 = sock == server6Sock_;
     socklen_t fromLen = v6 ? sizeof(from.v6) : sizeof(from.v4);
     int len = recvfrom(sock, buf_, sizeof(buf_), 0, reinterpret_cast<sockaddr*>(&from), &fromLen);
     if (len <= 0) return;
+    SINKHOLE_PERF_MARK(lap, perf::Recv);
 
     dns::Question q;
     if (!dns::parseQuery(buf_, static_cast<size_t>(len), q)) {
         counters_.dropped++;
         return;
     }
+    SINKHOLE_PERF_MARK(lap, perf::Parse);
 
     const ClientAddr client = v6 ? ClientAddr::fromV6(reinterpret_cast<const uint8_t*>(&from.v6.sin6_addr))
                                  : ClientAddr::fromV4(from.v4.sin_addr.s_addr);
@@ -145,6 +149,7 @@ void DnsServer::onClientPacket(int sock)
         reply(from, v6, buf_, dns::buildRcode(buf_, q, 5));
         return;
     }
+    SINKHOLE_PERF_MARK(lap, perf::Client);
     if (captive_ && !v6) {
         const uint32_t apIp = apIp_, mask = apMask_;
         if (apIp && (clientIp & mask) == (apIp & mask)) {
@@ -194,6 +199,7 @@ void DnsServer::onClientPacket(int sock)
         }
     }
 
+    SINKHOLE_PERF_MARK(lap, perf::Rules);
     const int64_t t0 = esp_timer_get_time();
     const bool blocked = !forwardTo && !noFilter && filter_.isBlocked(q.name, q.nameLen);
     // Rolling average of the filter cost (allow/custom/blocklist), published
@@ -204,13 +210,18 @@ void DnsServer::onClientPacket(int sock)
         filterSumUs_ = 0;
         filterN_ = 0;
     }
+    SINKHOLE_PERF_MARK(lap, perf::Filter);
     const bool banned = clients_.record(client, blocked);
+    SINKHOLE_PERF_MARK(lap, perf::Client);
     log_.add(client, q.name, blocked || banned);
+    SINKHOLE_PERF_MARK(lap, perf::Log);
 
     if (blocked || banned) {
         counters_.blocked++;
         size_t rlen = dns::buildBlocked(buf_, sizeof(buf_), q);
         reply(from, v6, buf_, rlen);
+        SINKHOLE_PERF_MARK(lap, perf::Send);
+        SINKHOLE_PERF_TOTAL(lap, perf::QBlocked);
         return;
     }
 
@@ -218,15 +229,21 @@ void DnsServer::onClientPacket(int sock)
 
     const uint32_t qkey = dns::questionKey(buf_, q.end);
     const uint32_t ckey = DnsCache::keyFor(qkey, dns::rd16(buf_ + 10) > 0);
-    if (size_t hit = cache_.lookup(ckey, buf_, q.end, out_, sizeof(out_))) {
+    const size_t hit = cache_.lookup(ckey, buf_, q.end, out_, sizeof(out_));
+    SINKHOLE_PERF_MARK(lap, perf::Cache);
+    if (hit) {
         // Cached answers are re-checked too, so allow-list and setting changes
         // apply at once (only answers that carry aliases cost anything).
-        if (!noFilter && cnameCloaked(out_, hit, q.end)) {
+        const bool cloaked = !noFilter && cnameCloaked(out_, hit, q.end);
+        SINKHOLE_PERF_MARK(lap, perf::Cname);
+        if (cloaked) {
             countCnameBlocked(client, q.name);
             reply(from, v6, buf_, dns::buildBlocked(buf_, sizeof(buf_), q));
             return;
         }
         reply(from, v6, out_, hit);
+        SINKHOLE_PERF_MARK(lap, perf::Send);
+        SINKHOLE_PERF_TOTAL(lap, perf::QCached);
         return;
     }
 
@@ -264,6 +281,7 @@ void DnsServer::onClientPacket(int sock)
     pendingInUse_++;
 
     dns::wr16(buf_, id);
+    SINKHOLE_PERF_MARK(lap, perf::Forward);
     sockaddr_in to{};
     to.sin_family = AF_INET;
     int sent = 0;
@@ -276,6 +294,8 @@ void DnsServer::onClientPacket(int sock)
                    reinterpret_cast<sockaddr*>(&to), sizeof(to)) >= 0)
             sent++;
     }
+    SINKHOLE_PERF_MARK(lap, perf::Send);
+    SINKHOLE_PERF_TOTAL(lap, perf::QForwarded);
     if (!sent) {
         p->used = false;
         pendingInUse_--;
@@ -284,11 +304,13 @@ void DnsServer::onClientPacket(int sock)
 
 void DnsServer::onUpstreamPacket()
 {
+    SINKHOLE_PERF_LAP(lap, perf::UTotal);
     sockaddr_in from{};
     socklen_t fromLen = sizeof(from);
     int len = recvfrom(upstreamSock_, buf_, sizeof(buf_), 0, reinterpret_cast<sockaddr*>(&from),
                        &fromLen);
     if (len < static_cast<int>(dns::kHeaderLen)) return;
+    SINKHOLE_PERF_MARK(lap, perf::URecv);
     if (from.sin_port != htons(kDnsPort) && from.sin_port != htons(upstreamPort_.load())) return;
 
     const uint16_t id = dns::rd16(buf_);
@@ -325,10 +347,13 @@ void DnsServer::onUpstreamPacket()
         }
         wins_[which]++;
         dns::wr16(buf_, p.clientId);
+        SINKHOLE_PERF_MARK(lap, perf::UMatch);
         // CNAME cloaking: an allowed name that is an alias of a blocked one
         // (metrics.shop.com -> shop.eulerian.net) is blocked too. Not cached,
         // so allow-list changes apply at once.
-        if (!p.noFilter && qend && rcode == 0 && cnameCloaked(buf_, static_cast<size_t>(len), qend)) {
+        const bool cloaked = !p.noFilter && qend && rcode == 0 && cnameCloaked(buf_, static_cast<size_t>(len), qend);
+        SINKHOLE_PERF_MARK(lap, perf::UCname);
+        if (cloaked) {
             dns::Question q{};
             q.end = qend;
             q.qtype = dns::rd16(buf_ + qend - 4);
@@ -344,7 +369,9 @@ void DnsServer::onUpstreamPacket()
             return;
         }
         reply(p.client, p.clientV6, buf_, static_cast<size_t>(len));  // client first, cache after
+        SINKHOLE_PERF_MARK(lap, perf::USend);
         cache_.store(p.cacheKey, buf_, static_cast<size_t>(len));
+        SINKHOLE_PERF_MARK(lap, perf::UStore);
         p.used = false;
         pendingInUse_--;
         return;
