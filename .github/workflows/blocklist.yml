@@ -1,7 +1,11 @@
 name: blocklist
 
-# Daily SHBL blocklists with SHA-256 header, published at a stable URL:
+# Daily SHBL blocklists with SHA-256 header, published at stable URLs:
 #   https://github.com/<owner>/<repo>/releases/download/blocklist/blocklist.bin
+# Each list goes out twice: <name>.bin in the compact format (v2) that every
+# firmware reads, and <name>-v4.bin as a fuse filter, which firmware 0.5.0 and
+# later fetch instead (smaller, faster). The v2 names must never carry a v4 list:
+# older firmware rejects it and would stop updating.
 on:
   schedule:
     - cron: "41 4 * * *"   # daily 04:41 UTC (HaGeZi updates daily; devices fetch only when it changed)
@@ -32,17 +36,30 @@ jobs:
           fi
           SB=https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
           HZ=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard
+          # Sources are downloaded once, so both formats hold exactly the same domains.
+          mkdir -p src
+          get() { curl -sSfL --retry 3 -o "src/$1" "$2"; }
+          get sb.txt "$SB"
+          get light.txt "$HZ/light-onlydomains.txt"
+          get pro.txt "$HZ/pro-onlydomains.txt"
+          get tif.txt "$HZ/tif-onlydomains.txt" || echo "::warning::HaGeZi TIF not downloaded"
+          # build NAME LOG SOURCES...: NAME.bin (v2, every firmware) and NAME-v4.bin (fuse filter)
+          build() {
+            name=$1; log=$2; shift 2
+            python3 tools/build_blocklist.py "$name.bin" $sign --format=v2 "$@" | tee "$log" &&
+            python3 tools/build_blocklist.py "$name-v4.bin" $sign "$@" | tee "${log%.log}-v4.log"
+          }
           # Normal (default, blocklist.bin): StevenBlack + HaGeZi Light, fits every board.
-          python3 tools/build_blocklist.py blocklist.bin $sign | tee build.log   # compact SHBL v2
+          build blocklist build.log src/sb.txt src/light.txt
           # Light: StevenBlack only (fewest false positives).
-          python3 tools/build_blocklist.py blocklist-light.bin $sign "$SB" | tee build-light.log
-          # Aggressive: StevenBlack + HaGeZi Pro, 8 MB boards and up (~280k domains).
-          python3 tools/build_blocklist.py blocklist-aggressive.bin $sign "$SB" "$HZ/pro-onlydomains.txt" | tee build-aggressive.log
+          build blocklist-light build-light.log src/sb.txt
+          # Aggressive: StevenBlack + HaGeZi Pro, 8 MB boards and up (~255k domains).
+          build blocklist-aggressive build-aggressive.log src/sb.txt src/pro.txt
           # Extended: Aggressive + HaGeZi Threat Intelligence Feeds (malware, phishing,
-          # scams), 16 MB boards (~1.65M). Optional: if it fails, yesterday's file stays
+          # scams), 16 MB boards (~1.63M). Optional: if it fails, yesterday's files stay
           # published and the other lists still go out.
-          python3 tools/build_blocklist.py blocklist-extended.bin $sign "$SB" "$HZ/pro-onlydomains.txt" "$HZ/tif-onlydomains.txt" \
-            | tee build-extended.log || { rm -f blocklist-extended.bin; echo "::warning::Extended list not built"; }
+          { [ -f src/tif.txt ] && build blocklist-extended build-extended.log src/sb.txt src/pro.txt src/tif.txt; } ||
+            { rm -f blocklist-extended.bin blocklist-extended-v4.bin; echo "::warning::Extended list not built"; }
           rm -f /tmp/bl.pem
       - name: Sanity checks (size fits the smallest board each list is offered to)
         run: |
@@ -53,12 +70,18 @@ jobs:
             echo "$1: $size bytes, $n domains (max $3 bytes, min $4 domains)"
             [ "$size" -le "$3" ] && [ "$n" -ge "$4" ]
           }
-          check blocklist.bin            build.log            $((0xB0000))  50000    # 4 MB layout slot
-          check blocklist-light.bin      build-light.log      $((0xB0000))  30000    # 4 MB layout slot
-          check blocklist-aggressive.bin build-aggressive.log $((0x270000)) 150000   # 8 MB layout slot
+          # Each list in both formats; the v2 file must stay v2 (byte 4 of the header).
+          both() {
+            [ "$(od -An -tu1 -j4 -N1 "$1.bin" | tr -d ' ')" = 2 ] &&
+            [ "$(od -An -tu1 -j4 -N1 "$1-v4.bin" | tr -d ' ')" = 4 ] &&
+            check "$1.bin" "$2" "$3" "$4" && check "$1-v4.bin" "${2%.log}-v4.log" "$3" "$4"
+          }
+          both blocklist            build.log            $((0xB0000))  50000    # 4 MB layout slot
+          both blocklist-light      build-light.log      $((0xB0000))  30000    # 4 MB layout slot
+          both blocklist-aggressive build-aggressive.log $((0x270000)) 150000   # 8 MB layout slot
           if [ -f blocklist-extended.bin ] && \
-             ! check blocklist-extended.bin build-extended.log $((0x670000)) 800000; then  # 16 MB layout slot
-            rm blocklist-extended.bin
+             ! both blocklist-extended build-extended.log $((0x670000)) 800000; then  # 16 MB layout slot
+            rm -f blocklist-extended.bin blocklist-extended-v4.bin
             echo "::warning::Extended list out of bounds: not published today"
           fi
       - name: Publish
@@ -67,12 +90,15 @@ jobs:
         run: |
           n() { grep 'hash entries' "$1" | grep -oE '[0-9,]+' | head -1; }
           files="blocklist.bin blocklist-light.bin blocklist-aggressive.bin"
+          files="$files blocklist-v4.bin blocklist-light-v4.bin blocklist-aggressive-v4.bin"
           ext=""
           if [ -f blocklist-extended.bin ]; then
-            files="$files blocklist-extended.bin"
+            files="$files blocklist-extended.bin blocklist-extended-v4.bin"
             ext=" · Extended (16 MB boards): $(n build-extended.log)"
           fi
           notes="Auto-built $(date -u +%F). Normal (blocklist.bin): $(n build.log) domains · Light: $(n build-light.log) · Aggressive (8 MB boards): $(n build-aggressive.log)$ext
+
+          Each list comes in two formats with the same domains: \`NAME.bin\` (compact, every firmware) and \`NAME-v4.bin\` (fuse filter, firmware 0.5.0 and later, which fetch it automatically).
 
           Built from [StevenBlack/hosts](https://github.com/StevenBlack/hosts) (MIT) and [HaGeZi DNS Blocklists](https://github.com/hagezi/dns-blocklists) (GPL-3.0): Light, Pro and Threat Intelligence Feeds. These files are hashed derivatives of those lists, under the same licenses; tools/build_blocklist.py rebuilds them from the sources."
           gh release view blocklist >/dev/null 2>&1 || \

@@ -3,7 +3,8 @@
 64-byte SHBL header (format, count, SHA-256), ready to upload or serve over HTTPS.
 
 Usage:
-  build_blocklist.py OUT.bin [SOURCE ...] [--v1 | --raw] [--sign=KEY.pem] [--allow-missing]
+  build_blocklist.py OUT.bin [SOURCE ...] [--format=v2 | --v1 | --raw] [--sign=KEY.pem]
+                     [--keep-subdomains] [--allow-missing]
 
 --sign=KEY.pem appends an ECDSA P-256 signature (key from tools/keys.py
 blocklist-key; needs `pip install cryptography`).
@@ -12,10 +13,15 @@ SOURCE is a URL or a local file: hosts files, plain domain lists, or AdGuard /
 Adblock basic rules (||domain^ blocks, @@||domain^ removes). With no sources a
 balanced default is used (StevenBlack base + Hagezi Light, ~110k domains).
 
-Formats (the device reads all three):
-  default  SHBL v2 "compact": 3 bytes per domain + 65 KB index, ~30-55% smaller
-  --v1     SHBL v1: sorted 5-byte hashes
-  --raw    headerless v1, the format of esp32-c3-adblock
+Subdomains of a listed name are dropped (they are blocked through the parent);
+--keep-subdomains keeps them.
+
+Formats:
+  default      SHBL v4 "fuse": a binary fuse filter, ~22-29 bits per domain, 3 flash
+               reads per lookup. Firmware 0.5.0 and later.
+  --format=v2  SHBL v2 "compact": 3 bytes per domain + 65 KB index. Every firmware.
+  --v1         SHBL v1: sorted 5-byte hashes
+  --raw        headerless v1, the format of esp32-c3-adblock
 
 Source parsing and hashing are derived from esp32-c3-adblock's
 tools/build_blocklist.py, Copyright (c) 2026 zed, MIT License.
@@ -174,7 +180,7 @@ def payload_v4(hashes):
     Fingerprint bits f = 40 - log2(n), rounded up: false matches no more frequent
     than v2's 40-bit hash collisions at the same list size."""
     n = len(hashes)
-    f = min(24, max(8, math.ceil(40 - math.log2(max(n, 2)))))
+    f = min(24, max(8, 40 - (max(n, 1).bit_length() - 1)))  # ceil(40 - log2 n), as v4FingerprintBits()
     seg_len = min(1 << 18, 1 << int(math.floor(math.log(max(n, 2)) / math.log(3.33) + 2.25)))
     factor = max(1.125, 0.875 + 0.25 * math.log(1e6) / math.log(max(n, 2)))
     capacity = round(n * factor)
@@ -261,7 +267,12 @@ def main():
     out = args[0] if args else 'blocklist.bin'
     sources = args[1:] or DEFAULT_SOURCES
     raw = '--raw' in flags
-    version = 1 if raw or '--format=v1' in flags or '--v1' in flags else 4 if '--format=v4' in flags else 2
+    if raw or '--format=v1' in flags or '--v1' in flags:
+        version = 1
+    elif '--format=v2' in flags or '--v2' in flags:
+        version = 2
+    else:
+        version = 4
     sign_key = next((a.split('=', 1)[1] for a in flags if a.startswith('--sign=')), None)
     if sign_key and raw:
         sys.exit('--raw lists have no header and cannot be signed')

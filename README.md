@@ -9,8 +9,8 @@ A Pi-hole-style **DNS ad-blocker and Wake-on-LAN node** for a few-dollar ESP32,
 written in plain **ESP-IDF v6.1** (no Arduino). It runs on a $2 ESP32-C3 with no
 PSRAM, and takes advantage of PSRAM when the board has it.
 
-- **~218k domains on a 4 MB C3, ~2.2M on 16 MB boards** stored as compact 40-bit hashes in flash,
-  memory-mapped and binary-searched. No file system, no RAM index.
+- **~216k domains on a 4 MB C3, ~2.5M on 16 MB boards** stored in flash as a fuse filter
+  over 40-bit hashes, memory-mapped: 3 flash reads per name. No file system, no RAM index.
 - **Non-blocking DNS forwarding**: one slow upstream lookup never stalls other clients.
 - **Hidden trackers caught (CNAME cloaking)**: a site's own subdomain that is an alias of
   a blocked tracker (`smetrics.ikea.com` → `…2o7.net`) is blocked too, also for cached answers.
@@ -206,32 +206,45 @@ python3 tools/build_blocklist.py big.bin URL_OR_FILE ...      # hosts / domains 
 ```
 
 Lists get a 64-byte header with the domain count and a SHA-256, which the device
-verifies before activating. The default **compact format (v2)** stores 3 bytes per
-domain plus a 65 KB index, so slots hold more and lookups are faster:
+verifies before activating. Blocking a domain also blocks its subdomains, so the
+builder drops names already covered by a listed parent (`ads.example.com` when
+`example.com` is listed): the same names stay blocked with 2-27% fewer entries.
 
-| Same 138,896 domains | v1 (`--v1`) | v2 (default) |
+The default **fuse format (v4)** is a binary fuse filter: a lookup reads 3 entries
+and XORs them, with no search, and it needs no bloom filter in RAM. Each entry is
+just wide enough that a name not on the list matches by chance no more often than
+with 40-bit hashes (at 1.6M domains: 1 in 1M per lookup, against 1 in 670k for v2). The **compact
+format (v2)** stores 3 bytes per domain plus a 65 KB index and is read by every
+firmware version. Measured on the ESP32-S3 with the Extended list (1.63M domains):
+
+| | v2 compact (`--format=v2`) | v4 fuse (default) |
 |---|---|---|
-| File size | 694 KB | 483 KB (-31%) |
-| 4 MB / 8 MB / 16 MB layout capacity | 144k / 511k / 1.35M | 218k / 830k / 2.2M |
-| Filter time per query (ESP32-S3) | 81 µs | 59 µs |
+| File size | 4.97 MB (24.3 bits/domain) | 4.63 MB (22.7 bits/domain) |
+| 4 MB / 8 MB / 16 MB layout capacity | 218k / 830k / 2.2M | 216k / 857k / 2.5M |
+| Lookup in flash, listed / not listed | 9.9 / 11.2 µs | 3.4 / 3.5 µs |
+| Load and check a new list | 0.42 s | 0.15 s |
+| Bloom filter (Pro) | 2.7 MB of PSRAM, rebuilt in 10.8 s | not needed |
 
-Raw headerless lists from esp32-c3-adblock (`--raw`) and v1 lists are still accepted.
-Blocking a domain also blocks its subdomains. The **Always allow** list wins over every blocklist.
+Small lists are about the same size in both formats (Normal: 430 KB); the fuse
+filter is smaller from about 250k domains. Raw headerless lists from
+esp32-c3-adblock (`--raw`) and v1 lists are still accepted. The **Always allow**
+list wins over every blocklist.
 
 **Which list.** *Settings → Updates → Blocklist* picks one of the daily lists this
-project publishes: **Light** (StevenBlack, ~56k domains, fewest false positives),
-**Normal** (default, + HaGeZi Light, ~140k), **Aggressive** (+ HaGeZi Pro, ~280k,
+project publishes: **Light** (StevenBlack, ~40k domains, fewest false positives),
+**Normal** (default, + HaGeZi Light, ~120k), **Aggressive** (+ HaGeZi Pro, ~255k,
 8 MB boards and up) or **Extended** (Aggressive + HaGeZi Threat Intelligence
-Feeds, ~1.65M, 16 MB boards: the extra 1.4M domains are malware, phishing and
-scam sites, so it breaks no more sites than Aggressive). *Custom URL* takes any
+Feeds, ~1.63M, 16 MB boards: the extra 1.4M domains are malware, phishing and
+scam sites, so it breaks no more sites than Aggressive). Counts are after dropping
+subdomains of listed names. *Custom URL* takes any
 SHBL or raw list.
 
 | List | Sources | Domains | File | Smallest layout |
 |---|---|---|---|---|
-| Light | StevenBlack | ~56k | ~230 KB | 4 MB |
-| Normal (default) | + HaGeZi Light | ~140k | ~490 KB | 4 MB |
-| Aggressive | StevenBlack + HaGeZi Pro | ~280k | ~900 KB | 8 MB |
-| Extended | Aggressive + HaGeZi TIF | ~1.65M | ~5 MB | 16 MB |
+| Light | StevenBlack | ~40k | ~150 KB | 4 MB |
+| Normal (default) | + HaGeZi Light | ~120k | ~430 KB | 4 MB |
+| Aggressive | StevenBlack + HaGeZi Pro | ~255k | ~850 KB | 8 MB |
+| Extended | Aggressive + HaGeZi TIF | ~1.63M | ~4.6 MB | 16 MB |
 
 Lists that don't fit are greyed out in the picker. If one ends up configured
 anyway (a backup from a bigger board, a URL typed by hand), the device reads its
@@ -254,9 +267,13 @@ No reflashing: lists travel separately from the firmware, over the air.
    (`.github/workflows/blocklist.yml`) downloads the sources (StevenBlack hosts,
    HaGeZi Light / Pro / Threat Intelligence Feeds), builds the four lists
    (`blocklist-light.bin`, `blocklist.bin`, `blocklist-aggressive.bin`,
-   `blocklist-extended.bin`), signs them when the signing key is configured, checks
+   `blocklist-extended.bin`) in both formats (`blocklist.bin` is v2, `blocklist-v4.bin`
+   the fuse filter, and so on), signs them when the signing key is configured, checks
    each one fits the smallest board it is offered to and has not shrunk, and replaces the files on the
    [`blocklist` release](https://github.com/joanrra2/pocket-adblock/releases/tag/blocklist).
+   Firmware 0.5.0 and later fetch the `-v4` file of the list you picked and fall back
+   to the v2 file if it is missing; the setting keeps the v2 name. Older firmware
+   keeps fetching the v2 files, so it never gets a list it can't read.
 2. **Device check.** The device asks for its list URL 10 minutes after booting and
    then every *Settings → Updates → interval* (6 h by default, so a new daily list
    arrives within a few hours). *Update now* checks at once.
