@@ -76,7 +76,7 @@ bool BlocklistStore::mapSlot(int slot, Mapped& out, bool verifyHash, char* why, 
         setWhy(why, whyLen, "empty or not an SHBL list");
         return false;
     }
-    const size_t payload = payloadSize(hdr.version, hdr.count);
+    const size_t payload = payloadSize(hdr);
     const size_t sigBytes = isSigned(hdr) ? kSignatureBytes : 0;
     if (hdr.count == 0 || kHdr + payload + sigBytes > part->size) {
         setWhy(why, whyLen, "count does not fit the partition");
@@ -92,7 +92,7 @@ bool BlocklistStore::mapSlot(int slot, Mapped& out, bool verifyHash, char* why, 
         return false;
     }
     const uint8_t* base = static_cast<const uint8_t*>(ptr);
-    HashTable table(base + kHdr, hdr.count, hdr.version);
+    HashTable table(base + kHdr, hdr.count, hdr.version, payload);
 
     if (verifyHash) {
         uint8_t digest[32];
@@ -278,7 +278,7 @@ esp_err_t BlocklistStore::write(const uint8_t* data, size_t len)
             mode_ = Mode::WithHeader;  // header kept in headBuf_, written at finish
             BlocklistHeader h;
             memcpy(&h, headBuf_, sizeof(h));
-            expectedPayload_ = headerLooksValid(h) ? payloadSize(h.version, h.count) : 0;
+            expectedPayload_ = headerLooksValid(h) ? payloadSize(h) : 0;
             // Too big for this board's slot? Say so now instead of failing at the end.
             if (expectedPayload_ && kHdr + expectedPayload_ > slots_[writeSlot_]->size) {
                 tooBig_ = true;
@@ -337,7 +337,7 @@ esp_err_t BlocklistStore::finishWrite(char* why, size_t whyLen)
             abortWrite();
             return ESP_ERR_INVALID_VERSION;
         }
-        if (hdr.count == 0 || payloadBytes_ != payloadSize(hdr.version, hdr.count)) {
+        if (hdr.count == 0 || payloadBytes_ != payloadSize(hdr)) {
             setWhy(why, whyLen, "header count does not match payload (truncated download?)");
             abortWrite();
             return ESP_ERR_INVALID_SIZE;
@@ -434,6 +434,10 @@ void BlocklistStore::rebuildBloom(const HashTable& table)
 {
     if (!bloom_.ready()) return;
     bloomReady_ = false;
+    if (!table.canList()) {  // a filter list answers in 3 reads: no bloom filter in front of it
+        ESP_LOGI(TAG, "bloom filter: not used with a filter list");
+        return;
+    }
     const int64_t t0 = esp_timer_get_time();
     bloom_.clear();
     table.forEach([this](uint64_t h) { bloom_.add(h); });

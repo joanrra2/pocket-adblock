@@ -427,7 +427,7 @@ function renderStatus(s){
  $('#notices').innerHTML=no.map(x=>`<div class="notice">${x}</div>`).join('');
  // updates view
  const u=s.update;
- $('#blinfo').innerHTML=kv([['Domains',n(b.count)+' <span class="mu">'+tr('of {0} · slot {1}',n(b.capacity),b.slot)+(b.format?' · '+(b.format==2?tr('compact'):'v1'):'')+'</span>'],['Custom / allowed',b.custom+' / '+b.allow],
+ $('#blinfo').innerHTML=kv([['Domains',n(b.count)+' <span class="mu">'+tr('of {0} · slot {1}',n(b.capacity),b.slot)+(b.format?' · '+(b.format==2?tr('compact'):b.format==4?'fuse':'v'+b.format):'')+'</span>'],['Custom / allowed',b.custom+' / '+b.allow],
   ['Loaded',b.count?tr('{0} ago',ago(b.activeFor)):'–'],
   ...(b.bloomBytes?[['Bloom filter',tr('{0} KB in {1} · {2} lookups skipped flash',n(b.bloomBytes/1024|0),b.bloomPsram?'PSRAM':tr('internal RAM'),n(b.bloomSkips))+(b.bloomReady?'':' · '+tr('rebuilding…'))]]:[]),
   ['Signature',b.signed?'<span class="ok">'+tr('verified')+'</span>':tr(b.keyConfigured?'not signed':'not checked (no key in this build)')],
