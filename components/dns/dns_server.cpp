@@ -1,6 +1,7 @@
 #include "sinkhole/dns_server.hpp"
 
 #include <cerrno>
+#include <fcntl.h>
 #include <cstring>
 #include <initializer_list>
 
@@ -23,10 +24,16 @@ constexpr uint32_t kLocalTtl = 60;  // local names: short, so edits show up quic
 constexpr uint32_t kSafeTtl = 300;
 constexpr uint32_t kSafeRefreshS = 6 * 3600, kSafeRetryS = 60;
 
+// Non-blocking: select() can report a socket readable with nothing to read,
+// and a blocking recvfrom() would then hold the DNS task until the next
+// packet (seconds on a quiet network, with upstream answers waiting).
+void setNonBlocking(int s) { fcntl(s, F_SETFL, fcntl(s, F_GETFL, 0) | O_NONBLOCK); }
+
 int openUdp(uint16_t port)
 {
     int s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (s < 0) return -1;
+    setNonBlocking(s);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
@@ -44,6 +51,7 @@ int openUdp6(uint16_t port)
 {
     int s = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
     if (s < 0) return -1;
+    setNonBlocking(s);
     int one = 1;
     setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, &one, sizeof(one));
     sockaddr_in6 addr{};
