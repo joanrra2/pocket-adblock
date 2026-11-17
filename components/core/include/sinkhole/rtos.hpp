@@ -15,9 +15,10 @@ namespace sinkhole {
 template <size_t StackBytes>
 class StaticTask {
 public:
-    bool start(const char* name, TaskFunction_t fn, void* arg, UBaseType_t prio)
+    // core: tskNO_AFFINITY, or 0 / 1 to pin the task to that core.
+    bool start(const char* name, TaskFunction_t fn, void* arg, UBaseType_t prio, BaseType_t core = tskNO_AFFINITY)
     {
-        handle_ = xTaskCreateStatic(fn, name, StackBytes, arg, prio, stack_, &tcb_);
+        handle_ = xTaskCreateStaticPinnedToCore(fn, name, StackBytes, arg, prio, stack_, &tcb_, core);
         return handle_ != nullptr;
     }
     TaskHandle_t handle() const { return handle_; }

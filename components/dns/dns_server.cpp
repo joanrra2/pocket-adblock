@@ -78,7 +78,10 @@ esp_err_t DnsServer::start()
         ESP_LOGE(TAG, "socket setup failed: errno %d", errno);
         return ESP_FAIL;
     }
-    if (!task_.start("dns", &DnsServer::taskEntry, this, 6)) return ESP_ERR_NO_MEM;
+    // Dual-core chips: the core Wi-Fi does not use (its task is pinned to core 0),
+    // so a query never waits for Wi-Fi housekeeping to give up the CPU.
+    if (!task_.start("dns", &DnsServer::taskEntry, this, 6, portNUM_PROCESSORS > 1 ? 1 : tskNO_AFFINITY))
+        return ESP_ERR_NO_MEM;
     return ESP_OK;
 }
 
