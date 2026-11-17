@@ -519,7 +519,7 @@ void DnsServer::expirePending()
         if (p.used && static_cast<int32_t>(now - p.deadline) >= 0) {
             p.used = false;
             pendingInUse_--;
-            if (p.internal < 0) counters_.upstreamTimeouts++;
+            if (p.internal == -1) counters_.upstreamTimeouts++;  // a client was waiting
         }
     }
 }
