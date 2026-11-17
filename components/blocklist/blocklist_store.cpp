@@ -57,7 +57,7 @@ esp_err_t BlocklistStore::begin()
             ESP_LOGI(TAG, "slot %c active: %lu hashes", 'A' + slot,
                      static_cast<unsigned long>(m.hdr.count));
             if (slot != preferred) nvs::saveU8(kSlotKey, static_cast<uint8_t>(slot));
-            rebuildBloom(m.table);
+            bloomAtStartup_ = true;  // lookups use flash until finishStartup() builds it
             return ESP_OK;
         }
         ESP_LOGW(TAG, "slot %c unusable: %s", 'A' + slot, why);
@@ -438,6 +438,19 @@ bool BlocklistStore::allocateBloom()
 #else
     return false;
 #endif
+}
+
+void BlocklistStore::finishStartup()
+{
+    if (!bloomAtStartup_) return;
+    bloomAtStartup_ = false;
+    HashTable t;
+    {
+        LockGuard g(mu_);
+        if (!active_.valid) return;
+        t = active_.table;
+    }
+    rebuildBloom(t);
 }
 
 // Lookups bypass the filter (bloomReady_ = false) while it is rebuilt.

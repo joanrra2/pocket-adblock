@@ -36,6 +36,9 @@ struct BlocklistInfo {
 class BlocklistStore {
 public:
     esp_err_t begin();
+    // Builds the bloom filter for the list found at boot (begin() leaves it for
+    // later so Wi-Fi and DNS start right away). Called from the updater task.
+    void finishStartup();
 
     bool contains(uint64_t hash);
     // Any of several hashes (the suffixes of one name) under a single lock.
@@ -106,7 +109,8 @@ private:
     // Optional RAM bloom filter (CONFIG_SINKHOLE_BLOOM_FILTER).
     BloomBits bloom_;
     bool bloomPsram_ = false;
-    bool bloomFailed_ = false;  // allocation failed once: don't retry on every update
+    bool bloomFailed_ = false;
+    bool bloomAtStartup_ = false;  // allocation failed once: don't retry on every update
     std::atomic<bool> bloomReady_{false};
     std::atomic<uint32_t> bloomSkips_{0};
 };

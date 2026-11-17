@@ -107,7 +107,9 @@ esp_err_t Updater::start()
 
 void Updater::taskEntry(void* arg)
 {
-    static_cast<Updater*>(arg)->run();
+    auto* self = static_cast<Updater*>(arg);
+    self->store_.finishStartup();  // low priority, after Wi-Fi and DNS are up
+    self->run();
 }
 
 void Updater::fetchNow()
