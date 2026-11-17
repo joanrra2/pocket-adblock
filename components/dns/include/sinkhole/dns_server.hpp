@@ -91,7 +91,7 @@ private:
         uint32_t upstreamIp2;  // 0 = no backup for this query
         uint8_t failedMask;    // which upstreams answered with an error
         bool clientV6;
-        int8_t internal;  // >= 0: our own lookup of a SafeSearch endpoint
+        int8_t internal;  // >= 0: our own lookup of a SafeSearch endpoint; kRefresh: cache refresh
         bool noFilter;    // client exempt from blocking (no CNAME check on the answer)
         ClientSockAddr client;
         TickType_t deadline;
@@ -106,6 +106,8 @@ private:
     bool cnameCloaked(const uint8_t* pkt, size_t len, size_t qend);
     void countCnameBlocked(const ClientAddr& client, const char* name);
     Pending* allocPending();
+    void refreshInBackground(size_t len, uint32_t qkey, uint32_t ckey);
+    static constexpr int8_t kRefresh = -2;
     void reply(const ClientSockAddr& to, bool v6, const uint8_t* data, size_t len);
 
     DomainFilter& filter_;

@@ -58,14 +58,15 @@ void DnsCache::begin()
 }
 
 size_t DnsCache::lookupIn(Table& t, uint32_t key, const uint8_t* query, size_t qend, uint8_t* out, size_t cap,
-                          uint32_t now)
+                          uint32_t now, bool* refresh)
 {
     if (!t.sets) return 0;
     for (size_t w = 0; w < t.ways; w++) {
         Hdr* e = t.way(key, w);
         if (e->key != key) continue;
         const uint32_t age = now - e->storedAt;
-        if (age >= e->ttl) {
+        const bool stale = age >= e->ttl;
+        if (stale && (!refresh || age >= e->ttl + kStaleS)) {
             e->key = 0;  // expired
             return 0;
         }
@@ -80,22 +81,28 @@ size_t DnsCache::lookupIn(Table& t, uint32_t key, const uint8_t* query, size_t q
         out[1] = query[1];
         // Keep the client's RD bit, report the remaining TTL.
         out[2] = static_cast<uint8_t>((out[2] & ~0x01) | (query[2] & 0x01));
-        dns::forEachRecord(out, e->len, e->qend, [age](uint8_t* ttl, uint16_t type) {
+        dns::forEachRecord(out, e->len, e->qend, [age, stale](uint8_t* ttl, uint16_t type) {
             if (type == dns::kTypeOpt) return;
             uint32_t v = dns::rd32(ttl);
-            dns::wr32(ttl, v > age ? v - age : 1);
+            dns::wr32(ttl, stale ? 30 : v > age ? v - age : 1);
         });
+        // Expired, or in the last tenth of its life: refresh in the background,
+        // at most once every 5 s per name.
+        if (refresh && (stale || e->ttl - age <= e->ttl / 10) && now - e->refreshed >= 5) {
+            e->refreshed = now;
+            *refresh = true;
+        }
         return e->len;
     }
     return 0;
 }
 
-size_t DnsCache::lookup(uint32_t key, const uint8_t* query, size_t qend, uint8_t* out, size_t cap)
+size_t DnsCache::lookup(uint32_t key, const uint8_t* query, size_t qend, uint8_t* out, size_t cap, bool* refresh)
 {
     if (!capacity()) return 0;
     const uint32_t now = uptimeSeconds();
-    size_t n = lookupIn(small_, key, query, qend, out, cap, now);
-    if (!n) n = lookupIn(large_, key, query, qend, out, cap, now);
+    size_t n = lookupIn(small_, key, query, qend, out, cap, now, refresh);
+    if (!n) n = lookupIn(large_, key, query, qend, out, cap, now, refresh);
     if (n)
         hits_++;
     else
@@ -165,6 +172,7 @@ void DnsCache::store(uint32_t key, const uint8_t* resp, size_t len)
     slot->key = key;
     slot->storedAt = uptimeSeconds();
     slot->ttl = minTtl;
+    slot->refreshed = 0;
     slot->len = static_cast<uint16_t>(len);
     slot->qend = static_cast<uint16_t>(qend);
     memcpy(Table::data(slot), resp, len);

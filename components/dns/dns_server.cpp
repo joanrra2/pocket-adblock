@@ -230,7 +230,8 @@ void DnsServer::onClientPacket(int sock)
 
     const uint32_t qkey = dns::questionKey(buf_, q.end);
     const uint32_t ckey = DnsCache::keyFor(qkey, dns::rd16(buf_ + 10) > 0);
-    const size_t hit = cache_.lookup(ckey, buf_, q.end, out_, sizeof(out_));
+    bool refresh = false;
+    const size_t hit = cache_.lookup(ckey, buf_, q.end, out_, sizeof(out_), forwardTo ? nullptr : &refresh);
     SINKHOLE_PERF_MARK(lap, perf::Cache);
     if (hit) {
         // Cached answers are re-checked too, so allow-list and setting changes
@@ -245,6 +246,7 @@ void DnsServer::onClientPacket(int sock)
         reply(from, v6, out_, hit);
         SINKHOLE_PERF_MARK(lap, perf::Send);
         SINKHOLE_PERF_TOTAL(lap, perf::QCached);
+        if (refresh) refreshInBackground(static_cast<size_t>(len), qkey, ckey);  // the client already has its answer
         return;
     }
 
@@ -303,6 +305,41 @@ void DnsServer::onClientPacket(int sock)
     }
 }
 
+// Asks the upstream for the question in buf_ again; the answer only refreshes
+// the cache (no client waits for it). Skipped when the pending table is busy.
+void DnsServer::refreshInBackground(size_t len, uint32_t qkey, uint32_t ckey)
+{
+    const uint32_t up = upstream_.load();
+    Pending* p = up && pendingInUse_ < CONFIG_SINKHOLE_DNS_MAX_PENDING / 2 ? allocPending() : nullptr;
+    if (!p) return;
+    uint16_t id;
+    bool clash;
+    do {
+        id = static_cast<uint16_t>(esp_random());
+        clash = false;
+        for (const auto& o : pending_)
+            if (o.used && o.upstreamId == id) clash = true;
+    } while (clash);
+    *p = Pending{};
+    p->used = true;
+    p->upstreamId = id;
+    p->questionKey = qkey;
+    p->cacheKey = ckey;
+    p->upstreamIp = up;
+    p->internal = kRefresh;
+    p->deadline = xTaskGetTickCount() + kTimeout;
+    pendingInUse_++;
+    dns::wr16(buf_, id);
+    sockaddr_in to{};
+    to.sin_family = AF_INET;
+    to.sin_port = htons(upstreamPort_.load());
+    to.sin_addr.s_addr = up;
+    if (sendto(upstreamSock_, buf_, len, 0, reinterpret_cast<sockaddr*>(&to), sizeof(to)) < 0) {
+        p->used = false;
+        pendingInUse_--;
+    }
+}
+
 void DnsServer::onUpstreamPacket()
 {
     SINKHOLE_PERF_LAP(lap, perf::UTotal);
@@ -330,6 +367,12 @@ void DnsServer::onUpstreamPacket()
         if (p.upstreamIp2 && rcode != 0 && rcode != 3) {
             p.failedMask |= static_cast<uint8_t>(1 << which);
             if (p.failedMask != 0x3) return;
+        }
+        if (p.internal == kRefresh) {  // background refresh: cache only
+            cache_.store(p.cacheKey, buf_, static_cast<size_t>(len));
+            p.used = false;
+            pendingInUse_--;
+            return;
         }
         if (p.internal >= 0) {  // our SafeSearch endpoint lookup: keep the first A
             const int t = p.internal;
