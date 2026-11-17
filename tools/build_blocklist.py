@@ -136,6 +136,98 @@ def payload_v2(hashes):
             b''.join(s.to_bytes(3, 'little') for b in buckets for s in b))
 
 
+V4_HEAD, V4_PAD = 28, 8
+M64 = (1 << 64) - 1
+
+
+def fuse_mix(h):  # murmur3 finalizer; must match HashTable::mix
+    h ^= h >> 33
+    h = (h * 0xff51afd7ed558ccd) & M64
+    h ^= h >> 33
+    h = (h * 0xc4ceb9fe1a85ec53) & M64
+    return h ^ (h >> 33)
+
+
+def fuse_slots(h, seg_len, seg_count_len):
+    h0 = (h * seg_count_len) >> 64
+    mask = seg_len - 1
+    return h0, (h0 + seg_len) ^ ((h >> 18) & mask), (h0 + 2 * seg_len) ^ (h & mask)
+
+
+def payload_v4(hashes):
+    """3-wise binary fuse filter (Graf & Lemire). Must match HashTable::containsV4.
+    Fingerprint bits f = 40 - log2(n), rounded up: false matches no more frequent
+    than v2's 40-bit hash collisions at the same list size."""
+    n = len(hashes)
+    f = min(24, max(8, math.ceil(40 - math.log2(max(n, 2)))))
+    seg_len = min(1 << 18, 1 << int(math.floor(math.log(max(n, 2)) / math.log(3.33) + 2.25)))
+    factor = max(1.125, 0.875 + 0.25 * math.log(1e6) / math.log(max(n, 2)))
+    capacity = round(n * factor)
+    seg_count = (capacity + seg_len - 1) // seg_len - 2
+    array_len = (seg_count + 2) * seg_len
+    seg_count = (array_len + seg_len - 1) // seg_len
+    seg_count = 1 if seg_count <= 2 else seg_count - 2
+    array_len = (seg_count + 2) * seg_len
+    scl = seg_count * seg_len
+    for attempt in range(100):
+        seed = int.from_bytes(hashlib.sha256(b'shbl-fuse-%d' % attempt).digest()[:8], 'little')
+        keys = [fuse_mix((k + seed) & M64) for k in hashes]
+        count, xorh = [0] * array_len, [0] * array_len
+        for h in keys:
+            for i in fuse_slots(h, seg_len, scl):
+                count[i] += 1
+                xorh[i] ^= h
+        queue = [i for i in range(array_len) if count[i] == 1]
+        stack = []
+        while queue:
+            i = queue.pop()
+            if count[i] != 1:
+                continue
+            h = xorh[i]
+            stack.append((h, i))
+            for j in fuse_slots(h, seg_len, scl):
+                count[j] -= 1
+                xorh[j] ^= h
+                if count[j] == 1:
+                    queue.append(j)
+        if len(stack) == n:
+            break
+    else:
+        sys.exit('fuse filter: construction failed 100 times')
+    fmask = (1 << f) - 1
+    fps = [0] * array_len
+    for h, i in reversed(stack):
+        a, b, c = fuse_slots(h, seg_len, scl)
+        fps[i] = ((h ^ (h >> 32)) & fmask) ^ fps[a] ^ fps[b] ^ fps[c]  # fps[i] is 0 here
+    out, acc, nacc = bytearray(), 0, 0
+    for v in fps:
+        acc |= v << nacc
+        nacc += f
+        while nacc >= 8:
+            out.append(acc & 0xFF)
+            acc >>= 8
+            nacc -= 8
+    if nacc:
+        out.append(acc & 0xFF)
+    payload = struct.pack('<QIIIBBBBI', seed, seg_len, scl, array_len, f, 0, 0, 0, 0) + bytes(out) + b'\0' * V4_PAD
+    assert len(payload) == V4_HEAD + (array_len * f + 7) // 8 + V4_PAD
+    assert all(fuse_contains(payload, k) for k in hashes), 'v4 self-check failed'
+    return payload
+
+
+def fuse_contains(p, key):
+    """Reference lookup (the self-check; mirrors HashTable::containsV4)."""
+    seed, seg_len, scl, _, f = struct.unpack_from('<QIIIB', p)
+    h = fuse_mix((key + seed) & M64)
+
+    def fp(i):
+        bit = i * f
+        return (int.from_bytes(p[V4_HEAD + (bit >> 3):V4_HEAD + (bit >> 3) + 5], 'little') >> (bit & 7)) & ((1 << f) - 1)
+
+    a, b, c = fuse_slots(h, seg_len, scl)
+    return ((h ^ (h >> 32)) & ((1 << f) - 1)) == fp(a) ^ fp(b) ^ fp(c)
+
+
 def sign_header(header, key_path):
     """ECDSA P-256 over SHA-256(header[:49]) (includes the payload hash and the
     signed flag), raw r||s. Must match BlocklistStore::verifySignature."""
@@ -154,20 +246,23 @@ def main():
     out = args[0] if args else 'blocklist.bin'
     sources = args[1:] or DEFAULT_SOURCES
     raw = '--raw' in flags
-    version = 1 if raw or '--format=v1' in flags or '--v1' in flags else 2
+    version = 1 if raw or '--format=v1' in flags or '--v1' in flags else 4 if '--format=v4' in flags else 2
     sign_key = next((a.split('=', 1)[1] for a in flags if a.startswith('--sign=')), None)
     if sign_key and raw:
         sys.exit('--raw lists have no header and cannot be signed')
 
     domains = parse(sources, '--allow-missing' in flags)
     hashes = sorted({fnv(d.encode()) for d in domains})
-    payload = payload_v1(hashes) if version == 1 else payload_v2(hashes)
+    payload = payload_v1(hashes) if version == 1 else payload_v2(hashes) if version == 2 else payload_v4(hashes)
 
     with open(out, 'wb') as f:  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
         if not raw:
             flags_byte = 0x01 if sign_key else 0x00  # reserved[0] bit 0 = signed
+            # reserved[4..7] = payload size (v4 can't derive it from the count). Not
+            # signed itself, but a different size can't produce the signed SHA-256.
+            rest = b'\0' * 3 + struct.pack('<I', len(payload) if version == 4 else 0) + b'\0' * 8
             header = struct.pack('<4sBBHII32sB15s', b'SHBL', version, HASH_BYTES, 64, len(hashes),
-                                 int(time.time()), hashlib.sha256(payload).digest(), flags_byte, b'\0' * 15)
+                                 int(time.time()), hashlib.sha256(payload).digest(), flags_byte, rest)
             assert len(header) == 64
             f.write(header)
         f.write(payload)
@@ -183,8 +278,14 @@ def main():
     if version == 1:
         print(f'lookup           : ~{math.ceil(math.log2(max(n, 2)))} reads/query')
         print('fits             : 4 MB layout up to 144,166 / 8 MB up to 511,168 / 16 MB up to 1,350,000')
-    else:
+    elif version == 2:
         print('fits             : 4 MB layout up to 218,090 / 8 MB up to 829,760 / 16 MB up to 2,227,861')
+    else:
+        f = payload[20]
+        print(f'fuse filter      : {f}-bit fingerprints (false match 1 in {2 ** f:,}); {8 * len(payload) / max(n, 1):.2f} bits/domain')
+        slots = {'4 MB': 0xB0000, '8 MB': 0x270000, '16 MB': 0x670000}
+        print('fits             : ' + ' / '.join(f'{name} {"yes" if 64 + len(payload) + 64 <= size else "NO"}'
+                                                  for name, size in slots.items()))
 
 
 if __name__ == '__main__':
