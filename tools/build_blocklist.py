@@ -114,6 +114,21 @@ def parse(sources, allow_missing):
     return domains
 
 
+def parents(d: str):
+    """Parent names the device also checks for d: 'a.b.example.com' -> 'b.example.com',
+    'example.com'. Stops before the bare TLD, like forEachSuffix in hash_table.hpp."""
+    i = d.find('.')
+    while i != -1 and d.find('.', i + 1) != -1:
+        yield d[i + 1:]
+        i = d.find('.', i + 1)
+
+
+def prune_covered(domains):
+    """Drops names whose parent is also listed: the device blocks every subdomain of a
+    listed name, so those entries are dead weight. Blocking is unchanged."""
+    return {d for d in domains if not any(p in domains for p in parents(d))}
+
+
 def payload_v1(hashes):
     return b''.join(h.to_bytes(HASH_BYTES, 'little') for h in hashes)
 
@@ -160,6 +175,12 @@ def main():
         sys.exit('--raw lists have no header and cannot be signed')
 
     domains = parse(sources, '--allow-missing' in flags)
+    listed = len(domains)
+    if '--keep-subdomains' not in flags:
+        kept = prune_covered(domains)
+        # Self-check: every source name must still match itself or a listed parent.
+        assert all(d in kept or any(p in kept for p in parents(d)) for d in domains)
+        domains = kept
     hashes = sorted({fnv(d.encode()) for d in domains})
     payload = payload_v1(hashes) if version == 1 else payload_v2(hashes)
 
@@ -175,7 +196,9 @@ def main():
             f.write(sign_header(header, sign_key))
 
     n = len(hashes)
-    print(f'source domains   : {len(domains):,}')
+    print(f'source domains   : {listed:,}')
+    if listed != len(domains):
+        print(f'covered by parent: {listed - len(domains):,} subdomains dropped (still blocked through the listed parent)')
     print(f'hash entries     : {n:,}  (collisions: {len(domains) - n})')
     print(f'format           : {"raw v1 (esp32-c3-adblock)" if raw else f"SHBL v{version}"}'
           f'{", signed" if sign_key else ""}')
