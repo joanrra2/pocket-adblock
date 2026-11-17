@@ -65,7 +65,12 @@ public:
     bool record(const ClientAddr& addr, bool blocked);
     // Counts one query against the client's per-minute budget; false when
     // over `perMinute` (the query should be refused). 0 = no limit.
-    bool withinRate(const ClientAddr& addr, uint16_t perMinute, bool* noFilter = nullptr);
+    // slot (optional): the client's entry, for record(slot, ...) in the same query.
+    bool withinRate(const ClientAddr& addr, uint16_t perMinute, bool* noFilter = nullptr, ClientInfo** slot = nullptr);
+    // Counts one query on the entry withinRate() returned, without a second
+    // lookup or lock. DNS task only: it is the only one that adds or evicts
+    // clients, so the entry still belongs to this client.
+    bool record(ClientInfo* slot, bool blocked);
     // Per-device rule (IPv4): queries from this device are never blocked.
     esp_err_t setNoFilter(uint32_t ip, bool on);
     bool isBanned(uint32_t ip);

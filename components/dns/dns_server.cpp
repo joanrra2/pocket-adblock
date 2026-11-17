@@ -144,7 +144,8 @@ void DnsServer::onClientPacket(int sock)
     // Per-client rate limit (a looping or misbehaving device must not starve
     // everyone else): REFUSED until its one-minute window resets.
     bool noFilter = false;  // per-device rule: never blocked
-    if (!clients_.withinRate(client, rateLimit_, &noFilter)) {
+    ClientInfo* slot = nullptr;
+    if (!clients_.withinRate(client, rateLimit_, &noFilter, &slot)) {
         counters_.rateLimited++;
         reply(from, v6, buf_, dns::buildRcode(buf_, q, 5));
         return;
@@ -211,7 +212,7 @@ void DnsServer::onClientPacket(int sock)
         filterN_ = 0;
     }
     SINKHOLE_PERF_MARK(lap, perf::Filter);
-    const bool banned = clients_.record(client, blocked);
+    const bool banned = clients_.record(slot, blocked);
     SINKHOLE_PERF_MARK(lap, perf::Client);
     log_.add(client, q.name, blocked || banned);
     SINKHOLE_PERF_MARK(lap, perf::Log);

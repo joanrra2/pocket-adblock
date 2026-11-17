@@ -74,12 +74,13 @@ ClientInfo* ClientTable::findLocked(const ClientAddr& addr)
     return nullptr;
 }
 
-bool ClientTable::withinRate(const ClientAddr& addr, uint16_t perMinute, bool* noFilter)
+bool ClientTable::withinRate(const ClientAddr& addr, uint16_t perMinute, bool* noFilter, ClientInfo** slot)
 {
     const uint32_t now = uptimeSeconds();
     LockGuard g(mu_);
     ClientInfo* c = findOrAddLocked(addr);
     if (noFilter) *noFilter = c->noFilter;
+    if (slot) *slot = c;
     if (!perMinute) return true;
     if (now - c->rateStart >= 60) {
         c->rateStart = now;
@@ -122,6 +123,16 @@ bool ClientTable::record(const ClientAddr& addr, bool blocked)
 {
     LockGuard g(mu_);
     ClientInfo* c = findOrAddLocked(addr);
+    c->lastSeen = uptimeSeconds();
+    if (blocked || c->banned)
+        c->blocked++;
+    else
+        c->allowed++;
+    return c->banned;
+}
+
+bool ClientTable::record(ClientInfo* c, bool blocked)
+{
     c->lastSeen = uptimeSeconds();
     if (blocked || c->banned)
         c->blocked++;
