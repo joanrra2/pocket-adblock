@@ -5,6 +5,7 @@
 //
 // Compatible with esp32-c3-adblock's blocklist.bin (raw, headerless, same hash).
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -81,7 +82,48 @@ constexpr size_t kV2IndexBytes = kV2CoarseBytes + kV2Buckets;
 // The header's reserved[4..7] holds the payload size.
 constexpr size_t kV4HeadBytes = 28;
 constexpr size_t kV4Pad = 8;
-constexpr unsigned kV4EstimatedBits = 23;  // capacity estimate for a slot (bits per domain)
+
+// Fingerprint bits for n domains: ceil(40 - log2 n), in 8..24.
+inline uint8_t v4FingerprintBits(uint32_t n)
+{
+    int log2n = 0;
+    while (log2n < 31 && (n >> (log2n + 1))) log2n++;
+    const int f = 40 - log2n;
+    return static_cast<uint8_t>(f < 8 ? 8 : f > 24 ? 24 : f);
+}
+
+// Payload size of a v4 list of n domains. Mirrors payload_v4() in
+// tools/build_blocklist.py (used only to tell how many domains fit a slot).
+inline size_t v4PayloadBytes(uint32_t n)
+{
+    const double dn = n < 2 ? 2.0 : static_cast<double>(n);
+    const int segExp = static_cast<int>(std::floor(std::log(dn) / std::log(3.33) + 2.25));
+    const uint64_t segLen = segExp >= 18 ? (1u << 18) : (1u << (segExp < 0 ? 0 : segExp));
+    const double factor = std::fmax(1.125, 0.875 + 0.25 * std::log(1e6) / std::log(dn));
+    const uint64_t capacity = static_cast<uint64_t>(std::llround(n * factor));
+    const uint64_t segs = (capacity + segLen - 1) / segLen;  // segments incl. the 2 extra
+    const uint64_t segCount = segs <= 2 ? 1 : segs - 2;
+    const uint64_t arrayLen = (segCount + 2) * segLen;
+    return kV4HeadBytes + static_cast<size_t>((arrayLen * v4FingerprintBits(n) + 7) / 8) + kV4Pad;
+}
+
+// Most domains whose v4 payload fits `bytes`. Fewer fingerprint bits are needed
+// past each power of two, so search each [2^k, 2^(k+1)) range separately.
+inline uint32_t v4Capacity(size_t bytes)
+{
+    uint32_t best = 0;
+    for (int k = 0; k < 26; k++) {
+        uint32_t lo = 1u << k, hi = (2u << k) - 1;
+        if (v4PayloadBytes(lo) > bytes) continue;
+        while (lo < hi) {  // largest n in the range that fits
+            const uint32_t mid = lo + (hi - lo + 1) / 2;
+            if (v4PayloadBytes(mid) <= bytes) lo = mid;
+            else hi = mid - 1;
+        }
+        if (lo > best) best = lo;
+    }
+    return best;
+}
 
 inline uint32_t rd32le(const uint8_t* p)
 {
@@ -104,7 +146,7 @@ inline size_t payloadSize(const BlocklistHeader& h)
 inline uint32_t capacityFor(uint8_t version, size_t slotBytes)
 {
     const size_t usable = slotBytes > 64 ? slotBytes - 64 : 0;
-    if (version == kBlocklistV4) return static_cast<uint32_t>(usable * 8 / kV4EstimatedBits);
+    if (version == kBlocklistV4) return usable > kSignatureBytes ? v4Capacity(usable - kSignatureBytes) : 0;
     if (version == kBlocklistV2) return usable > kV2IndexBytes ? static_cast<uint32_t>((usable - kV2IndexBytes) / 3) : 0;
     return static_cast<uint32_t>(usable / kHashBytes);
 }
