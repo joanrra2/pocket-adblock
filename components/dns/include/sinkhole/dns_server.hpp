@@ -99,8 +99,8 @@ private:
 
     static void taskEntry(void* arg);
     void run();
-    void onClientPacket(int sock);
-    void onUpstreamPacket();
+    bool onClientPacket(int sock, int flags);
+    bool onUpstreamPacket(int flags);
     void expirePending();
     void refreshSafeTargets();
     bool cnameCloaked(const uint8_t* pkt, size_t len, size_t qend);

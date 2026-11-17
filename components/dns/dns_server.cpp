@@ -18,6 +18,7 @@ namespace {
 constexpr const char* TAG = "dns";
 constexpr uint16_t kDnsPort = 53;
 constexpr TickType_t kTimeout = pdMS_TO_TICKS(CONFIG_SINKHOLE_DNS_UPSTREAM_TIMEOUT_MS);
+constexpr int kDrain = 16;  // datagrams per socket per select() wake
 constexpr uint32_t kLocalTtl = 60;  // local names: short, so edits show up quickly
 constexpr uint32_t kSafeTtl = 300;
 constexpr uint32_t kSafeRefreshS = 6 * 3600, kSafeRetryS = 60;
@@ -96,9 +97,17 @@ void DnsServer::run()
         int n = select(maxFd + 1, &rd, nullptr, nullptr, &tv);
         if (n > 0) {
             // Replies first: they free pending slots.
-            if (FD_ISSET(upstreamSock_, &rd)) onUpstreamPacket();
-            if (FD_ISSET(serverSock_, &rd)) onClientPacket(serverSock_);
-            if (server6Sock_ >= 0 && FD_ISSET(server6Sock_, &rd)) onClientPacket(server6Sock_);
+            // Everything queued, not one datagram per select(): a burst of
+            // queries would otherwise wait one select() round trip each.
+            if (FD_ISSET(upstreamSock_, &rd))
+                for (int k = 0; k < kDrain && onUpstreamPacket(k ? MSG_DONTWAIT : 0); k++) {
+                }
+            if (FD_ISSET(serverSock_, &rd))
+                for (int k = 0; k < kDrain && onClientPacket(serverSock_, k ? MSG_DONTWAIT : 0); k++) {
+                }
+            if (server6Sock_ >= 0 && FD_ISSET(server6Sock_, &rd))
+                for (int k = 0; k < kDrain && onClientPacket(server6Sock_, k ? MSG_DONTWAIT : 0); k++) {
+                }
         }
         expirePending();
         if (flushCache_.exchange(false)) cache_.clear();
@@ -121,20 +130,20 @@ void DnsServer::reply(const ClientSockAddr& to, bool v6, const uint8_t* data, si
         sendto(serverSock_, data, len, 0, reinterpret_cast<const sockaddr*>(&to.v4), sizeof(to.v4));
 }
 
-void DnsServer::onClientPacket(int sock)
+bool DnsServer::onClientPacket(int sock, int flags)
 {
     SINKHOLE_PERF_LAP(lap, perf::QOther);
     ClientSockAddr from{};
     const bool v6 = sock == server6Sock_;
     socklen_t fromLen = v6 ? sizeof(from.v6) : sizeof(from.v4);
-    int len = recvfrom(sock, buf_, sizeof(buf_), 0, reinterpret_cast<sockaddr*>(&from), &fromLen);
-    if (len <= 0) return;
+    int len = recvfrom(sock, buf_, sizeof(buf_), flags, reinterpret_cast<sockaddr*>(&from), &fromLen);
+    if (len <= 0) return false;
     SINKHOLE_PERF_MARK(lap, perf::Recv);
 
     dns::Question q;
     if (!dns::parseQuery(buf_, static_cast<size_t>(len), q)) {
         counters_.dropped++;
-        return;
+        return true;
     }
     SINKHOLE_PERF_MARK(lap, perf::Parse);
 
@@ -148,14 +157,14 @@ void DnsServer::onClientPacket(int sock)
     if (!clients_.withinRate(client, rateLimit_, &noFilter, &slot)) {
         counters_.rateLimited++;
         reply(from, v6, buf_, dns::buildRcode(buf_, q, 5));
-        return;
+        return true;
     }
     SINKHOLE_PERF_MARK(lap, perf::Client);
     if (captive_ && !v6) {
         const uint32_t apIp = apIp_, mask = apMask_;
         if (apIp && (clientIp & mask) == (apIp & mask)) {
             reply(from, false, buf_, dns::buildCaptive(buf_, sizeof(buf_), q, apIp));
-            return;
+            return true;
         }
     }
 
@@ -168,7 +177,7 @@ void DnsServer::onClientPacket(int sock)
         clients_.record(client, false);
         log_.add(client, q.name, false);
         reply(from, v6, buf_, dns::buildCaptive(buf_, sizeof(buf_), q, localIp, kLocalTtl));
-        return;
+        return true;
     }
     const uint32_t forwardTo = local ? localIp : 0;  // forward rule: that server only
 
@@ -181,7 +190,7 @@ void DnsServer::onClientPacket(int sock)
             clients_.record(client, false);
             log_.add(client, q.name, false);
             reply(from, v6, buf_, dns::buildCaptive(buf_, sizeof(buf_), q, safeIps_[t], kSafeTtl));
-            return;
+            return true;
         }
     }
 
@@ -196,7 +205,7 @@ void DnsServer::onClientPacket(int sock)
             clients_.record(client, true);
             log_.add(client, q.name, true);
             reply(from, v6, buf_, dns::buildNxdomain(buf_, q));
-            return;
+            return true;
         }
     }
 
@@ -223,7 +232,7 @@ void DnsServer::onClientPacket(int sock)
         reply(from, v6, buf_, rlen);
         SINKHOLE_PERF_MARK(lap, perf::Send);
         SINKHOLE_PERF_TOTAL(lap, perf::QBlocked);
-        return;
+        return true;
     }
 
     counters_.allowed++;
@@ -241,20 +250,20 @@ void DnsServer::onClientPacket(int sock)
         if (cloaked) {
             countCnameBlocked(client, q.name);
             reply(from, v6, buf_, dns::buildBlocked(buf_, sizeof(buf_), q));
-            return;
+            return true;
         }
         reply(from, v6, out_, hit);
         SINKHOLE_PERF_MARK(lap, perf::Send);
         SINKHOLE_PERF_TOTAL(lap, perf::QCached);
         if (refresh) refreshInBackground(static_cast<size_t>(len), qkey, ckey);  // the client already has its answer
-        return;
+        return true;
     }
 
     const uint32_t up = forwardTo ? forwardTo : upstream_.load();
     Pending* p = up ? allocPending() : nullptr;
     if (!p) {
         counters_.dropped++;  // no upstream yet, or table full: client will retry
-        return;
+        return true;
     }
 
     // Fresh random txid, unique among in-flight queries (cache-poisoning hygiene
@@ -303,6 +312,7 @@ void DnsServer::onClientPacket(int sock)
         p->used = false;
         pendingInUse_--;
     }
+    return true;
 }
 
 // Asks the upstream for the question in buf_ again; the answer only refreshes
@@ -340,16 +350,16 @@ void DnsServer::refreshInBackground(size_t len, uint32_t qkey, uint32_t ckey)
     }
 }
 
-void DnsServer::onUpstreamPacket()
+bool DnsServer::onUpstreamPacket(int flags)
 {
     SINKHOLE_PERF_LAP(lap, perf::UTotal);
     sockaddr_in from{};
     socklen_t fromLen = sizeof(from);
-    int len = recvfrom(upstreamSock_, buf_, sizeof(buf_), 0, reinterpret_cast<sockaddr*>(&from),
+    int len = recvfrom(upstreamSock_, buf_, sizeof(buf_), flags, reinterpret_cast<sockaddr*>(&from),
                        &fromLen);
-    if (len < static_cast<int>(dns::kHeaderLen)) return;
+    if (len < static_cast<int>(dns::kHeaderLen)) return len >= 0;
     SINKHOLE_PERF_MARK(lap, perf::URecv);
-    if (from.sin_port != htons(kDnsPort) && from.sin_port != htons(upstreamPort_.load())) return;
+    if (from.sin_port != htons(kDnsPort) && from.sin_port != htons(upstreamPort_.load())) return true;
 
     const uint16_t id = dns::rd16(buf_);
     const size_t qend = dns::questionEnd(buf_, static_cast<size_t>(len));
@@ -359,20 +369,20 @@ void DnsServer::onUpstreamPacket()
         if (!p.used || p.upstreamId != id) continue;
         const uint32_t src = from.sin_addr.s_addr;
         const int which = src == p.upstreamIp ? 0 : (p.upstreamIp2 && src == p.upstreamIp2) ? 1 : -1;
-        if (which < 0) return;                              // spoofed / wrong server
-        if (qend && p.questionKey != key) return;           // not our question
+        if (which < 0) return true;                              // spoofed / wrong server
+        if (qend && p.questionKey != key) return true;           // not our question
         // Racing two resolvers: a SERVFAIL/REFUSED from one must not beat a real
         // answer from the other. Relay an error only once both have failed.
         const uint8_t rcode = buf_[3] & 0x0F;
         if (p.upstreamIp2 && rcode != 0 && rcode != 3) {
             p.failedMask |= static_cast<uint8_t>(1 << which);
-            if (p.failedMask != 0x3) return;
+            if (p.failedMask != 0x3) return true;
         }
         if (p.internal == kRefresh) {  // background refresh: cache only
             cache_.store(p.cacheKey, buf_, static_cast<size_t>(len));
             p.used = false;
             pendingInUse_--;
-            return;
+            return true;
         }
         if (p.internal >= 0) {  // our SafeSearch endpoint lookup: keep the first A
             const int t = p.internal;
@@ -387,7 +397,7 @@ void DnsServer::onUpstreamPacket()
             if (safeResolved_ == (1 << safe::kTargets) - 1) safeRefreshAt_ = uptimeSeconds() + kSafeRefreshS;
             p.used = false;
             pendingInUse_--;
-            return;
+            return true;
         }
         wins_[which]++;
         dns::wr16(buf_, p.clientId);
@@ -410,7 +420,7 @@ void DnsServer::onUpstreamPacket()
             reply(p.client, p.clientV6, buf_, dns::buildBlocked(buf_, sizeof(buf_), q));
             p.used = false;
             pendingInUse_--;
-            return;
+            return true;
         }
         reply(p.client, p.clientV6, buf_, static_cast<size_t>(len));  // client first, cache after
         SINKHOLE_PERF_MARK(lap, perf::USend);
@@ -418,9 +428,10 @@ void DnsServer::onUpstreamPacket()
         SINKHOLE_PERF_MARK(lap, perf::UStore);
         p.used = false;
         pendingInUse_--;
-        return;
+        return true;
     }
     // Late reply for an expired query: ignore.
+    return true;
 }
 
 bool DnsServer::cnameCloaked(const uint8_t* pkt, size_t len, size_t qend)
