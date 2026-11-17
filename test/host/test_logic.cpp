@@ -1,10 +1,16 @@
 // Host unit tests for the platform-independent parts (hash table, DNS packet
 // handling). No ESP-IDF needed, run from the repo root:
 //   g++ -std=c++17 -Icomponents/blocklist/include -Icomponents/dns/include test/host/test_logic.cpp -o test_logic
-//   ./test_logic
+//   ./test_logic [LIST.bin DOMAINS.txt]
+// With a list built by tools/build_blocklist.py and its source domains, it also
+// checks that every domain is blocked (directly or through a listed parent) and
+// that random names are not.
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -145,6 +151,210 @@ static void testCompactFormat()
     CHECK(falseNeg == 0);
     CHECK(falsePos * 100 < probes * 2);  // < 2%
     std::printf("bloom: %d false positives in %d probes (%.2f%%)\n", falsePos, probes, 100.0 * falsePos / probes);
+}
+
+// ---- v4 (binary fuse filter): same construction as payload_v4() in tools/build_blocklist.py
+static uint64_t fuseMix(uint64_t h)
+{
+    h ^= h >> 33;
+    h *= 0xff51afd7ed558ccdULL;
+    h ^= h >> 33;
+    h *= 0xc4ceb9fe1a85ec53ULL;
+    return h ^ (h >> 33);
+}
+
+static uint32_t mulHi32(uint64_t h, uint32_t m)  // (h * m) >> 64, portable
+{
+    const uint64_t lo = (h & 0xFFFFFFFFu) * m, hi = (h >> 32) * m;
+    return static_cast<uint32_t>((hi + (lo >> 32)) >> 32);
+}
+
+static void fuseSlots(uint64_t h, uint32_t segLen, uint32_t scl, uint32_t out[3])
+{
+    const uint32_t h0 = mulHi32(h, scl);
+    out[0] = h0;
+    out[1] = (h0 + segLen) ^ (static_cast<uint32_t>(h >> 18) & (segLen - 1));
+    out[2] = (h0 + 2 * segLen) ^ (static_cast<uint32_t>(h) & (segLen - 1));
+}
+
+static std::vector<uint8_t> buildV4(const std::vector<uint64_t>& keys, uint64_t seed)
+{
+    const uint32_t n = static_cast<uint32_t>(keys.size());
+    const uint8_t f = v4FingerprintBits(n);
+    const double dn = n < 2 ? 2.0 : n;
+    const uint32_t segLen =
+        std::min(1u << 18, 1u << static_cast<int>(std::floor(std::log(dn) / std::log(3.33) + 2.25)));
+    const double factor = std::max(1.125, 0.875 + 0.25 * std::log(1e6) / std::log(dn));
+    const uint64_t cap = static_cast<uint64_t>(std::llround(n * factor));
+    const uint64_t segs = (cap + segLen - 1) / segLen;
+    const uint32_t segCount = segs <= 2 ? 1 : static_cast<uint32_t>(segs - 2);
+    const uint32_t scl = segCount * segLen, len = (segCount + 2) * segLen;
+
+    std::vector<uint32_t> count(len);
+    std::vector<uint64_t> xorh(len);
+    std::vector<uint64_t> hs;
+    for (uint64_t k : keys) hs.push_back(fuseMix(k + seed));
+    uint32_t sl[3];
+    for (uint64_t h : hs) {
+        fuseSlots(h, segLen, scl, sl);
+        for (uint32_t i : sl) count[i]++, xorh[i] ^= h;
+    }
+    std::vector<uint32_t> queue;
+    for (uint32_t i = 0; i < len; i++)
+        if (count[i] == 1) queue.push_back(i);
+    std::vector<std::pair<uint64_t, uint32_t>> stack;
+    while (!queue.empty()) {
+        const uint32_t i = queue.back();
+        queue.pop_back();
+        if (count[i] != 1) continue;
+        const uint64_t h = xorh[i];
+        stack.emplace_back(h, i);
+        fuseSlots(h, segLen, scl, sl);
+        for (uint32_t j : sl) {
+            count[j]--;
+            xorh[j] ^= h;
+            if (count[j] == 1) queue.push_back(j);
+        }
+    }
+    if (stack.size() != n) return {};  // the caller retries with another seed
+    std::vector<uint32_t> fps(len);
+    const uint32_t fmask = (1u << f) - 1;
+    for (auto it = stack.rbegin(); it != stack.rend(); ++it) {
+        fuseSlots(it->first, segLen, scl, sl);
+        fps[it->second] =
+            (static_cast<uint32_t>(it->first ^ (it->first >> 32)) & fmask) ^ fps[sl[0]] ^ fps[sl[1]] ^ fps[sl[2]];
+    }
+    std::vector<uint8_t> out(kV4HeadBytes);
+    for (int k = 0; k < 8; k++) out[k] = static_cast<uint8_t>(seed >> (8 * k));
+    for (int k = 0; k < 4; k++) {
+        out[8 + k] = static_cast<uint8_t>(segLen >> (8 * k));
+        out[12 + k] = static_cast<uint8_t>(scl >> (8 * k));
+        out[16 + k] = static_cast<uint8_t>(len >> (8 * k));
+    }
+    out[20] = f;
+    uint64_t acc = 0;
+    int nacc = 0;
+    for (uint32_t v : fps) {
+        acc |= static_cast<uint64_t>(v) << nacc;
+        for (nacc += f; nacc >= 8; nacc -= 8, acc >>= 8) out.push_back(static_cast<uint8_t>(acc));
+    }
+    if (nacc) out.push_back(static_cast<uint8_t>(acc));
+    out.resize(out.size() + kV4Pad);
+    return out;
+}
+
+static void testFuseFormat()
+{
+    uint64_t x = 0x2545F4914F6CDD1DULL;
+    auto next = [&] {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        return x & kHashMask;
+    };
+    for (uint32_t n : {1u, 2u, 1000u, 150000u, 300000u}) {
+        std::vector<uint64_t> v;
+        while (v.size() < n) {
+            v.push_back(next());
+            if (v.size() == n) {
+                std::sort(v.begin(), v.end());
+                v.erase(std::unique(v.begin(), v.end()), v.end());
+            }
+        }
+        std::vector<uint8_t> p;
+        for (uint64_t seed = 1; p.empty() && seed < 50; seed++) p = buildV4(v, seed * 0x9E3779B97F4A7C15ULL);
+        CHECK(!p.empty());
+        if (p.empty()) continue;
+        CHECK(p.size() == v4PayloadBytes(n));
+        HashTable t(p.data(), n, kBlocklistV4, p.size());
+        CHECK(t.isValid());
+        CHECK(!t.canList());
+        size_t listed = 0;
+        t.forEach([&](uint64_t) { listed++; });
+        CHECK(listed == 0);
+        int misses = 0, falsePos = 0;
+        for (uint64_t k : v) misses += !t.contains(k);
+        const int probes = 400000;
+        for (int i = 0; i < probes; i++) falsePos += t.contains(next());
+        CHECK(misses == 0);
+        // f = ceil(40 - log2 n) keeps false matches at or below n / 2^40 per lookup.
+        const double expected = probes * std::ldexp(1.0, -v4FingerprintBits(n));
+        CHECK(falsePos <= 3 + 4 * expected);
+        if (n == 300000)
+            std::printf("fuse: %u domains, %u-bit fingerprints, %.2f bits/domain, %d false matches in %d probes\n", n,
+                        v4FingerprintBits(n), 8.0 * p.size() / n, falsePos, probes);
+
+        // Structure errors are caught (the content itself is covered by the SHA-256).
+        std::vector<uint8_t> bad = p;
+        bad[20] = 25;  // fingerprint width
+        CHECK(!HashTable(bad.data(), n, kBlocklistV4, bad.size()).isValid());
+        bad = p;
+        bad[8] ^= 1;  // segment length no longer a power of two
+        CHECK(!HashTable(bad.data(), n, kBlocklistV4, bad.size()).isValid());
+        CHECK(!HashTable(p.data(), n, kBlocklistV4, p.size() - 1).isValid());  // truncated
+        CHECK(!HashTable(p.data(), 0, kBlocklistV4, p.size()).isValid());
+    }
+
+    // Slot capacity: the reported count fits, and 2% more does not.
+    for (size_t slot : {size_t{0xB0000}, size_t{0x270000}, size_t{0x670000}}) {
+        const uint32_t cap = capacityFor(kBlocklistV4, slot);
+        CHECK(64 + v4PayloadBytes(cap) + kSignatureBytes <= slot);
+        CHECK(64 + v4PayloadBytes(cap + cap / 50) + kSignatureBytes > slot);
+        std::printf("v4 capacity: slot 0x%zX holds %u domains (v2: %u)\n", slot, cap,
+                    capacityFor(kBlocklistV2, slot));
+    }
+
+    // Header: v4 carries its payload size in reserved[4..7].
+    BlocklistHeader hd{};
+    std::memcpy(hd.magic, kBlocklistMagic, 4);
+    hd.version = kBlocklistV4;
+    hd.hashBytes = kHashBytes;
+    hd.headerSize = sizeof(BlocklistHeader);
+    hd.count = 5;
+    hd.reserved[4] = 0x34;
+    hd.reserved[5] = 0x12;
+    CHECK(headerLooksValid(hd));
+    CHECK(payloadSize(hd) == 0x1234);
+    hd.version = 3;
+    CHECK(!headerLooksValid(hd));
+}
+
+// A list made by tools/build_blocklist.py (any format) against its source domains.
+static void testBuiltList(const char* listPath, const char* domainsPath)
+{
+    std::ifstream lf(listPath, std::ios::binary), df(domainsPath);
+    CHECK(lf.good() && df.good());
+    const std::vector<uint8_t> file((std::istreambuf_iterator<char>(lf)), std::istreambuf_iterator<char>());
+    CHECK(file.size() > sizeof(BlocklistHeader));
+    if (file.size() <= sizeof(BlocklistHeader)) return;
+    BlocklistHeader hd;
+    std::memcpy(&hd, file.data(), sizeof(hd));
+    CHECK(headerLooksValid(hd));
+    const size_t bytes = payloadSize(hd);
+    CHECK(sizeof(hd) + bytes + (isSigned(hd) ? kSignatureBytes : 0) == file.size());
+    if (sizeof(hd) + bytes > file.size()) return;
+    HashTable t(file.data() + sizeof(hd), hd.count, hd.version, bytes);
+    CHECK(t.isValid());
+    std::string line;
+    size_t domains = 0, missed = 0;
+    while (std::getline(df, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+        if (line.empty() || line[0] == '#') continue;
+        domains++;
+        bool hit = false;
+        forEachSuffix(line.c_str(), line.size(), [&](const char* s, size_t n) { return hit = t.contains(fnv1a40(s, n)); });
+        if (!hit && missed++ < 5) std::printf("not blocked: %s\n", line.c_str());
+    }
+    size_t falsePos = 0;
+    for (int i = 0; i < 100000; i++) {
+        const std::string name = "unlisted-" + std::to_string(i) + ".example-test.invalid";
+        falsePos += t.contains(fnv1a40(name.data(), name.size()));
+    }
+    CHECK(domains > 0);
+    CHECK(missed == 0);
+    CHECK(falsePos <= 2);
+    std::printf("%s: format v%u, %u entries, %zu source domains all blocked, %zu false matches in 100000\n", listPath,
+                hd.version, hd.count, domains, falsePos);
 }
 
 static std::vector<uint8_t> makeQuery(const char* name, uint16_t qtype, bool edns)
@@ -302,8 +512,10 @@ static void testSafeSearch()
     CHECK(safe::kDefaultIps[safe::Google] == safe::ip4(216, 239, 38, 120));
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc == 3) testBuiltList(argv[1], argv[2]);
+    testFuseFormat();
     testCnameTargets();
     testSafeSearch();
     testHashTable();
