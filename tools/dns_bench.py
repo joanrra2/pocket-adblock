@@ -13,6 +13,8 @@ Tests (each with fresh random names so caches can't help unless intended):
               how many are lost and how long until the last answer arrives
   cached      200 sequential queries spread over 50 allowed names (answer cache,
               including names whose answers carry CNAMEs)
+  expired     first lookup of 30 names right after their cached answers expired
+              (only meaningful on a build whose cache keeps answers <= 30 s)
 Uncached upstream traffic is kept small (~40 names) to stay polite to public resolvers.
 """
 import argparse
@@ -138,6 +140,26 @@ def test_burst(server, size=32, rounds=20):
         r['all_answered_p50'] = round(statistics.median(last), 2)
         r['all_answered_max'] = round(max(last), 2)
     return r
+
+
+def test_expired(server, wait=36):
+    """First lookup of a name whose cached answer just expired (needs a build
+    whose cache keeps answers at most 30 s). Without serve-stale it goes to the
+    upstream again; with it the old answer comes back at once and is refreshed."""
+    names = ['www.microsoft.com', 'www.apple.com', 'www.amazon.com', 'www.bbc.co.uk', 'www.cloudflare.com',
+             'www.mozilla.org', 'www.python.org', 'en.wikipedia.org', 'www.reddit.com', 'www.netflix.com',
+             'www.spotify.com', 'www.linkedin.com', 'www.paypal.com', 'www.ebay.com', 'www.twitch.tv',
+             'www.nytimes.com', 'www.theguardian.com', 'www.elpais.com', 'www.rtve.es', 'stackoverflow.com',
+             'www.debian.org', 'www.kernel.org', 'www.adobe.com', 'www.dropbox.com', 'www.slack.com',
+             'www.imdb.com', 'www.booking.com', 'www.samsung.com', 'www.intel.com', 'www.nvidia.com']
+    s = new_sock()
+    for name in names:
+        query(s, server, name)
+    time.sleep(wait)
+    first = [query(s, server, name) for name in names]
+    time.sleep(1)
+    again = [query(s, server, name) for name in names]
+    return {'first_after_expiry': stats(first, len(names)), 'next': stats(again, len(names))}
 
 
 def test_cached(server, n=200):
