@@ -76,11 +76,13 @@ jobs:
             [ "$size" -le "$3" ] && [ "$n" -ge "$4" ]
           }
           # One format of a list; the v2 file must stay v2 (byte 4 of the header).
-          one() {  # FILE LOG FORMAT MAX MIN
-            [ "$(od -An -tu1 -j4 -N1 "$1" | tr -d ' ')" = "$3" ] && check "$1" "$2" "$4" "$5"
+          one() {
+            local file=$1 log=$2 format=$3 max=$4 min=$5
+            [ "$(od -An -tu1 -j4 -N1 "$file" | tr -d ' ')" = "$format" ] && check "$file" "$log" "$max" "$min"
           }
-          both() {
-            one "$1.bin" "$2" 2 "$3" "$4" && one "$1-v4.bin" "${2%.log}-v4.log" 4 "$3" "$4"
+          both() {  # NAME LOG MAX MIN: NAME.bin (v2) and NAME-v4.bin
+            local name=$1 log=$2 max=$3 min=$4
+            one "$name.bin" "$log" 2 "$max" "$min" && one "$name-v4.bin" "${log%.log}-v4.log" 4 "$max" "$min"
           }
           both blocklist            build.log            $((0xB0000))  50000    # 4 MB layout slot
           both blocklist-light      build-light.log      $((0xB0000))  30000    # 4 MB layout slot
@@ -129,6 +131,7 @@ jobs:
             case "$(paste -sd' ' extended-steps.txt)" in
               "v2 v4") ext="$ext (too big today: both files hold the Strict list)" ;;
               v2|v4) ext="$ext (too big today: the $(cat extended-steps.txt) file holds the Strict list)" ;;
+              *) ;;  # both fit
             esac
           fi
           notes="Auto-built $(date -u +%F). Normal (blocklist.bin): $(n build.log) domains · Light: $(n build-light.log) · Aggressive (8 MB boards): $(n build-aggressive.log)$ext
