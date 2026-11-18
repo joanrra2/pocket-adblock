@@ -56,6 +56,7 @@ esp_err_t MqttBridge::start()
     client_ = client;
     esp_mqtt_client_register_event(client, MQTT_EVENT_ANY, &MqttBridge::onEvent, this);
     wol_.setListener(&MqttBridge::onHostState, this);
+    wol_.setResultListener(&MqttBridge::onHostResult, this);
 
     esp_timer_create_args_t targs{};
     targs.callback = &MqttBridge::onTick;
@@ -85,6 +86,15 @@ void MqttBridge::onHostState(void* ctx, const char* name, bool online)
     snprintf(topic, sizeof(topic), "%s/wol/%s/state", self->prefix_, name);
     esp_mqtt_client_publish(static_cast<esp_mqtt_client_handle_t>(self->client_), topic,
                             online ? "online" : "offline", 0, 1, 1);
+}
+
+void MqttBridge::onHostResult(void* ctx, const char* name, const char* result)
+{
+    auto* self = static_cast<MqttBridge*>(ctx);
+    if (!self->connected_) return;
+    char topic[128];
+    snprintf(topic, sizeof(topic), "%s/wol/%s/result", self->prefix_, name);
+    self->enqueue(topic, result, true);
 }
 
 void MqttBridge::enqueue(const char* topic, const char* payload, bool retain)
@@ -287,6 +297,11 @@ void MqttBridge::handleEvent(int32_t id, void* data)
         char* slash = strchr(name, '/');
         if (!slash || strcmp(slash, "/set") != 0) return;
         *slash = '\0';
+        if (ev->data_len == 6 && strncasecmp(ev->data, "cancel", 6) == 0) {
+            esp_err_t err = wol_.cancel(name);
+            ESP_LOGI(TAG, "remote cancel '%s': %s", name, esp_err_to_name(err));
+            return;
+        }
         esp_err_t err = wol_.wakeAndVerify(name);
         ESP_LOGI(TAG, "remote wake '%s': %s", name, esp_err_to_name(err));
     }

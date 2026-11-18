@@ -1455,7 +1455,9 @@ esp_err_t WebServer::getWol(httpd_req_t* req)
             .ip("ip", snap[i].host.ip)
             .boolean("online", snap[i].online)
             .num("port", snap[i].host.port)
+            .num("timeout", WolService::timeoutOf(snap[i].host))
             .boolean("waking", snap[i].waking)
+            .num("wakeLeft", snap[i].waking && snap[i].wakeDeadline > now ? snap[i].wakeDeadline - now : 0)
             .str("result", snap[i].result)
             .num("resultAgo", snap[i].resultAt ? static_cast<int64_t>(now - snap[i].resultAt) : -1)
             .num("wokeAgo", snap[i].lastWake ? static_cast<int64_t>(now - snap[i].lastWake) : -1)
@@ -1467,13 +1469,14 @@ esp_err_t WebServer::getWol(httpd_req_t* req)
 
 esp_err_t WebServer::postWol(httpd_req_t* req)
 {
-    char form[kFormMax], action[16], name[32] = "", macStr[24] = "", ipStr[20] = "", portStr[8] = "";
+    char form[kFormMax], action[16], name[32] = "", macStr[48] = "", ipStr[20] = "", portStr[8] = "", waitStr[8] = "";
     if (readForm(req, form, sizeof(form)) < 0 || !field(form, "action", action, sizeof(action)))
         return sendError(req, "400 Bad Request", "action is required");
     field(form, "name", name, sizeof(name));
     field(form, "mac", macStr, sizeof(macStr));
     field(form, "ip", ipStr, sizeof(ipStr));
     field(form, "port", portStr, sizeof(portStr));
+    field(form, "timeout", waitStr, sizeof(waitStr));
 
     if (strcmp(action, "wake") == 0) {
         if (name[0]) {
@@ -1498,6 +1501,9 @@ esp_err_t WebServer::postWol(httpd_req_t* req)
         if (port > 65535) return sendError(req, "400 Bad Request", "invalid port");
         if (port && !h.ip) return sendError(req, "400 Bad Request", "a port check needs the IP");
         h.port = static_cast<uint16_t>(port);
+        const unsigned long wait = strtoul(waitStr, nullptr, 10);  // seconds, empty = default
+        if (wait && (wait < 30 || wait > 3600)) return sendError(req, "400 Bad Request", "wait: 30 s to 60 min");
+        h.timeout = static_cast<uint16_t>(wait);
         esp_err_t err = d_.wol.add(h);
         if (err == ESP_ERR_INVALID_ARG) return sendError(req, "400 Bad Request", "name: no spaces, '/', '+' or '#'");
         if (err == ESP_ERR_NO_MEM) return sendError(req, "409 Conflict", "host list is full");
@@ -1505,6 +1511,11 @@ esp_err_t WebServer::postWol(httpd_req_t* req)
     }
     if (strcmp(action, "remove") == 0) {
         return d_.wol.remove(name) == ESP_OK ? sendOk(req) : sendError(req, "404 Not Found", "unknown host");
+    }
+    if (strcmp(action, "cancel") == 0) {
+        const esp_err_t err = d_.wol.cancel(name);
+        if (err == ESP_ERR_NOT_FOUND) return sendError(req, "404 Not Found", "unknown host");
+        return sendOk(req, err == ESP_OK ? "cancelled" : "not waking");
     }
     return sendError(req, "400 Bad Request", "unknown action");
 }

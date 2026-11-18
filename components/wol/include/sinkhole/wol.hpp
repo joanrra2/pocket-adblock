@@ -20,7 +20,12 @@ struct WolHost {
     uint8_t mac[6];
     uint32_t ip;    // optional, network order; enables the online check
     uint16_t port;  // optional TCP port (3389 RDP, 22 SSH...): online = it accepts; 0 = ping
+    // Seconds to wait for it to answer after a wake (30..3600, 0 = 180). Sits in
+    // what used to be padding, so stored hosts keep their size and older
+    // firmware ignores it; anything out of range reads as the default.
+    uint16_t timeout;
 };
+static_assert(sizeof(WolHost) == 48, "WolHost is stored in NVS: keep its size");
 
 struct WolHostState {
     WolHost host;
@@ -31,6 +36,7 @@ struct WolHostState {
     char result[48];        // last wake result, e.g. "online after 41 s"
     uint32_t resultAt;      // uptime seconds, 0 = none
     uint8_t misses;         // failed checks in a row (offline after 2)
+    bool resultNew;         // result changed, not yet reported to the listener
 };
 
 class WolService {
@@ -70,11 +76,18 @@ public:
     // ESP_ERR_INVALID_STATE: already online, nothing sent.
     esp_err_t wakeAndVerify(const char* name, bool* verifying = nullptr);
     static constexpr uint32_t kVerifySeconds = 180;
+    static uint32_t timeoutOf(const WolHost& h);  // effective wait in seconds
+    // Stops waiting for a host being woken. ESP_ERR_INVALID_STATE: not waking.
+    esp_err_t cancel(const char* name);
     esp_err_t wakeMac(const uint8_t mac[6]);
 
     // Notified after each probe round (used by the MQTT bridge).
     using Listener = void (*)(void* ctx, const char* name, bool online);
     void setListener(Listener fn, void* ctx) { listener_ = fn; listenerCtx_ = ctx; }
+    // Notified (from the probe task, about a second later) whenever a host's
+    // wake result changes: "waking", "online after 41 s", "cancelled"...
+    using ResultListener = void (*)(void* ctx, const char* name, const char* result);
+    void setResultListener(ResultListener fn, void* ctx) { resultListener_ = fn; resultCtx_ = ctx; }
 
 private:
     static void taskEntry(void* arg);
@@ -83,6 +96,7 @@ private:
     static bool tcpOpen(uint32_t ip, uint16_t port);
     bool check(const WolHost& h) { return h.port ? tcpOpen(h.ip, h.port) : ping(h.ip); }
     void setResultLocked(int i, const char* text);
+    void reportResults();  // outside the lock
     esp_err_t saveLocked();
     int findLocked(const char* name);
 
@@ -92,12 +106,15 @@ private:
     size_t count_ = 0;
     Listener listener_ = nullptr;
     void* listenerCtx_ = nullptr;
+    ResultListener resultListener_ = nullptr;
+    void* resultCtx_ = nullptr;
     StaticTask<3072> task_;
 };
 
 // Remote control over MQTT (TLS recommended: mqtts://...). Topics, with
 // <p> = Settings::mqttPrefix:
-//   <p>/wol/<name>/set    any payload  -> wake that host
+//   <p>/wol/<name>/set    any payload  -> wake that host ("cancel": stop waiting)
+//   <p>/wol/<name>/result last wake result, e.g. "online after 41 s" (retained)
 //   <p>/wol/<name>/state  "online" / "offline" (retained, published by us)
 //   <p>/status            "online" / LWT "offline" (retained)
 // What the bridge may read and control besides Wake-on-LAN (provided by the
@@ -124,6 +141,7 @@ public:
 private:
     static void onEvent(void* arg, const char* base, int32_t id, void* data);
     static void onHostState(void* ctx, const char* name, bool online);
+    static void onHostResult(void* ctx, const char* name, const char* result);
     static void onTick(void* arg);
     void handleEvent(int32_t id, void* data);
     void tick();
