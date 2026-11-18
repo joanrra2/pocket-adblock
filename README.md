@@ -365,8 +365,8 @@ two-minute video: [Pocket Wake setup guide](https://github.com/joanrra2/pocket-w
 
 With **Show in Home Assistant** ticked (default) and the broker your Home Assistant
 uses, a *Pocket AdBlock* device appears by itself (MQTT discovery): a **Blocking**
-switch, sensors for blocked / allowed queries, blocked share, blocklist size and
-active clients, and for every Wake-on-LAN host a **Wake** button plus an **online**
+switch, sensors for blocked / allowed queries, blocked share, blocklist size,
+active clients, uptime and the last restart reason, and for every Wake-on-LAN host a **Wake** button plus an **online**
 sensor (hosts with an IP). Adding or removing hosts updates Home Assistant within
 a few seconds. MQTT changes apply after a restart.
 
@@ -375,6 +375,12 @@ a few seconds. MQTT changes apply after a restart.
 - **Firmware:** upload `build/pocket-adblock.bin` (or a release's `*-ota.bin`) under
   **Updates**. The new image stays on probation for 60 s and the bootloader rolls back if it crashes first.
 - **Blocklist:** **Download now**, upload a `.bin`, or let the schedule run.
+- **Restarts:** *Updates → Firmware* lists the last 10 restarts with the reason
+  (power on, crash, watchdog, power dip, firmware update, settings restored, restart
+  from the web UI...), the firmware version and how long each one ran, so a board that
+  restarts by itself is easy to spot. Times come from NTP (`pool.ntp.org`, set with
+  `SINKHOLE_NTP_SERVER`; empty turns the clock off) and are shown in your browser's
+  time zone. Only a power cut loses the time of the boot it ended.
 
 ### Online updates and signing
 

@@ -5,6 +5,7 @@
 #include "esp_system.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
+#include "sinkhole/boot_log.hpp"
 
 namespace sinkhole {
 
@@ -46,6 +47,7 @@ void BootButton::run()
             if (heldMs >= kResetHoldMs) {
                 ESP_LOGW(TAG, "factory reset");
                 nvs_flash_erase();
+                BootLog::noteRestart(BootLog::Cause::FactoryReset);
                 esp_restart();
             }
         } else {

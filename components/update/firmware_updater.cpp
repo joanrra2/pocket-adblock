@@ -55,8 +55,9 @@ void FirmwareUpdater::abort()
     handle_ = 0;
 }
 
-void FirmwareUpdater::restartIn(uint32_t ms)
+void FirmwareUpdater::restartIn(uint32_t ms, BootLog::Cause cause)
 {
+    BootLog::noteRestart(cause);
     static esp_timer_handle_t timer = nullptr;
     if (!timer) {
         esp_timer_create_args_t args{};
