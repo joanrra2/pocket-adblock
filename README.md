@@ -404,6 +404,28 @@ Plain HTTP on the LAN, the same trust model as the original project. Every API c
 needs HTTP Basic auth, and every change also needs an `X-Requested-With` header, which
 blocks CSRF via cached credentials. Change the default passwords. The setup AP uses WPA2.
 
+- **The admin password is stored as a hash** (PBKDF2-HMAC-SHA256, 10,000 rounds, random
+  salt), not in plain text. Checking it takes about 1 s, once after each restart or
+  password change; the accepted login is then remembered, so pages stay fast.
+- **Wrong passwords slow down.** After 5 different wrong passwords in a row, the device
+  answers `429` with a `Retry-After` wait before it checks another one: 5 s, then 10 s,
+  doubling up to 10 minutes. The right password keeps working meanwhile, and a page
+  retrying the same wrong password doesn't count again. Each try is logged with the
+  client's address.
+- **While the default password is set**, the API only answers when the page was opened
+  by the device's IP address, a single-word name, or a local name (`.local`, `.lan`,
+  `.home`, `.home.arpa`, `.internal`). This stops a web page from reaching the device
+  through DNS rebinding with the published default password.
+- **Upgrading from 0.5 or older** hashes the existing password at the first boot. The
+  plain copy is kept until the new firmware passes its 60 s check, so an automatic
+  rollback can still log in, and is then erased. To go back to 0.5 or older by hand
+  later, first set the admin password to the default (`sinkhole`), which is kept as
+  is; otherwise the old firmware accepts no admin password until a factory reset
+  (hold BOOT 10 s, which also erases Wi-Fi and settings).
+- Backups leave the hash out unless *include passwords* is ticked. Restoring a file
+  without passwords keeps the device's current ones; restoring an older backup that
+  holds a plain password hashes it.
+
 ## Pocket AdBlock or Pi-hole?
 
 Both forward allowed queries to an upstream resolver (Pi-hole's default too) and

@@ -31,6 +31,9 @@ void App::start()
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     config_.load();
+    // A confirmed image no longer needs the plain admin password an upgrade kept
+    // for a rollback (on probation, startRollbackGuard drops it once confirmed).
+    if (!FirmwareUpdater::pendingVerify()) config_.scrubLegacyAdminPassword();
     const Settings s = config_.get();
     if (config_.usingDefaultAdminPassword())
         ESP_LOGW(TAG, "web admin still uses the default password: change it in Settings");
@@ -224,7 +227,16 @@ void App::startRollbackGuard()
     args.arg = this;
     args.callback = [](void* arg) {
         auto* self = static_cast<App*>(arg);
-        if (self->dns_.running()) FirmwareUpdater::markValid();
+        if (!self->dns_.running()) return;
+        FirmwareUpdater::markValid();
+        // The plain admin password an upgrade kept for a rollback can go now.
+        // An NVS write is too much for the esp_timer task's stack: own task.
+        xTaskCreate(
+            [](void* arg) {
+                static_cast<App*>(arg)->config_.scrubLegacyAdminPassword();
+                vTaskDelete(nullptr);
+            },
+            "scrub", 4096, self, 2, nullptr);
     };
     esp_timer_handle_t t = nullptr;
     if (esp_timer_create(&args, &t) == ESP_OK) esp_timer_start_once(t, kHealthyAfterUs);

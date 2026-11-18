@@ -4,9 +4,12 @@
 #include <cstring>
 
 #include "esp_log.h"
+#include "esp_random.h"
+#include "esp_timer.h"
 #include "lwip/inet.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "psa/crypto.h"
 #include "sdkconfig.h"
 #include "sinkhole/text.hpp"
 
@@ -16,6 +19,54 @@ namespace {
 constexpr const char* TAG = "config";
 constexpr const char* kNamespace = "sinkhole";
 constexpr const char* kSettingsKey = "settings";
+// PBKDF2 work factor for the admin password. Each login check costs this many
+// HMAC-SHA256 rounds (cached after a success); stored per password, so it can
+// be raised later without breaking existing ones.
+constexpr uint32_t kAdminIter = 10000;
+constexpr char kScrubbed = '\x7f';  // first byte of a cleared adminPass
+
+esp_err_t pbkdf2(const char* pass, const uint8_t* salt, size_t saltLen, uint32_t iter, uint8_t out[32])
+{
+    psa_crypto_init();  // idempotent
+    psa_key_derivation_operation_t op = PSA_KEY_DERIVATION_OPERATION_INIT;
+    psa_status_t st = psa_key_derivation_setup(&op, PSA_ALG_PBKDF2_HMAC(PSA_ALG_SHA_256));
+    if (st == PSA_SUCCESS) st = psa_key_derivation_input_integer(&op, PSA_KEY_DERIVATION_INPUT_COST, iter);
+    if (st == PSA_SUCCESS) st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT, salt, saltLen);
+    if (st == PSA_SUCCESS)
+        st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_PASSWORD,
+                                            reinterpret_cast<const uint8_t*>(pass), strlen(pass));
+    if (st == PSA_SUCCESS) st = psa_key_derivation_output_bytes(&op, out, 32);
+    psa_key_derivation_abort(&op);
+    if (st != PSA_SUCCESS) ESP_LOGE(TAG, "PBKDF2 failed (%d)", static_cast<int>(st));
+    return st == PSA_SUCCESS ? ESP_OK : ESP_FAIL;
+}
+
+// Constant time, for credentials.
+bool sameBytes(const uint8_t* a, const uint8_t* b, size_t n)
+{
+    uint8_t diff = 0;
+    for (size_t i = 0; i < n; i++) diff |= static_cast<uint8_t>(a[i] ^ b[i]);
+    return diff == 0;
+}
+
+bool sameText(const char* a, const char* b)
+{
+    const size_t la = strlen(a), lb = strlen(b);
+    uint8_t diff = static_cast<uint8_t>(la != lb);
+    for (size_t i = 0; i < la; i++) diff |= static_cast<uint8_t>(a[i] ^ b[i % (lb ? lb : 1)]);
+    return diff == 0;
+}
+
+// Overwrite adminPass with random letters behind kScrubbed: older firmware
+// (rollback or manual downgrade) then matches no password at all.
+void scrub(char (&pass)[64])
+{
+    uint8_t rnd[16];
+    esp_fill_random(rnd, sizeof(rnd));
+    memset(pass, 0, sizeof(pass));
+    pass[0] = kScrubbed;
+    for (size_t i = 0; i < sizeof(rnd); i++) pass[i + 1] = static_cast<char>('a' + rnd[i] % 26);
+}
 }  // namespace
 
 // ---------------------------------------------------------------- text helpers
@@ -162,6 +213,7 @@ size_t Config::validBytes(uint16_t version)
         case 11: return offsetof(Settings, ledKind);
         case 12: return offsetof(Settings, privacy);
         case 13: return offsetof(Settings, dhcpServer);
+        case 14: return offsetof(Settings, adminHash);
         case kVersion: return sizeof(Settings);
         default:
             // Newer firmware wrote it (rollback / downgrade): fields are only ever
@@ -172,32 +224,59 @@ size_t Config::validBytes(uint16_t version)
     }
 }
 
+bool Config::upgrade(const uint8_t* raw, size_t n, Settings& out)
+{
+    static Settings stored;  // under mu_ in load(); httpd task in restore (one at a time)
+    memset(&stored, 0, sizeof(stored));
+    memcpy(&stored, raw, n < sizeof(stored) ? n : sizeof(stored));
+    if (n > sizeof(stored)) n = sizeof(stored);
+    const size_t valid = n >= sizeof(uint16_t) ? validBytes(stored.version) : 0;
+    applyDefaults(out);
+    if (!valid || n < valid) return false;
+    memcpy(&out, &stored, valid);  // keep everything the stored version knew
+    out.version = kVersion;
+    if (stored.version < 6) copyStr(out.fwManifestUrl, CONFIG_SINKHOLE_FW_MANIFEST_URL);
+    // Defensive: blobs from a buggy build could miss terminators.
+    out.hostname[sizeof(out.hostname) - 1] = '\0';
+    out.staSsid[sizeof(out.staSsid) - 1] = '\0';
+    out.staPass[sizeof(out.staPass) - 1] = '\0';
+    out.apSsid[sizeof(out.apSsid) - 1] = '\0';
+    out.apPass[sizeof(out.apPass) - 1] = '\0';
+    out.adminUser[sizeof(out.adminUser) - 1] = '\0';
+    out.adminPass[sizeof(out.adminPass) - 1] = '\0';
+    out.blocklistUrl[sizeof(out.blocklistUrl) - 1] = '\0';
+    out.mqttUri[sizeof(out.mqttUri) - 1] = '\0';
+    out.mqttUser[sizeof(out.mqttUser) - 1] = '\0';
+    out.mqttPass[sizeof(out.mqttPass) - 1] = '\0';
+    out.mqttPrefix[sizeof(out.mqttPrefix) - 1] = '\0';
+    out.dotHost[sizeof(out.dotHost) - 1] = '\0';
+    // Older firmware kept the admin password in plain text: hash it. The plain
+    // copy stays until the firmware is confirmed (scrubLegacyAdminPassword), so
+    // a rollback to the previous image still accepts it. The default password
+    // and an empty one (a backup without passwords) stay as they are.
+    if (stored.version < 15 && out.adminPass[0] && strcmp(out.adminPass, CONFIG_SINKHOLE_ADMIN_PASSWORD) != 0)
+        hashAdmin(out, out.adminPass);
+    return true;
+}
+
 esp_err_t Config::load()
 {
     LockGuard g(mu_);
     // Only used here, under mu_ (keeps ~1 KB off the stack). Room for fields a
     // newer firmware appended, so a rollback keeps the settings.
     static uint8_t raw[sizeof(Settings) + 256];
-    static Settings stored;
     memset(raw, 0, sizeof(raw));
     size_t n = 0;
     esp_err_t err = nvs::loadBlob(kSettingsKey, raw, sizeof(raw), &n);
-    memcpy(&stored, raw, sizeof(stored));
-    if (n > sizeof(stored)) n = sizeof(stored);
-    const size_t valid = (err == ESP_OK && n >= sizeof(uint16_t)) ? validBytes(stored.version) : 0;
-    applyDefaults(s_);
-    if (!valid || n < valid) {
+    uint16_t version = 0;
+    if (n >= sizeof(version)) memcpy(&version, raw, sizeof(version));
+    if (err != ESP_OK || !upgrade(raw, n, s_)) {
         ESP_LOGI(TAG, "no usable stored settings (%s), using defaults", esp_err_to_name(err));
         return saveLocked();
     }
-    if (stored.version != kVersion) {
-        memcpy(&s_, &stored, valid);  // keep everything the old version knew
-        s_.version = kVersion;
-        if (stored.version < 6) copyStr(s_.fwManifestUrl, CONFIG_SINKHOLE_FW_MANIFEST_URL);
-        ESP_LOGI(TAG, "settings migrated from v%u to v%u", stored.version, kVersion);
+    if (version != kVersion) {
+        ESP_LOGI(TAG, "settings migrated from v%u to v%u", version, kVersion);
         saveLocked();
-    } else {
-        s_ = stored;
     }
     // Early builds defaulted to the upstream project's list; follow the new
     // default (this project's weekly list) unless the user picked another URL.
@@ -207,20 +286,6 @@ esp_err_t Config::load()
         copyStr(s_.blocklistUrl, CONFIG_SINKHOLE_BLOCKLIST_URL);
         saveLocked();
     }
-    // Defensive: blobs from a buggy build could miss terminators.
-    s_.hostname[sizeof(s_.hostname) - 1] = '\0';
-    s_.staSsid[sizeof(s_.staSsid) - 1] = '\0';
-    s_.staPass[sizeof(s_.staPass) - 1] = '\0';
-    s_.apSsid[sizeof(s_.apSsid) - 1] = '\0';
-    s_.apPass[sizeof(s_.apPass) - 1] = '\0';
-    s_.adminUser[sizeof(s_.adminUser) - 1] = '\0';
-    s_.adminPass[sizeof(s_.adminPass) - 1] = '\0';
-    s_.blocklistUrl[sizeof(s_.blocklistUrl) - 1] = '\0';
-    s_.mqttUri[sizeof(s_.mqttUri) - 1] = '\0';
-    s_.mqttUser[sizeof(s_.mqttUser) - 1] = '\0';
-    s_.mqttPass[sizeof(s_.mqttPass) - 1] = '\0';
-    s_.mqttPrefix[sizeof(s_.mqttPrefix) - 1] = '\0';
-    s_.dotHost[sizeof(s_.dotHost) - 1] = '\0';
     return ESP_OK;
 }
 
@@ -233,7 +298,77 @@ Settings Config::get()
 bool Config::usingDefaultAdminPassword()
 {
     LockGuard g(mu_);
-    return strcmp(s_.adminPass, CONFIG_SINKHOLE_ADMIN_PASSWORD) == 0;
+    return s_.adminIter == 0 && strcmp(s_.adminPass, CONFIG_SINKHOLE_ADMIN_PASSWORD) == 0;
+}
+
+esp_err_t Config::hashAdmin(Settings& s, const char* pass)
+{
+    uint8_t salt[sizeof(s.adminSalt)], hash[sizeof(s.adminHash)];
+    esp_fill_random(salt, sizeof(salt));
+    const int64_t t0 = esp_timer_get_time();
+    if (pbkdf2(pass, salt, sizeof(salt), kAdminIter, hash) != ESP_OK) return ESP_FAIL;
+    ESP_LOGI(TAG, "admin password hashed (%lu rounds, %d ms)", static_cast<unsigned long>(kAdminIter),
+             static_cast<int>((esp_timer_get_time() - t0) / 1000));
+    memcpy(s.adminSalt, salt, sizeof(salt));
+    memcpy(s.adminHash, hash, sizeof(hash));
+    s.adminIter = kAdminIter;
+    return ESP_OK;
+}
+
+bool Config::checkAdmin(const char* user, const char* pass)
+{
+    char u[sizeof(Settings::adminUser)], plain[sizeof(Settings::adminPass)];
+    uint8_t salt[sizeof(Settings::adminSalt)], hash[sizeof(Settings::adminHash)];
+    uint32_t iter;
+    {
+        LockGuard g(mu_);
+        memcpy(u, s_.adminUser, sizeof(u));
+        memcpy(plain, s_.adminPass, sizeof(plain));
+        memcpy(salt, s_.adminSalt, sizeof(salt));
+        memcpy(hash, s_.adminHash, sizeof(hash));
+        iter = s_.adminIter;
+    }
+    bool ok = sameText(user, u);
+    if (iter == 0) {
+        ok &= sameText(pass, plain);
+    } else {
+        uint8_t got[sizeof(hash)];
+        ok &= pbkdf2(pass, salt, sizeof(salt), iter, got) == ESP_OK && sameBytes(got, hash, sizeof(hash));
+        memset(got, 0, sizeof(got));
+    }
+    memset(plain, 0, sizeof(plain));
+    return ok;
+}
+
+esp_err_t Config::setAdmin(const char* user, const char* pass)
+{
+    if (strcmp(pass, CONFIG_SINKHOLE_ADMIN_PASSWORD) == 0) {
+        // Back to the published default: nothing to hide, and the UI keeps warning.
+        LockGuard g(mu_);
+        copyStr(s_.adminUser, user);
+        copyStr(s_.adminPass, pass);
+        s_.adminIter = 0;
+        memset(s_.adminHash, 0, sizeof(s_.adminHash));
+        return saveLocked();
+    }
+    static Settings next;  // httpd task only; keeps the slow PBKDF2 outside the lock
+    applyDefaults(next);
+    if (hashAdmin(next, pass) != ESP_OK) return ESP_FAIL;
+    LockGuard g(mu_);
+    copyStr(s_.adminUser, user);
+    memcpy(s_.adminSalt, next.adminSalt, sizeof(s_.adminSalt));
+    memcpy(s_.adminHash, next.adminHash, sizeof(s_.adminHash));
+    s_.adminIter = next.adminIter;
+    scrub(s_.adminPass);
+    return saveLocked();
+}
+
+void Config::scrubLegacyAdminPassword()
+{
+    LockGuard g(mu_);
+    if (s_.adminIter == 0 || s_.adminPass[0] == kScrubbed) return;
+    scrub(s_.adminPass);
+    if (saveLocked() == ESP_OK) ESP_LOGI(TAG, "plain admin password removed");
 }
 
 esp_err_t Config::saveLocked()
