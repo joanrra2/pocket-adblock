@@ -25,7 +25,8 @@ constexpr int kMaxRedirects = 5;
 // The project's own daily lists, biggest first. A board whose slot can't hold
 // the chosen one (a backup from a 16 MB board restored on a 4 MB one, a URL
 // typed by hand) steps down to the next instead of failing every check.
-constexpr const char* kListSizes[] = {"blocklist-extended.bin", "blocklist-aggressive.bin", "blocklist.bin"};
+constexpr const char* kListSizes[] = {"blocklist-extended.bin", "blocklist-strict.bin", "blocklist-aggressive.bin",
+                                      "blocklist.bin"};
 
 // Writes url with the next smaller list's file name; false when url is not one
 // of those lists (custom lists are left alone) or already the smallest.
@@ -50,7 +51,7 @@ bool smallerList(const char* url, char* out, size_t cap)
 // never sees a v4 list unless someone types its URL, and then rejects its header
 // and keeps the active list.
 constexpr const char* kOfficialLists[] = {"blocklist.bin", "blocklist-light.bin", "blocklist-aggressive.bin",
-                                          "blocklist-extended.bin"};
+                                          "blocklist-strict.bin", "blocklist-extended.bin"};
 constexpr const char* kOfficialRelease = "/releases/download/blocklist/";
 
 // Writes the fuse-filter twin of an official list URL; false for any other URL.

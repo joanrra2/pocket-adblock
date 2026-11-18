@@ -1,6 +1,6 @@
 # Board profile: ESP32-C6 with 8 MB (or more) flash, e.g. ESP32-C6-DevKitC-1-N8,
 # ESP32-C6-WROOM-1-N8. 2 x 1.5 MB apps + 2 x 2.4 MB blocklists (~830k domains
-# each, room for the Aggressive list). Most C6 SuperMini / XIAO C6 boards have
+# each, room for the Aggressive and Strict lists). Most C6 SuperMini / XIAO C6 boards have
 # 4 MB: use the plain esp32c6 image there (check with `python -m esptool flash-id`).
 #
 #   idf.py -B build-c6-8 -D SDKCONFIG=build-c6-8/sdkconfig \

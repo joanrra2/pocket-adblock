@@ -28,7 +28,7 @@ menu "DNS Sinkhole"
         string "Default blocklist URL"
         default "https://github.com/joanrra2/pocket-adblock/releases/download/blocklist/blocklist.bin"
         help
-            The project's daily lists (blocklist.bin, -light, -aggressive, -extended
+            The project's daily lists (blocklist.bin, -light, -aggressive, -strict, -extended
             in a release named "blocklist") are fetched in their fuse-filter
             version (blocklist-v4.bin and so on), falling back to the named file.
             The setting keeps the original name, which older firmware can read.
