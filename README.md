@@ -374,12 +374,15 @@ Release firmware checks `manifest.json` from the latest GitHub release once a da
 | What | How | Effect |
 |---|---|---|
 | Signed blocklists | `tools/keys.py blocklist-key keys/bl.pem`, put the printed `CONFIG_SINKHOLE_BLOCKLIST_PUBKEY` line in your sdkconfig, build lists with `--sign=keys/bl.pem` | signed lists are verified (ECDSA P-256); with `SINKHOLE_BLOCKLIST_REQUIRE_SIGNED` unsigned/raw lists are refused |
-| Signed firmware | `tools/keys.py firmware-key keys/firmware_signing.pem`, add `boards/signed-firmware.defaults` | OTA only accepts images signed with that key (RSA-3072); unlocks automatic install |
+| Signed firmware | `tools/keys.py firmware-key keys/firmware_signing.pem`, add `boards/signed-firmware.defaults` | OTA only accepts images signed with that key (RSA-3072); unlocks automatic install. ESP32-S3, C3 and C6 (the classic ESP32 supports RSA signing from chip revision 3) |
 | Automatic install | *Install updates automatically* (signed builds only) | new releases install themselves, with the usual 60 s health probation and rollback |
 
 No eFuses are burned: a board can always be re-flashed over USB. In CI, the
 `FIRMWARE_SIGNING_KEY` and `BLOCKLIST_SIGNING_KEY` secrets (and the
 `BLOCKLIST_PUBKEY` variable) turn signing on for releases and the daily lists.
+Release images are signed from 0.5.1 on, except for the classic ESP32. A board running
+a signed release only accepts updates signed with the same key, so local builds go
+over USB or are built with that key.
 
 ## Security
 
