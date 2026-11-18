@@ -27,15 +27,20 @@ def make_handler(device, auth):
             for h in ('Content-Type', 'X-Requested-With'):
                 if self.headers.get(h):
                     req.add_header(h, self.headers[h])
+            extra = []  # X-Log-Next, Retry-After... the UI reads them
             try:
                 with urllib.request.urlopen(req, timeout=30) as r:
                     status, data, ctype = r.status, r.read(), r.headers.get('Content-Type', '')
+                    extra = [(k, v) for k, v in r.headers.items() if k.lower().startswith('x-') or k.lower() == 'retry-after']
             except urllib.error.HTTPError as e:
                 status, data, ctype = e.code, e.read(), e.headers.get('Content-Type', '')
+                extra = [(k, v) for k, v in e.headers.items() if k.lower() == 'retry-after']
             except OSError as e:
                 status, data, ctype = 502, f'{{"ok":false,"message":"device unreachable: {e}"}}'.encode(), 'application/json'
             self.send_response(status)
             self.send_header('Content-Type', ctype)
+            for k, v in extra:
+                self.send_header(k, v)
             self.send_header('Content-Length', str(len(data)))
             self.end_headers()
             self.wfile.write(data)

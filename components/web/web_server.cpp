@@ -16,6 +16,7 @@
 #include "lwip/sockets.h"
 #include "psa/crypto.h"
 #include "sinkhole/json_writer.hpp"
+#include "sinkhole/log_buffer.hpp"
 #include "sinkhole/memory.hpp"
 #include "sinkhole/perf.hpp"
 #include "sinkhole/secret.hpp"
@@ -118,6 +119,7 @@ const WebServer::Route WebServer::kRoutes[] = {
     {"/api/wol", HTTP_GET, &WebServer::getWol, true},
     {"/api/wol", HTTP_POST, &WebServer::postWol, true},
     {"/api/restarts", HTTP_GET, &WebServer::getRestarts, true},
+    {"/api/logs", HTTP_GET, &WebServer::getLogs, true},
 #if CONFIG_SINKHOLE_PERF
     {"/api/perf", HTTP_GET, &WebServer::getPerf, true},
 #endif
@@ -1379,6 +1381,44 @@ esp_err_t WebServer::postReboot(httpd_req_t* req)
 {
     FirmwareUpdater::restartIn(1000, BootLog::Cause::WebRestart);
     return sendOk(req, "rebooting");
+}
+
+// GET /api/logs?from=N: the device log since position N (0 = all that is kept),
+// as plain text. X-Log-Next is the position to ask from next time; X-Log-Start
+// says where the text begins (> N when older lines were already overwritten).
+esp_err_t WebServer::getLogs(httpd_req_t* req)
+{
+    std::array<char, 32> q{};
+    std::array<char, 16> v{};
+    uint32_t from = 0;
+    if (httpd_req_get_url_query_str(req, q.data(), q.size()) == ESP_OK &&
+        httpd_query_key_value(q.data(), "from", v.data(), v.size()) == ESP_OK)
+        from = static_cast<uint32_t>(strtoul(v.data(), nullptr, 10));
+    // Stop at the end as it is now, so a busy log can't keep the response going.
+    uint32_t until = LogBuffer::end();
+    auto* buf = reinterpret_cast<char*>(chunk_);
+    LogBuffer::Chunk c = LogBuffer::read(from, buf, sizeof(chunk_));
+    if (c.next > until) until = c.next;  // a line arrived in between
+    std::array<char, 12> start{};
+    std::array<char, 12> next{};
+    std::array<char, 12> size{};
+    snprintf(start.data(), start.size(), "%lu", static_cast<unsigned long>(c.start));
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "X-Log-Start", start.data());
+    snprintf(size.data(), size.size(), "%u", static_cast<unsigned>(LogBuffer::capacity()));
+    httpd_resp_set_hdr(req, "X-Log-Size", size.data());
+    // The end position goes in a header, sent before the body: compute it first
+    // from `until` (what this response will cover).
+    snprintf(next.data(), next.size(), "%lu", static_cast<unsigned long>(until > c.start ? until : c.start));
+    httpd_resp_set_hdr(req, "X-Log-Next", next.data());
+    while (c.len) {
+        if (httpd_resp_send_chunk(req, buf, static_cast<ssize_t>(c.len)) != ESP_OK) return ESP_FAIL;
+        if (c.next >= until) break;
+        const size_t want = until - c.next < sizeof(chunk_) ? until - c.next : sizeof(chunk_);
+        c = LogBuffer::read(c.next, buf, want);
+    }
+    return httpd_resp_send_chunk(req, nullptr, 0);
 }
 
 // Last restarts, newest first (the first one is this boot).

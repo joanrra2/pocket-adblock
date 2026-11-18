@@ -56,7 +56,8 @@ CONFIG_LWIP_TCPIP_CORE_LOCKING=y
 CONFIG_LWIP_UDP_RECVMBOX_SIZE=32
 
 # ---- tasks ----
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
+# Only during boot: app_main returns and the task (with its stack) goes away.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=5120
 # Wi-Fi/IP event handlers run here (AP policy, reconnect, logging): 2304 is tight.
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 CONFIG_FREERTOS_HZ=1000
