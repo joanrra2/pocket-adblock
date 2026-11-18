@@ -4,6 +4,7 @@
 #include "sinkhole/blocklist_store.hpp"
 #include "sinkhole/boot_button.hpp"
 #include "sinkhole/config.hpp"
+#include "sinkhole/device_names.hpp"
 #include "sinkhole/dns_server.hpp"
 #include "sinkhole/domain_filter.hpp"
 #include "sinkhole/domain_list.hpp"
@@ -40,6 +41,7 @@ private:
     DomainList allow_{"custom_allow"};
     DomainFilter filter_{store_, custom_, allow_};
     ClientTable clients_;
+    DeviceNames names_;
     QueryLog queryLog_;
     Counters counters_;
     WifiManager wifi_{config_};

@@ -120,6 +120,7 @@ const WebServer::Route WebServer::kRoutes[] = {
     {"/api/wol", HTTP_POST, &WebServer::postWol, true},
     {"/api/restarts", HTTP_GET, &WebServer::getRestarts, true},
     {"/api/logs", HTTP_GET, &WebServer::getLogs, true},
+    {"/api/names", HTTP_POST, &WebServer::postNames, true},
 #if CONFIG_SINKHOLE_PERF
     {"/api/perf", HTTP_GET, &WebServer::getPerf, true},
 #endif
@@ -511,13 +512,17 @@ esp_err_t WebServer::getClients(httpd_req_t* req)
     }
     ClientInfo* snap = sClientSnap;
     char addr[46];
+    std::array<char, DeviceNames::kMaxName> name{};
     const size_t n = d_.clients.snapshot(snap, ClientTable::kCapacity);
     const uint32_t now = uptimeSeconds();
     JsonWriter j(req);
     j.beginArray();
     for (size_t i = 0; i < n; i++) {
+        const char* from = clientName(snap[i], name.data(), name.size());
         j.beginObject()
             .str("ip", (snap[i].addr.format(addr), addr))
+            .str("name", from ? name.data() : "")
+            .str("nameFrom", from ? from : "")
             .boolean("v6", snap[i].addr.v6)
             .mac("mac", snap[i].mac)
             .num("blocked", snap[i].blocked)
@@ -554,6 +559,7 @@ esp_err_t WebServer::getQueries(httpd_req_t* req)
     static QueryEntry page[16];  // httpd task only; small pages keep the lock short
     char addr[46];
     const uint32_t now = uptimeSeconds();
+    snapshotNames();
     size_t cursor = 0, sent = 0;
     JsonWriter j(req);
     j.beginObject().num("capacity", static_cast<int64_t>(d_.log.capacity())).beginArray("items");
@@ -565,6 +571,7 @@ esp_err_t WebServer::getQueries(httpd_req_t* req)
             j.beginObject()
                 .num("ago", now - page[i].uptime)
                 .str("ip", (page[i].addr.format(addr), addr))
+                .str("name", nameOf(page[i].addr))
                 .str("domain", page[i].domain)
                 .boolean("blocked", page[i].blocked)
                 .endObject();
@@ -618,10 +625,13 @@ esp_err_t WebServer::getTop(httpd_req_t* req)
         order[pos] = i;
     }
     j.beginArray("clients");
+    std::array<char, DeviceNames::kMaxName> name{};
     for (size_t i = 0; i < k; i++) {
         const ClientInfo& c = sClientSnap[order[i]];
+        const char* from = clientName(c, name.data(), name.size());
         j.beginObject()
             .str("ip", (c.addr.format(addr), addr))
+            .str("name", from ? name.data() : "")
             .num("queries", c.blocked + c.allowed)
             .num("blocked", c.blocked)
             .endObject();
@@ -688,7 +698,7 @@ esp_err_t WebServer::getHistory(httpd_req_t* req)
 
 namespace {
 constexpr const char* kBackupKeys[] = {"settings", "custom_block", "custom_allow", "local_dns",
-                                       "wol_hosts2", "wol_hosts", "banned", "nofilter"};
+                                       "wol_hosts2", "wol_hosts", "banned", "nofilter", "dev_names"};
 constexpr size_t kBackupMax = 64 * 1024;
 
 void clearSecrets(Settings& s)
@@ -1381,6 +1391,71 @@ esp_err_t WebServer::postReboot(httpd_req_t* req)
 {
     FirmwareUpdater::restartIn(1000, BootLog::Cause::WebRestart);
     return sendOk(req, "rebooting");
+}
+
+namespace {
+bool hasMac(const ClientInfo& c)
+{
+    static constexpr std::array<uint8_t, 6> kZero{};
+    return memcmp(c.mac, kZero.data(), kZero.size()) != 0;
+}
+}  // namespace
+
+const char* WebServer::clientName(const ClientInfo& c, char* out, size_t cap)
+{
+    if (hasMac(c) && d_.names.find(c.mac, out, cap)) return "you";
+    if (!c.addr.v6) {
+        uint32_t ip;
+        memcpy(&ip, c.addr.a, 4);
+        LocalRecords::Record r;
+        for (size_t i = 0; d_.dns.records().at(i, r); i++) {
+            if (r.kind == LocalRecords::Kind::Address && r.ip == ip) {
+                copyStr(out, cap, r.name);
+                return "dns";
+            }
+        }
+    }
+    if (hasMac(c) && d_.dhcp.hostname(c.mac, out, cap)) return "dhcp";
+    return nullptr;
+}
+
+void WebServer::snapshotNames()
+{
+    const size_t n = d_.clients.snapshot(sClientSnap, ClientTable::kCapacity);
+    namedCount_ = 0;
+    for (size_t i = 0; i < n; i++) {
+        NamedClient& nc = named_[namedCount_];
+        if (clientName(sClientSnap[i], nc.name.data(), nc.name.size())) {
+            nc.addr = sClientSnap[i].addr;
+            namedCount_++;
+        }
+    }
+}
+
+const char* WebServer::nameOf(const ClientAddr& a)
+{
+    for (size_t i = 0; i < namedCount_; i++)
+        if (named_[i].addr.v6 == a.v6 && memcmp(named_[i].addr.a, a.a, a.v6 ? 16 : 4) == 0) return named_[i].name.data();
+    return "";
+}
+
+// mac=aa:bb:..., name= (empty forgets it)
+esp_err_t WebServer::postNames(httpd_req_t* req)
+{
+    std::array<char, kFormMax> form{};
+    std::array<char, 48> macStr{};  // "aa%3Abb%3A..." as browsers send it: 27+ before decoding
+    std::array<char, 64> name{};
+    if (readForm(req, form.data(), form.size()) < 0) return sendError(req, "400 Bad Request", "bad body");
+    field(form.data(), "mac", macStr.data(), macStr.size());
+    field(form.data(), "name", name.data(), name.size());
+    std::array<uint8_t, 6> mac{};
+    if (!parseMac(macStr.data(), mac.data())) return sendError(req, "400 Bad Request", "valid MAC required");
+    switch (d_.names.set(mac.data(), name.data())) {
+        case ESP_OK: return sendOk(req);
+        case ESP_ERR_INVALID_ARG: return sendError(req, "400 Bad Request", "name: 1 to 25 characters, no < > \" &");
+        case ESP_ERR_NO_MEM: return sendError(req, "409 Conflict", "no room for more names");
+        default: return sendError(req, "500 Internal Server Error", "could not save");
+    }
 }
 
 // GET /api/logs?from=N: the device log since position N (0 = all that is kept),

@@ -201,6 +201,15 @@ suffixes to another DNS server:
 
 24 entries by default (`SINKHOLE_MAX_LOCAL_RECORDS`, 56 bytes each).
 
+### Device names
+
+The device list, the query log and the top clients show a name instead of an IP when
+there is one: the name you gave it with **Name** under *Devices* (kept by MAC address,
+so it follows the device when its IP changes; up to 32, included in backups), else a
+local name above that points at its IP, else the hostname it sent with its DHCP request
+when this device is the network's DHCP server. Fixed DHCP addresses (reservations) stay
+a job for the router: its DHCP server does them, and this one hands out a pool only.
+
 ## Blocklists
 
 ```bash

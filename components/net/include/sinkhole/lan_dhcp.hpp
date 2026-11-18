@@ -53,6 +53,9 @@ public:
     esp_err_t start(esp_netif_t* sta, const Options& o);
     void stop();
     bool running() const { return running_; }
+    // The hostname a client sent with its DHCP request (option 12); false if
+    // the server isn't running, doesn't know the MAC or got no name.
+    bool hostname(const uint8_t* mac, char* out, size_t cap);
     static Stats stats();
 
 private:
