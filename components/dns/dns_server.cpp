@@ -108,22 +108,29 @@ void DnsServer::run()
         int n = select(maxFd + 1, &rd, nullptr, nullptr, &tv);
         if (n > 0) {
             // Replies first: they free pending slots.
-            // Everything queued, not one datagram per select(): a burst of
-            // queries would otherwise wait one select() round trip each.
-            if (FD_ISSET(upstreamSock_, &rd))
-                for (int k = 0; k < kDrain && onUpstreamPacket(k ? MSG_DONTWAIT : 0); k++) {
-                }
-            if (FD_ISSET(serverSock_, &rd))
-                for (int k = 0; k < kDrain && onClientPacket(serverSock_, k ? MSG_DONTWAIT : 0); k++) {
-                }
-            if (server6Sock_ >= 0 && FD_ISSET(server6Sock_, &rd))
-                for (int k = 0; k < kDrain && onClientPacket(server6Sock_, k ? MSG_DONTWAIT : 0); k++) {
-                }
+            if (FD_ISSET(upstreamSock_, &rd)) drainUpstream();
+            if (FD_ISSET(serverSock_, &rd)) drainClients(serverSock_);
+            if (server6Sock_ >= 0 && FD_ISSET(server6Sock_, &rd)) drainClients(server6Sock_);
         }
         expirePending();
         if (flushCache_.exchange(false)) cache_.clear();
         refreshSafeTargets();
     }
+}
+
+// Everything queued, not one datagram per select(): a burst of queries would
+// otherwise wait one select() round trip each. Capped so the other socket and
+// the expiry pass still get their turn.
+void DnsServer::drainClients(int sock)
+{
+    for (int k = 0; k < kDrain; k++)
+        if (!onClientPacket(sock, k ? MSG_DONTWAIT : 0)) return;
+}
+
+void DnsServer::drainUpstream()
+{
+    for (int k = 0; k < kDrain; k++)
+        if (!onUpstreamPacket(k ? MSG_DONTWAIT : 0)) return;
 }
 
 DnsServer::Pending* DnsServer::allocPending()

@@ -68,6 +68,8 @@ class Lap {
 public:
     Lap();
     ~Lap() { finish(total_); }
+    Lap(const Lap&) = delete;  // a copy would record the query twice
+    Lap& operator=(const Lap&) = delete;
     void mark(Stage s);
     void total(Stage s) { total_ = s; }  // which whole-query bucket on exit
     void finish(Stage total);

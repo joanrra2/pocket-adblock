@@ -270,12 +270,15 @@ static void testFuseFormat()
         CHECK(t.isValid());
         CHECK(!t.canList());
         size_t listed = 0;
-        t.forEach([&](uint64_t) { listed++; });
+        t.forEach([&listed](uint64_t) { listed++; });
         CHECK(listed == 0);
-        int misses = 0, falsePos = 0;
-        for (uint64_t k : v) misses += !t.contains(k);
+        int misses = 0;
+        int falsePos = 0;
+        for (uint64_t k : v)
+            if (!t.contains(k)) misses++;
         const int probes = 400000;
-        for (int i = 0; i < probes; i++) falsePos += t.contains(next());
+        for (int i = 0; i < probes; i++)
+            if (t.contains(next())) falsePos++;
         CHECK(misses == 0);
         // f = ceil(40 - log2 n) keeps false matches at or below n / 2^40 per lookup.
         const double expected = probes * std::ldexp(1.0, -v4FingerprintBits(n));
@@ -342,13 +345,18 @@ static void testBuiltList(const char* listPath, const char* domainsPath)
         if (line.empty() || line[0] == '#') continue;
         domains++;
         bool hit = false;
-        forEachSuffix(line.c_str(), line.size(), [&](const char* s, size_t n) { return hit = t.contains(fnv1a40(s, n)); });
-        if (!hit && missed++ < 5) std::printf("not blocked: %s\n", line.c_str());
+        forEachSuffix(line.c_str(), line.size(), [&hit, &t](const char* s, size_t n) {
+            hit = t.contains(fnv1a40(s, n));
+            return hit;
+        });
+        if (hit) continue;
+        if (missed < 5) std::printf("not blocked: %s\n", line.c_str());
+        missed++;
     }
     size_t falsePos = 0;
     for (int i = 0; i < 100000; i++) {
         const std::string name = "unlisted-" + std::to_string(i) + ".example-test.invalid";
-        falsePos += t.contains(fnv1a40(name.data(), name.size()));
+        if (t.contains(fnv1a40(name.data(), name.size()))) falsePos++;
     }
     CHECK(domains > 0);
     CHECK(missed == 0);

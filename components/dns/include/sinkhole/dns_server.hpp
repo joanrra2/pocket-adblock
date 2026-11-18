@@ -101,6 +101,8 @@ private:
     void run();
     bool onClientPacket(int sock, int flags);
     bool onUpstreamPacket(int flags);
+    void drainClients(int sock);
+    void drainUpstream();
     void expirePending();
     void refreshSafeTargets();
     bool cnameCloaked(const uint8_t* pkt, size_t len, size_t qend);
