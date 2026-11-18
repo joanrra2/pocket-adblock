@@ -97,8 +97,8 @@ struct Settings {
     // holds the password (the built-in default, or settings from older firmware).
     // Once hashed, adminPass is overwritten with random bytes as soon as the
     // firmware is confirmed (kept until then, so a rollback can still log in).
-    uint8_t adminHash[32];
-    uint8_t adminSalt[16];
+    uint8_t adminHash[32];  // NOSONAR fixed blob layout stored in NVS
+    uint8_t adminSalt[16];  // NOSONAR fixed blob layout stored in NVS
     uint32_t adminIter;
 };
 

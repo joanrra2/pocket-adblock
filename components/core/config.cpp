@@ -1,5 +1,6 @@
 #include "sinkhole/config.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstring>
 
@@ -11,6 +12,7 @@
 #include "nvs_flash.h"
 #include "psa/crypto.h"
 #include "sdkconfig.h"
+#include "sinkhole/secret.hpp"
 #include "sinkhole/text.hpp"
 
 namespace sinkhole {
@@ -23,49 +25,38 @@ constexpr const char* kSettingsKey = "settings";
 // HMAC-SHA256 rounds (cached after a success); stored per password, so it can
 // be raised later without breaking existing ones.
 constexpr uint32_t kAdminIter = 10000;
-constexpr char kScrubbed = '\x7f';  // first byte of a cleared adminPass
+constexpr char kScrubbed = 0x7f;  // first byte of a cleared adminPass (DEL: never typed)
+constexpr size_t kPassMax = sizeof(Settings::adminPass);
 
-esp_err_t pbkdf2(const char* pass, const uint8_t* salt, size_t saltLen, uint32_t iter, uint8_t out[32])
+using Hash = std::array<uint8_t, sizeof(Settings::adminHash)>;
+using Salt = std::array<uint8_t, sizeof(Settings::adminSalt)>;
+
+esp_err_t pbkdf2(const char* pass, const Salt& salt, uint32_t iter, Hash& out)
 {
     psa_crypto_init();  // idempotent
     psa_key_derivation_operation_t op = PSA_KEY_DERIVATION_OPERATION_INIT;
     psa_status_t st = psa_key_derivation_setup(&op, PSA_ALG_PBKDF2_HMAC(PSA_ALG_SHA_256));
     if (st == PSA_SUCCESS) st = psa_key_derivation_input_integer(&op, PSA_KEY_DERIVATION_INPUT_COST, iter);
-    if (st == PSA_SUCCESS) st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT, salt, saltLen);
+    if (st == PSA_SUCCESS)
+        st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_SALT, salt.data(), salt.size());
     if (st == PSA_SUCCESS)
         st = psa_key_derivation_input_bytes(&op, PSA_KEY_DERIVATION_INPUT_PASSWORD,
-                                            reinterpret_cast<const uint8_t*>(pass), strlen(pass));
-    if (st == PSA_SUCCESS) st = psa_key_derivation_output_bytes(&op, out, 32);
+                                            reinterpret_cast<const uint8_t*>(pass), strnlen(pass, kPassMax));
+    if (st == PSA_SUCCESS) st = psa_key_derivation_output_bytes(&op, out.data(), out.size());
     psa_key_derivation_abort(&op);
     if (st != PSA_SUCCESS) ESP_LOGE(TAG, "PBKDF2 failed (%d)", static_cast<int>(st));
     return st == PSA_SUCCESS ? ESP_OK : ESP_FAIL;
 }
 
-// Constant time, for credentials.
-bool sameBytes(const uint8_t* a, const uint8_t* b, size_t n)
-{
-    uint8_t diff = 0;
-    for (size_t i = 0; i < n; i++) diff |= static_cast<uint8_t>(a[i] ^ b[i]);
-    return diff == 0;
-}
-
-bool sameText(const char* a, const char* b)
-{
-    const size_t la = strlen(a), lb = strlen(b);
-    uint8_t diff = static_cast<uint8_t>(la != lb);
-    for (size_t i = 0; i < la; i++) diff |= static_cast<uint8_t>(a[i] ^ b[i % (lb ? lb : 1)]);
-    return diff == 0;
-}
-
 // Overwrite adminPass with random letters behind kScrubbed: older firmware
 // (rollback or manual downgrade) then matches no password at all.
-void scrub(char (&pass)[64])
+void scrub(char (&pass)[kPassMax])
 {
-    uint8_t rnd[16];
-    esp_fill_random(rnd, sizeof(rnd));
-    memset(pass, 0, sizeof(pass));
+    std::array<uint8_t, 16> rnd;
+    esp_fill_random(rnd.data(), rnd.size());
+    secureWipe(pass, sizeof(pass));
     pass[0] = kScrubbed;
-    for (size_t i = 0; i < sizeof(rnd); i++) pass[i + 1] = static_cast<char>('a' + rnd[i] % 26);
+    for (size_t i = 0; i < rnd.size(); i++) pass[i + 1] = static_cast<char>('a' + rnd[i] % 26);
 }
 }  // namespace
 
@@ -303,40 +294,47 @@ bool Config::usingDefaultAdminPassword()
 
 esp_err_t Config::hashAdmin(Settings& s, const char* pass)
 {
-    uint8_t salt[sizeof(s.adminSalt)], hash[sizeof(s.adminHash)];
-    esp_fill_random(salt, sizeof(salt));
+    Salt salt;
+    Hash hash;
+    esp_fill_random(salt.data(), salt.size());
     const int64_t t0 = esp_timer_get_time();
-    if (pbkdf2(pass, salt, sizeof(salt), kAdminIter, hash) != ESP_OK) return ESP_FAIL;
+    if (pbkdf2(pass, salt, kAdminIter, hash) != ESP_OK) return ESP_FAIL;
     ESP_LOGI(TAG, "admin password hashed (%lu rounds, %d ms)", static_cast<unsigned long>(kAdminIter),
              static_cast<int>((esp_timer_get_time() - t0) / 1000));
-    memcpy(s.adminSalt, salt, sizeof(salt));
-    memcpy(s.adminHash, hash, sizeof(hash));
+    memcpy(s.adminSalt, salt.data(), salt.size());
+    memcpy(s.adminHash, hash.data(), hash.size());
     s.adminIter = kAdminIter;
     return ESP_OK;
 }
 
 bool Config::checkAdmin(const char* user, const char* pass)
 {
-    char u[sizeof(Settings::adminUser)], plain[sizeof(Settings::adminPass)];
-    uint8_t salt[sizeof(Settings::adminSalt)], hash[sizeof(Settings::adminHash)];
-    uint32_t iter;
+    // Copies, so the slow PBKDF2 runs outside the lock.
+    struct Stored {
+        char user[sizeof(Settings::adminUser)];
+        char plain[sizeof(Settings::adminPass)];
+        Salt salt;
+        Hash hash;
+        uint32_t iter;
+    };
+    static Stored c;  // httpd task only
     {
         LockGuard g(mu_);
-        memcpy(u, s_.adminUser, sizeof(u));
-        memcpy(plain, s_.adminPass, sizeof(plain));
-        memcpy(salt, s_.adminSalt, sizeof(salt));
-        memcpy(hash, s_.adminHash, sizeof(hash));
-        iter = s_.adminIter;
+        memcpy(c.user, s_.adminUser, sizeof(c.user));
+        memcpy(c.plain, s_.adminPass, sizeof(c.plain));
+        memcpy(c.salt.data(), s_.adminSalt, c.salt.size());
+        memcpy(c.hash.data(), s_.adminHash, c.hash.size());
+        c.iter = s_.adminIter;
     }
-    bool ok = sameText(user, u);
-    if (iter == 0) {
-        ok &= sameText(pass, plain);
+    bool ok = sameText(user, c.user, sizeof(c.user));
+    if (c.iter == 0) {
+        ok &= sameText(pass, c.plain, sizeof(c.plain));
     } else {
-        uint8_t got[sizeof(hash)];
-        ok &= pbkdf2(pass, salt, sizeof(salt), iter, got) == ESP_OK && sameBytes(got, hash, sizeof(hash));
-        memset(got, 0, sizeof(got));
+        Hash got;
+        ok &= pbkdf2(pass, c.salt, c.iter, got) == ESP_OK && sameBytes(got.data(), c.hash.data(), got.size());
+        secureWipe(got.data(), got.size());
     }
-    memset(plain, 0, sizeof(plain));
+    secureWipe(&c, sizeof(c));
     return ok;
 }
 
@@ -348,7 +346,7 @@ esp_err_t Config::setAdmin(const char* user, const char* pass)
         copyStr(s_.adminUser, user);
         copyStr(s_.adminPass, pass);
         s_.adminIter = 0;
-        memset(s_.adminHash, 0, sizeof(s_.adminHash));
+        secureWipe(s_.adminHash, sizeof(s_.adminHash));
         return saveLocked();
     }
     static Settings next;  // httpd task only; keeps the slow PBKDF2 outside the lock

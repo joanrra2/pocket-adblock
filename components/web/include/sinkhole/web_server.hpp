@@ -12,6 +12,7 @@
 //   - while the default password is set, the Host header must be an IP address
 //     or a local name (DNS rebinding: a web page can't reach the API)
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -72,6 +73,11 @@ private:
     bool authorized(httpd_req_t* req, bool isPost);
     bool hostAllowed(httpd_req_t* req);
     void forgetLogins();  // after the credentials changed
+    using Digest = std::array<uint8_t, 32>;
+    static esp_err_t challenge(httpd_req_t* req);
+    bool credentialsOk(const char* header);
+    int guessWaitSeconds() const;
+    void noteWrongPassword(httpd_req_t* req, const Digest& digest);
     int readForm(httpd_req_t* req, char* buf, size_t len);
     static bool field(const char* form, const char* key, char* out, size_t outLen);
     esp_err_t sendOk(httpd_req_t* req, const char* message = "ok");
@@ -114,9 +120,9 @@ private:
     // Login state (httpd task only).
     static constexpr int kFreeGuesses = 5;
     static constexpr size_t kBadRemembered = 4;
-    uint8_t good_[32] = {};  // SHA-256 of the last accepted Authorization header
+    Digest good_{};  // SHA-256 of the last accepted Authorization header
     bool goodValid_ = false;
-    uint8_t bad_[kBadRemembered][32] = {};  // recent wrong headers: retried, not counted again
+    std::array<Digest, kBadRemembered> bad_{};  // recent wrong headers: retried, not counted again
     size_t badNext_ = 0;
     uint32_t failures_ = 0;  // different wrong passwords in a row
     int64_t lockedUntilUs_ = 0;

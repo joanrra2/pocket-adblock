@@ -232,7 +232,7 @@ void App::startRollbackGuard()
         // The plain admin password an upgrade kept for a rollback can go now.
         // An NVS write is too much for the esp_timer task's stack: own task.
         xTaskCreate(
-            [](void* arg) {
+            [](void* arg) {  // NOSONAR FreeRTOS task entry: the signature takes void*
                 static_cast<App*>(arg)->config_.scrubLegacyAdminPassword();
                 vTaskDelete(nullptr);
             },
