@@ -401,15 +401,30 @@ async function loadBoots(){if(Date.now()-bootsAt<60000)return;bootsAt=Date.now()
  $('#boots').innerHTML=r.items.map((b,i)=>`<dt>${b.at?esc(when(b.at)):tr(i?'time unknown':'this boot')}</dt><dd><span class="${b.unexpected?'wa':''}">${esc(tr(b.why))}</span> · ${esc(b.version)}${b.ranFor?' · '+tr(i?'ran {0}':'up {0}',ago(b.ranFor)):''}</dd>`).join('')||'<dt>–</dt><dd></dd>'}
 // Device log: polls /api/logs from the last position while the tab is open.
 let logPos=0,logPaused=false,logText='';
-const logLine=l=>{const m=/^([EWIDV]) \((\d+)\) (.*)$/.exec(l);if(!m)return esc(l);
- const t=S&&S.time?new Date((S.time-S.uptime)*1000+ +m[2]).toLocaleTimeString(LANG=='es'?'es':undefined):(+m[2]/1000).toFixed(1)+'s';
- return `<span class="${m[1]=='E'?'e':m[1]=='W'?'w':''}"><span class="t">${t}</span> ${m[1]} ${esc(m[3])}</span>`};
-async function loadLog(){if(logPaused)return;const r=await fetch('/api/logs?from='+logPos);if(!r.ok)return;
+const LOG_CLASS={E:'e',W:'w'};
+function logTime(ms){
+ if(!(S&&S.time))return (ms/1000).toFixed(1)+'s';
+ return new Date((S.time-S.uptime)*1000+ms).toLocaleTimeString(LANG=='es'?'es':undefined);
+}
+function logLine(l){
+ const m=/^([EWIDV]) \((\d+)\) (.*)$/.exec(l);
+ if(!m)return esc(l);
+ return `<span class="${LOG_CLASS[m[1]]||''}"><span class="t">${logTime(+m[2])}</span> ${m[1]} ${esc(m[3])}</span>`;
+}
+async function loadLog(){
+ if(logPaused)return;
+ const r=await fetch('/api/logs?from='+logPos);
+ if(!r.ok)return;
  const start=+r.headers.get('X-Log-Start'),next=+r.headers.get('X-Log-Next'),size=+r.headers.get('X-Log-Size'),txt=await r.text();
- if(start!=logPos)logText='';logPos=next;if(!txt&&logText)return;logText=(logText+txt).slice(-200000);
+ if(start!=logPos)logText='';
+ logPos=next;
+ if(!txt&&logText)return;
+ logText=(logText+txt).slice(-200000);
  const box=$('#logbox'),stick=box.scrollHeight-box.scrollTop-box.clientHeight<40;
- box.innerHTML=logText.split('\n').filter(Boolean).map(logLine).join('\n');if(stick)box.scrollTop=box.scrollHeight;
- $('#lognote').textContent=tr('The last {0} KB of the device log (restarts clear it).',size/1024|0)}
+ box.innerHTML=logText.split('\n').filter(Boolean).map(logLine).join('\n');
+ if(stick)box.scrollTop=box.scrollHeight;
+ $('#lognote').textContent=tr('The last {0} KB of the device log (restarts clear it).',Math.trunc(size/1024));
+}
 const kv=rows=>rows.map(([k,v])=>`<dt>${tr(k)}</dt><dd>${v}</dd>`).join('');
 
 // ---------- rendering

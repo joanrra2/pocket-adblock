@@ -1399,7 +1399,9 @@ esp_err_t WebServer::getLogs(httpd_req_t* req)
     auto* buf = reinterpret_cast<char*>(chunk_);
     LogBuffer::Chunk c = LogBuffer::read(from, buf, sizeof(chunk_));
     if (c.next > until) until = c.next;  // a line arrived in between
-    std::array<char, 12> start{}, next{}, size{};
+    std::array<char, 12> start{};
+    std::array<char, 12> next{};
+    std::array<char, 12> size{};
     snprintf(start.data(), start.size(), "%lu", static_cast<unsigned long>(c.start));
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
