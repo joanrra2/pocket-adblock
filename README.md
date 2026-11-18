@@ -381,6 +381,10 @@ a few seconds. MQTT changes apply after a restart.
   restarts by itself is easy to spot. Times come from NTP (`pool.ntp.org`, set with
   `SINKHOLE_NTP_SERVER`; empty turns the clock off) and are shown in your browser's
   time zone. Only a power cut loses the time of the boot it ended.
+- **Device log:** *Updates → Device log* shows what the firmware prints on the serial
+  port, live, with warnings and errors highlighted, and downloads it as a text file:
+  the last 64 KB on boards with PSRAM, the last 4 KB (about 40 lines) otherwise.
+  Restarts clear it (the restart list above keeps why).
 
 ### Online updates and signing
 

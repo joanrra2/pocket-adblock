@@ -111,6 +111,7 @@ private:
     esp_err_t getPerf(httpd_req_t* req);
     esp_err_t postWol(httpd_req_t* req);
     esp_err_t getRestarts(httpd_req_t* req);
+    esp_err_t getLogs(httpd_req_t* req);
 
     static const Route kRoutes[];
 

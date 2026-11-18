@@ -34,6 +34,8 @@ h2{font-size:15px;font-weight:650;margin-bottom:12px;display:flex;align-items:ce
 .pill{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:99px;font-size:12.5px;font-weight:600;background:var(--s2)}
 .pill:before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
 .ok{color:var(--ok)}.bad{color:var(--bad)}.wa{color:var(--wa)}
+.log{background:var(--bg);border:1px solid var(--ln);border-radius:10px;padding:10px 12px;margin:10px 0 0;max-height:420px;overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--tx)}
+.log .w{color:var(--wa)}.log .e{color:var(--bad)}.log .t{color:var(--mu)}
 .hero{display:flex;gap:24px;align-items:center;flex-wrap:wrap}
 .ring{position:relative;width:132px;height:132px;flex:none}
 .ring svg{transform:rotate(-90deg)}.ring circle{fill:none;stroke-width:12}
@@ -195,6 +197,9 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
      <div class="row mt"><button class="btn">Save</button></div></form>
     <div class="row mt"><button class="btn d" data-a="reboot">Restart device</button></div></div>
   </div>
+  <div class="card"><h2>Device log</h2><div class="mu" id="lognote"></div>
+   <pre class="log" id="logbox" aria-live="off"></pre>
+   <div class="row mt"><button class="btn" data-a="logpause" id="logpause">Pause</button><button class="btn" data-a="logsave">Download</button></div></div>
  </section>
 
  <section id="settings" hidden>
@@ -354,7 +359,7 @@ const ES={
 // messages from the device
 'connecting to the new network':'conectando a la nueva red','reconnecting':'reconectando','download started':'descarga iniciada','magic packet sent':'paquete mágico enviado',
 'rebooting':'reiniciando','firmware accepted, rebooting':'firmware aceptado, reiniciando','saved; reboot to apply':'guardado; reinicia para aplicar',
-'credentials changed; log in again':'credenciales cambiadas; vuelve a iniciar sesión','Restarts':'Reinicios','Clock':'Reloj','not set yet (NTP)':'aún sin hora (NTP)','Last restart':'Último reinicio','time unknown':'hora desconocida','this boot':'este arranque','ran {0}':'funcionó {0}','up {0}':'encendido {0}',
+'credentials changed; log in again':'credenciales cambiadas; vuelve a iniciar sesión','Restarts':'Reinicios','Device log':'Registro del dispositivo','Pause':'Pausar','Resume':'Reanudar','Download':'Descargar','The last {0} KB of the device log (restarts clear it).':'Los últimos {0} KB del registro del dispositivo (se borra al reiniciar).','Clock':'Reloj','not set yet (NTP)':'aún sin hora (NTP)','Last restart':'Último reinicio','time unknown':'hora desconocida','this boot':'este arranque','ran {0}':'funcionó {0}','up {0}':'encendido {0}',
 'power on':'encendido','reset pin':'botón de reset','crash':'fallo (crash)','watchdog':'watchdog','power dip (brownout)':'bajada de tensión (brownout)','wake from sleep':'despertar','USB reset':'reset por USB','debugger reset':'reset del depurador','unknown':'desconocido',
 'firmware uploaded':'firmware subido','firmware update':'actualización de firmware','settings restored':'ajustes restaurados','restarted from the web UI':'reiniciado desde la web','factory reset':'restablecimiento de fábrica','remote restart':'reinicio remoto','software restart':'reinicio por software','too many wrong passwords: wait and try again':'demasiadas contraseñas incorrectas: espera e inténtalo de nuevo',
 'could not save the new password':'no se pudo guardar la nueva contraseña',"open this page by the device's IP address or local name, or change the default password":'abre esta página con la dirección IP o el nombre local del dispositivo, o cambia la contraseña predeterminada','not a valid domain':'no es un dominio válido','already in the list':'ya está en la lista',
@@ -394,6 +399,17 @@ const when=t=>new Date(t*1000).toLocaleString(LANG=='es'?'es':undefined,{dateSty
 let bootsAt=0;
 async function loadBoots(){if(Date.now()-bootsAt<60000)return;bootsAt=Date.now();const r=await api('/api/restarts');
  $('#boots').innerHTML=r.items.map((b,i)=>`<dt>${b.at?esc(when(b.at)):tr(i?'time unknown':'this boot')}</dt><dd><span class="${b.unexpected?'wa':''}">${esc(tr(b.why))}</span> · ${esc(b.version)}${b.ranFor?' · '+tr(i?'ran {0}':'up {0}',ago(b.ranFor)):''}</dd>`).join('')||'<dt>–</dt><dd></dd>'}
+// Device log: polls /api/logs from the last position while the tab is open.
+let logPos=0,logPaused=false,logText='';
+const logLine=l=>{const m=/^([EWIDV]) \((\d+)\) (.*)$/.exec(l);if(!m)return esc(l);
+ const t=S&&S.time?new Date((S.time-S.uptime)*1000+ +m[2]).toLocaleTimeString(LANG=='es'?'es':undefined):(+m[2]/1000).toFixed(1)+'s';
+ return `<span class="${m[1]=='E'?'e':m[1]=='W'?'w':''}"><span class="t">${t}</span> ${m[1]} ${esc(m[3])}</span>`};
+async function loadLog(){if(logPaused)return;const r=await fetch('/api/logs?from='+logPos);if(!r.ok)return;
+ const start=+r.headers.get('X-Log-Start'),next=+r.headers.get('X-Log-Next'),size=+r.headers.get('X-Log-Size'),txt=await r.text();
+ if(start!=logPos)logText='';logPos=next;if(!txt&&logText)return;logText=(logText+txt).slice(-200000);
+ const box=$('#logbox'),stick=box.scrollHeight-box.scrollTop-box.clientHeight<40;
+ box.innerHTML=logText.split('\n').filter(Boolean).map(logLine).join('\n');if(stick)box.scrollTop=box.scrollHeight;
+ $('#lognote').textContent=tr('The last {0} KB of the device log (restarts clear it).',size/1024|0)}
 const kv=rows=>rows.map(([k,v])=>`<dt>${tr(k)}</dt><dd>${v}</dd>`).join('');
 
 // ---------- rendering
@@ -865,7 +881,7 @@ function renderTop(){
  $('#topd').innerHTML=(TOP[topTab]||[]).map(d=>row(esc(d.name),n(d.count))).join('')||'<p class="k">'+tr('Nothing yet.')+'</p>';
  for(const b of $('#toptabs').children)b.classList.toggle('on',b.dataset.v==topTab);
 }
-const extra={dash:()=>{loadTop().catch(()=>{});loadHistory().catch(()=>{});return loadDash()},lists:loadLists,devices:loadClients,wake:loadWol,system:()=>loadBoots().catch(()=>{}),settings:()=>{}};
+const extra={dash:()=>{loadTop().catch(()=>{});loadHistory().catch(()=>{});return loadDash()},lists:loadLists,devices:loadClients,wake:loadWol,system:()=>{loadBoots().catch(()=>{});return loadLog().catch(()=>{})},settings:()=>{}};
 async function refresh(){try{S=await api('/api/status');renderStatus(S);await extra[tab]()}catch(e){toast(tr('Device unreachable: {0}',e.message),1)}}
 
 // ---------- actions
@@ -910,6 +926,8 @@ const A={
  fwinstall:()=>confirm(tr('Install the update and restart?'))&&act('/api/firmware/install',{}),
  upload:upload,
  reboot:()=>confirm(tr('Restart the device now?'))&&act('/api/reboot',{}),
+ logpause:()=>{logPaused=!logPaused;$('#logpause').textContent=tr(logPaused?'Resume':'Pause');if(!logPaused)loadLog()},
+ logsave:()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([logText],{type:'text/plain'}));a.download='pocket-adblock-log.txt';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)},
  scan:scan,
  pick:v=>{const x=nets[v],f=$('form[data-f="wifi"]');f.ssid.value=x.ssid;f.pass.value='';x.secure?f.pass.focus():toast(tr('Open network: no password needed'))},
  reconnect:()=>act('/api/wifi',{action:'reconnect'}),

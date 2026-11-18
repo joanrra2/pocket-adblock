@@ -5,6 +5,7 @@
 #include "esp_netif.h"
 #include "esp_timer.h"
 #include "sdkconfig.h"
+#include "sinkhole/log_buffer.hpp"
 #include "sinkhole/memory.hpp"
 #include "sinkhole/text.hpp"
 
@@ -23,6 +24,7 @@ App::App()
 
 void App::start()
 {
+    LogBuffer::begin();  // before the first log line, so the web UI sees the boot
     ESP_LOGI(TAG, "DNS Sinkhole %s starting (PSRAM: %s)", FirmwareUpdater::version(),
              psramAvailable() ? "yes" : "no");
 
