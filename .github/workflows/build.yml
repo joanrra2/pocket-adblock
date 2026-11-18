@@ -17,9 +17,22 @@ jobs:
       - uses: actions/checkout@v4
       - name: Unit tests (hash table, DNS packets)
         run: |
-          g++ -std=c++17 -Wall -Wextra -Werror -Icomponents/blocklist/include -Icomponents/dns/include \
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Icomponents/blocklist/include -Icomponents/dns/include \
               test/host/test_logic.cpp -o test_logic
           ./test_logic
+      - name: Lists from tools/build_blocklist.py read the same on the device (v2 and v4)
+        run: |
+          # Names with listed parents too, so pruning is covered.
+          python3 -c "
+          for i in range(30000):
+              print(f'ads{i}.tracker{i % 101}.example{i % 7}.com')
+          for t in range(0, 101, 3):
+              print(f'tracker{t}.example{t % 7}.com')
+          " > domains.txt
+          python3 tools/build_blocklist.py l2.bin domains.txt --format=v2
+          python3 tools/build_blocklist.py l4.bin domains.txt
+          ./test_logic l2.bin domains.txt
+          ./test_logic l4.bin domains.txt
 
   firmware:
     runs-on: ubuntu-latest

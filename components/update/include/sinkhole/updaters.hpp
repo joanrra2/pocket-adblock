@@ -88,6 +88,8 @@ private:
     void run();
     bool blocklistDue();
     bool firmwareDue();
+    enum class ListFetch { Updated, Unchanged, TooBig, Failed };
+    ListFetch downloadList(const char* url, char* why, size_t whyLen, uint32_t& bytes);
     void fetchBlocklist();
     void checkFirmware();
     void installFirmware();

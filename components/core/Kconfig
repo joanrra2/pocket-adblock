@@ -28,8 +28,12 @@ menu "DNS Sinkhole"
         string "Default blocklist URL"
         default "https://github.com/joanrra2/pocket-adblock/releases/download/blocklist/blocklist.bin"
         help
-            Raw (headerless) lists from esp32-c3-adblock and SHBL v1 lists from
-            tools/build_blocklist.py are both accepted. Leave empty to disable.
+            The project's daily lists (blocklist.bin, -light, -aggressive, -extended
+            in a release named "blocklist") are fetched in their fuse-filter
+            version (blocklist-v4.bin and so on), falling back to the named file.
+            The setting keeps the original name, which older firmware can read.
+            Raw (headerless) lists from esp32-c3-adblock and SHBL v1/v2/v4 lists
+            from tools/build_blocklist.py are accepted. Leave empty to disable.
 
     config SINKHOLE_BLOCKLIST_UPDATE_HOURS
         int "Hours between automatic blocklist updates (0 = off)"
@@ -90,6 +94,15 @@ menu "DNS Sinkhole"
         int "Custom block / allow entries (each list)"
         default 64
         range 8 512
+
+    config SINKHOLE_PERF
+        bool "Time each DNS stage (development aid, GET /api/perf)"
+        default n
+        help
+            Times every query stage with the CPU cycle counter (~0.3 us per
+            query, ~7 KB of RAM) and serves the stats at /api/perf
+            (?reset=1 starts a new window). For measuring optimizations;
+            leave it off in normal builds.
 
     config SINKHOLE_DNS_MAX_PENDING
         int "Concurrent upstream DNS queries"
@@ -184,6 +197,9 @@ menu "DNS Sinkhole"
             (10 bits: ~270 KB for the 4 MB layout, ~1 MB for the 8 MB layout).
             Allocated in PSRAM when present, otherwise in internal RAM only if it
             fits; if allocation fails the firmware runs without it.
+            Only sorted lists (SHBL v1/v2, raw) use it, and it is allocated the
+            first time one becomes active: fuse-filter lists (v4, the default)
+            answer in 3 flash reads and leave this RAM free.
             Recommended: ESP32-S3 / ESP32 boards with PSRAM. Not recommended on the
             ESP32-C3: it would take the internal RAM that HTTPS updates need.
 

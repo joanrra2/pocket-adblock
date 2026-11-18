@@ -37,7 +37,9 @@ esp_err_t BlocklistStore::begin()
         return ESP_ERR_NOT_FOUND;
     }
 
-    setupBloom();
+    // capacityFor(v4) searches; work it out once, not on every status request.
+    static constexpr uint8_t kFormats[] = {kBlocklistV1, kBlocklistV2, kBlocklistV4};
+    for (uint8_t v : kFormats) capacity_[v] = capacityFor(v, slots_[0]->size);
 
     uint8_t preferred = 0;
     nvs::loadU8(kSlotKey, preferred);
@@ -55,7 +57,7 @@ esp_err_t BlocklistStore::begin()
             ESP_LOGI(TAG, "slot %c active: %lu hashes", 'A' + slot,
                      static_cast<unsigned long>(m.hdr.count));
             if (slot != preferred) nvs::saveU8(kSlotKey, static_cast<uint8_t>(slot));
-            rebuildBloom(m.table);
+            bloomAtStartup_ = true;  // lookups use flash until finishStartup() builds it
             return ESP_OK;
         }
         ESP_LOGW(TAG, "slot %c unusable: %s", 'A' + slot, why);
@@ -76,7 +78,7 @@ bool BlocklistStore::mapSlot(int slot, Mapped& out, bool verifyHash, char* why, 
         setWhy(why, whyLen, "empty or not an SHBL list");
         return false;
     }
-    const size_t payload = payloadSize(hdr.version, hdr.count);
+    const size_t payload = payloadSize(hdr);
     const size_t sigBytes = isSigned(hdr) ? kSignatureBytes : 0;
     if (hdr.count == 0 || kHdr + payload + sigBytes > part->size) {
         setWhy(why, whyLen, "count does not fit the partition");
@@ -92,7 +94,7 @@ bool BlocklistStore::mapSlot(int slot, Mapped& out, bool verifyHash, char* why, 
         return false;
     }
     const uint8_t* base = static_cast<const uint8_t*>(ptr);
-    HashTable table(base + kHdr, hdr.count, hdr.version);
+    HashTable table(base + kHdr, hdr.count, hdr.version, payload);
 
     if (verifyHash) {
         uint8_t digest[32];
@@ -188,7 +190,7 @@ BlocklistInfo BlocklistStore::info()
     i.bloomPsram = bloomPsram_;
     i.bloomReady = bloomReady_;
     i.bloomSkips = bloomSkips_;
-    i.capacity = slots_[0] ? capacityFor(i.format ? i.format : kBlocklistV2, slots_[0]->size) : 0;
+    i.capacity = capacity_[i.format ? i.format : kBlocklistV4];  // empty: what the default lists can use
     return i;
 }
 
@@ -278,7 +280,7 @@ esp_err_t BlocklistStore::write(const uint8_t* data, size_t len)
             mode_ = Mode::WithHeader;  // header kept in headBuf_, written at finish
             BlocklistHeader h;
             memcpy(&h, headBuf_, sizeof(h));
-            expectedPayload_ = headerLooksValid(h) ? payloadSize(h.version, h.count) : 0;
+            expectedPayload_ = headerLooksValid(h) ? payloadSize(h) : 0;
             // Too big for this board's slot? Say so now instead of failing at the end.
             if (expectedPayload_ && kHdr + expectedPayload_ > slots_[writeSlot_]->size) {
                 tooBig_ = true;
@@ -337,7 +339,7 @@ esp_err_t BlocklistStore::finishWrite(char* why, size_t whyLen)
             abortWrite();
             return ESP_ERR_INVALID_VERSION;
         }
-        if (hdr.count == 0 || payloadBytes_ != payloadSize(hdr.version, hdr.count)) {
+        if (hdr.count == 0 || payloadBytes_ != payloadSize(hdr)) {
             setWhy(why, whyLen, "header count does not match payload (truncated download?)");
             abortWrite();
             return ESP_ERR_INVALID_SIZE;
@@ -409,31 +411,54 @@ esp_err_t BlocklistStore::finishWrite(char* why, size_t whyLen)
 
 // ------------------------------------------------------------------ bloom filter
 
-void BlocklistStore::setupBloom()
+// Allocated the first time a sorted list (v1/v2) becomes active: a filter list
+// (v4, the default) never needs it, so those boards keep the PSRAM. Once
+// allocated it stays (lookups may still be reading it).
+bool BlocklistStore::allocateBloom()
 {
 #if CONFIG_SINKHOLE_BLOOM_FILTER
+    if (bloom_.ready()) return true;
+    if (bloomFailed_) return false;
     const uint32_t cap = capacityFor(kBlocklistV2, slots_[0]->size);  // the densest format
     const size_t bytes = (static_cast<size_t>(cap) * CONFIG_SINKHOLE_BLOOM_BITS_PER_ENTRY + 7) / 8;
     void* mem = psramAvailable() ? heap_caps_calloc(1, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : nullptr;
     bloomPsram_ = mem != nullptr;
     if (!mem) mem = heap_caps_calloc(1, bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!mem) {
+        bloomFailed_ = true;
         ESP_LOGW(TAG, "bloom filter: no room for %u KB, running without it", static_cast<unsigned>(bytes / 1024));
-        return;
+        return false;
     }
     // k = bits per entry * ln 2 (optimal number of hash functions).
     const uint8_t k = static_cast<uint8_t>((CONFIG_SINKHOLE_BLOOM_BITS_PER_ENTRY * 693 + 500) / 1000);
     bloom_.attach(static_cast<uint8_t*>(mem), bytes, k ? k : 1);
     ESP_LOGI(TAG, "bloom filter: %u KB in %s, %d bits/domain, k=%u", static_cast<unsigned>(bytes / 1024),
              bloomPsram_ ? "PSRAM" : "internal RAM", CONFIG_SINKHOLE_BLOOM_BITS_PER_ENTRY, k);
+    return true;
+#else
+    return false;
 #endif
+}
+
+void BlocklistStore::finishStartup()
+{
+    if (!bloomAtStartup_) return;
+    bloomAtStartup_ = false;
+    HashTable t;
+    {
+        LockGuard g(mu_);
+        if (!active_.valid) return;
+        t = active_.table;
+    }
+    rebuildBloom(t);
 }
 
 // Lookups bypass the filter (bloomReady_ = false) while it is rebuilt.
 void BlocklistStore::rebuildBloom(const HashTable& table)
 {
-    if (!bloom_.ready()) return;
     bloomReady_ = false;
+    if (!table.canList()) return;  // a filter list (v4) answers in 3 reads: no bloom filter needed
+    if (!allocateBloom()) return;
     const int64_t t0 = esp_timer_get_time();
     bloom_.clear();
     table.forEach([this](uint64_t h) { bloom_.add(h); });

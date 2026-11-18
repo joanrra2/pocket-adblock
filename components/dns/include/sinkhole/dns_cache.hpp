@@ -24,7 +24,11 @@ public:
 
     // query: client packet, qend: end of its question. Writes the cached reply
     // (with the client's txid and aged TTLs) into out; returns 0 on a miss.
-    size_t lookup(uint32_t key, const uint8_t* query, size_t qend, uint8_t* out, size_t cap);
+    // refresh: set when the caller should ask the upstream again in the
+    // background: the answer expired less than kStaleS ago (served with a 30 s
+    // TTL, RFC 8767) or has less than a tenth of its lifetime left (prefetch).
+    size_t lookup(uint32_t key, const uint8_t* query, size_t qend, uint8_t* out, size_t cap, bool* refresh = nullptr);
+    static constexpr uint32_t kStaleS = 3600;
     void store(uint32_t key, const uint8_t* resp, size_t len);
     void clear();
 
@@ -46,6 +50,7 @@ private:
         uint32_t key;
         uint32_t storedAt;  // uptime seconds
         uint32_t ttl;       // seconds
+        uint32_t refreshed; // uptime of the last background refresh request
         uint16_t len;
         uint16_t qend;
     };
@@ -67,7 +72,7 @@ private:
 
     bool setup(Table& t, size_t room, size_t entries, bool psram, bool fullyAssociative);
     size_t lookupIn(Table& t, uint32_t key, const uint8_t* query, size_t qend, uint8_t* out, size_t cap,
-                    uint32_t now);
+                    uint32_t now, bool* refresh);
     static void forget(Table& t, uint32_t key);
 
     Table small_;

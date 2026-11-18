@@ -13,6 +13,7 @@
 #include "lwip/inet.h"
 #include "sinkhole/json_writer.hpp"
 #include "sinkhole/memory.hpp"
+#include "sinkhole/perf.hpp"
 #include "sinkhole/text.hpp"
 
 extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
@@ -94,6 +95,9 @@ const WebServer::Route WebServer::kRoutes[] = {
     {"/api/reboot", HTTP_POST, &WebServer::postReboot, true},
     {"/api/wol", HTTP_GET, &WebServer::getWol, true},
     {"/api/wol", HTTP_POST, &WebServer::postWol, true},
+#if CONFIG_SINKHOLE_PERF
+    {"/api/perf", HTTP_GET, &WebServer::getPerf, true},
+#endif
 };
 
 esp_err_t WebServer::start()
@@ -504,6 +508,40 @@ esp_err_t WebServer::getTop(httpd_req_t* req)
 }
 
 // Last 24 h in 10-minute slots, oldest first, plus the current partial slot.
+esp_err_t WebServer::getPerf(httpd_req_t* req)
+{
+#if CONFIG_SINKHOLE_PERF
+    static perf::StageStats s[perf::kStages];  // httpd task only
+    int64_t windowUs = 0;
+    perf::Recorder::instance().snapshot(s, windowUs);
+    char q[32] = "";
+    httpd_req_get_url_query_str(req, q, sizeof(q));
+    if (strstr(q, "reset=1")) perf::Recorder::instance().requestReset();
+    uint64_t busy = 0;  // cycles in whole queries and replies
+    for (perf::Stage t : {perf::QBlocked, perf::QCached, perf::QForwarded, perf::QOther, perf::UTotal}) busy += s[t].sum;
+    JsonWriter j(req);
+    j.beginObject().num("windowMs", windowUs / 1000).num("cpuMhz", CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ);
+    j.num("busyPerMille", windowUs > 0 ? static_cast<int64_t>(perf::cyclesToNs(busy) / 1000) * 1000 / windowUs : 0);
+    j.beginObject("ns");
+    for (int i = 0; i < perf::kStages; i++) {
+        const perf::StageStats& t = s[i];
+        if (!t.n) continue;
+        j.beginObject(perf::name(static_cast<perf::Stage>(i)))
+            .num("n", t.n)
+            .num("mean", perf::cyclesToNs(t.sum / t.n))
+            .num("min", perf::cyclesToNs(t.min))
+            .num("p50", perf::quantileNs(t, 0.5f))
+            .num("p99", perf::quantileNs(t, 0.99f))
+            .num("max", perf::cyclesToNs(t.max))
+            .endObject();
+    }
+    j.endObject().endObject();
+    return j.finish();
+#else
+    return httpd_resp_send_404(req);
+#endif
+}
+
 esp_err_t WebServer::getHistory(httpd_req_t* req)
 {
     static uint32_t allowed[History::kSlots], blocked[History::kSlots];  // httpd task only

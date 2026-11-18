@@ -74,12 +74,13 @@ ClientInfo* ClientTable::findLocked(const ClientAddr& addr)
     return nullptr;
 }
 
-bool ClientTable::withinRate(const ClientAddr& addr, uint16_t perMinute, bool* noFilter)
+bool ClientTable::withinRate(const ClientAddr& addr, uint16_t perMinute, bool* noFilter, ClientInfo** slot)
 {
     const uint32_t now = uptimeSeconds();
     LockGuard g(mu_);
     ClientInfo* c = findOrAddLocked(addr);
     if (noFilter) *noFilter = c->noFilter;
+    if (slot) *slot = c;
     if (!perMinute) return true;
     if (now - c->rateStart >= 60) {
         c->rateStart = now;
@@ -122,6 +123,16 @@ bool ClientTable::record(const ClientAddr& addr, bool blocked)
 {
     LockGuard g(mu_);
     ClientInfo* c = findOrAddLocked(addr);
+    c->lastSeen = uptimeSeconds();
+    if (blocked || c->banned)
+        c->blocked++;
+    else
+        c->allowed++;
+    return c->banned;
+}
+
+bool ClientTable::record(ClientInfo* c, bool blocked)
+{
     c->lastSeen = uptimeSeconds();
     if (blocked || c->banned)
         c->blocked++;
@@ -335,17 +346,33 @@ void QueryLog::markBlocked(const ClientAddr& addr, const char* domain)
 
 size_t QueryLog::page(size_t& cursor, const QueryFilter& f, QueryEntry* out, size_t max)
 {
-    LockGuard g(mu_);
+    // Copy 16 entries at a time and filter them outside the lock: a search
+    // that matches little would otherwise hold it for the whole ring, and
+    // the DNS task waits for it on every query.
+    QueryEntry chunk[16];
     size_t n = 0;
-    while (cursor < count_ && n < max) {
-        const QueryEntry& e = ring_[(head_ + cap_ - 1 - cursor) % cap_];
-        cursor++;
-        if (f.ip && e.addr.v4() != f.ip) continue;
-        if (f.blockedOnly && !e.blocked) continue;
-        if (f.text && !strstr(e.domain, f.text)) continue;
-        out[n++] = e;
+    for (;;) {
+        size_t got = 0, total;
+        {
+            LockGuard g(mu_);
+            total = count_;
+            const size_t base = head_ + cap_ - 1;
+            while (got < 16 && cursor + got < count_) {
+                chunk[got] = ring_[(base - cursor - got) % cap_];
+                got++;
+            }
+        }
+        for (size_t k = 0; k < got; k++) {
+            cursor++;
+            const QueryEntry& e = chunk[k];
+            if (f.ip && e.addr.v4() != f.ip) continue;
+            if (f.blockedOnly && !e.blocked) continue;
+            if (f.text && !strstr(e.domain, f.text)) continue;
+            out[n++] = e;
+            if (n == max) return n;
+        }
+        if (!got || cursor >= total) return n;
     }
-    return n;
 }
 
 }  // namespace sinkhole

@@ -24,7 +24,7 @@ struct BlocklistInfo {
     uint32_t activatedUptime;  // seconds since boot when it went live
     char slot;                 // 'A', 'B' or '-' when none
     uint32_t capacity;         // max hashes a slot can hold (in the active format)
-    uint8_t format;            // 1, 2 (compact) or 0 when none
+    uint8_t format;            // 1, 2 (compact), 4 (fuse filter) or 0 when none
     bool signedOk;             // signature verified against the configured key
     bool keyConfigured;        // firmware built with a blocklist public key
     uint32_t bloomBytes;       // 0 = no bloom filter
@@ -36,6 +36,9 @@ struct BlocklistInfo {
 class BlocklistStore {
 public:
     esp_err_t begin();
+    // Builds the bloom filter for the list found at boot (begin() leaves it for
+    // later so Wi-Fi and DNS start right away). Called from the updater task.
+    void finishStartup();
 
     bool contains(uint64_t hash);
     // Any of several hashes (the suffixes of one name) under a single lock.
@@ -73,11 +76,12 @@ private:
     esp_err_t writeAt(size_t offset, const uint8_t* data, size_t len);
     esp_err_t payloadWrite(const uint8_t* data, size_t len);
     void importKey();
-    void setupBloom();
+    bool allocateBloom();
     void rebuildBloom(const HashTable& table);
     bool verifySignature(const BlocklistHeader& hdr, const uint8_t* sig);
 
     const esp_partition_t* slots_[2] = {nullptr, nullptr};
+    uint32_t capacity_[kBlocklistV4 + 1] = {};  // per format, for one slot
 
     Mutex mu_;  // guards active_ / activeSlot_
     Mapped active_;
@@ -105,6 +109,8 @@ private:
     // Optional RAM bloom filter (CONFIG_SINKHOLE_BLOOM_FILTER).
     BloomBits bloom_;
     bool bloomPsram_ = false;
+    bool bloomFailed_ = false;
+    bool bloomAtStartup_ = false;  // allocation failed once: don't retry on every update
     std::atomic<bool> bloomReady_{false};
     std::atomic<uint32_t> bloomSkips_{0};
 };

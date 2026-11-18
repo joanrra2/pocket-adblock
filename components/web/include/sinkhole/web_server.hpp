@@ -94,6 +94,7 @@ private:
     esp_err_t postFirmwareInstall(httpd_req_t* req);
     esp_err_t postReboot(httpd_req_t* req);
     esp_err_t getWol(httpd_req_t* req);
+    esp_err_t getPerf(httpd_req_t* req);
     esp_err_t postWol(httpd_req_t* req);
 
     static const Route kRoutes[];

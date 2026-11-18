@@ -42,6 +42,31 @@ bool smallerList(const char* url, char* out, size_t cap)
     return false;
 }
 
+// The project's daily lists. They are published twice: "<name>.bin" in the
+// compact sorted format (v2) that every firmware reads, and "<name>-v4.bin" as a
+// fuse filter (smaller, 3x faster lookups, no bloom filter). This firmware
+// fetches the -v4 file but keeps the v2 name in the settings, so a board
+// downgraded to older firmware still finds a list it can read. Older firmware
+// never sees a v4 list unless someone types its URL, and then rejects its header
+// and keeps the active list.
+constexpr const char* kOfficialLists[] = {"blocklist.bin", "blocklist-light.bin", "blocklist-aggressive.bin",
+                                          "blocklist-extended.bin"};
+constexpr const char* kOfficialRelease = "/releases/download/blocklist/";
+
+// Writes the fuse-filter twin of an official list URL; false for any other URL.
+bool fuseVariant(const char* url, char* out, size_t cap)
+{
+    const char* name = strrchr(url, '/');
+    if (!name || !strstr(url, kOfficialRelease)) return false;
+    name++;
+    for (const char* list : kOfficialLists) {
+        if (strcmp(name, list) != 0) continue;
+        const int n = snprintf(out, cap, "%.*s-v4.bin", static_cast<int>(strlen(url) - 4), url);
+        return n > 0 && static_cast<size_t>(n) < cap;
+    }
+    return false;
+}
+
 bool isRedirect(int status)
 {
     return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
@@ -82,7 +107,9 @@ esp_err_t Updater::start()
 
 void Updater::taskEntry(void* arg)
 {
-    static_cast<Updater*>(arg)->run();
+    auto* self = static_cast<Updater*>(arg);
+    self->store_.finishStartup();  // low priority, after Wi-Fi and DNS are up
+    self->run();
 }
 
 void Updater::fetchNow()
@@ -239,6 +266,29 @@ bool Updater::firmwareDue()
 
 // ------------------------------------------------------------------ jobs
 
+Updater::ListFetch Updater::downloadList(const char* url, char* why, size_t whyLen, uint32_t& bytes)
+{
+    bytes = 0;
+    snprintf(why, whyLen, "ok");
+    esp_err_t err = store_.beginWrite();
+    if (err != ESP_OK) {
+        snprintf(why, whyLen, "another blocklist update is running");
+        return ListFetch::Failed;
+    }
+    err = httpGet(
+        url, [](void* ctx, const uint8_t* d, size_t n) { return static_cast<BlocklistStore*>(ctx)->write(d, n); },
+        &store_, why, whyLen, bytes);
+    if (err == ESP_OK) return store_.finishWrite(why, whyLen) == ESP_OK ? ListFetch::Updated : ListFetch::Failed;
+    const bool same = store_.unchanged();
+    const bool tooBig = store_.tooBig();
+    if (tooBig)
+        snprintf(why, whyLen, "list too big for this board: %lu domains, room for %lu",
+                 static_cast<unsigned long>(store_.tooBigCount()),
+                 static_cast<unsigned long>(store_.info().capacity));
+    store_.abortWrite();
+    return same ? ListFetch::Unchanged : tooBig ? ListFetch::TooBig : ListFetch::Failed;
+}
+
 void Updater::fetchBlocklist()
 {
     char url[sizeof(Settings::blocklistUrl)];
@@ -251,44 +301,27 @@ void Updater::fetchBlocklist()
         LockGuard g(mu_);
         status_.running = true;
     }
-    char why[96] = "ok";
+    char why[96];
     uint32_t bytes = 0;
-    bool tooBig = false;
-    esp_err_t err = store_.beginWrite();
-    if (err != ESP_OK) {
-        snprintf(why, sizeof(why), "another blocklist update is running");
-    } else {
-        err = httpGet(
-            url,
-            [](void* ctx, const uint8_t* d, size_t n) { return static_cast<BlocklistStore*>(ctx)->write(d, n); },
-            &store_, why, sizeof(why), bytes);
-        if (err == ESP_OK) {
-            err = store_.finishWrite(why, sizeof(why));
-        } else {
-            const bool same = store_.unchanged();
-            tooBig = store_.tooBig();
-            if (tooBig)
-                snprintf(why, sizeof(why), "list too big for this board: %lu domains, room for %lu",
-                         static_cast<unsigned long>(store_.tooBigCount()),
-                         static_cast<unsigned long>(store_.info().capacity));
-            store_.abortWrite();
-            if (same) {  // stopped after the header: nothing to do
-                {
-                    LockGuard g(mu_);
-                    status_.running = false;
-                }
-                report(true, "already up to date", bytes);
-                ESP_LOGI(TAG, "blocklist: unchanged, kept the active list");
-                return;
-            }
-        }
+    char fuse[sizeof(url) + 8];
+    const bool twin = fuseVariant(url, fuse, sizeof(fuse));
+    ListFetch r = downloadList(twin ? fuse : url, why, sizeof(why), bytes);
+    if (twin && r == ListFetch::Failed) {  // not published (a fork's older CI?) or broken: the v2 file
+        ESP_LOGW(TAG, "blocklist: %s: %s; trying %s", strrchr(fuse, '/') + 1, why, strrchr(url, '/') + 1);
+        r = downloadList(url, why, sizeof(why), bytes);
     }
     {
         LockGuard g(mu_);
         status_.running = false;
     }
+    if (r == ListFetch::Unchanged) {  // stopped after the header: nothing to do
+        report(true, "already up to date", bytes);
+        ESP_LOGI(TAG, "blocklist: unchanged, kept the active list");
+        return;
+    }
+    const esp_err_t err = r == ListFetch::Updated ? ESP_OK : ESP_FAIL;
     char smaller[sizeof(Settings::blocklistUrl)];
-    if (err != ESP_OK && tooBig && smallerList(url, smaller, sizeof(smaller))) {
+    if (r == ListFetch::TooBig && smallerList(url, smaller, sizeof(smaller))) {
         // Nothing was written; the active list keeps filtering. Switch for good
         // and fetch the smaller list right away.
         cfg_.modify([&](Settings& s) {
