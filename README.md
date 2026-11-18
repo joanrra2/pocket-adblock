@@ -50,7 +50,7 @@ PSRAM, and takes advantage of PSRAM when the board has it.
 | ESP32-S3 (quad flash, with or without PSRAM) | builds in CI | PSRAM used when present |
 | ESP32-C3 (SuperMini etc., 4 MB, no PSRAM) | builds in CI | the original $2 target |
 | ESP32 (classic), ESP32-C6 (4 MB) | builds in CI | |
-| ESP32-C6 with 8 MB flash (DevKitC-1 N8, WROOM-1 N8) | builds in CI | use the `esp32c6-8mb` profile, 8 MB layout (~830k domains, fits the Aggressive list) |
+| ESP32-C6 with 8 MB flash (DevKitC-1 N8, WROOM-1 N8) | builds in CI | use the `esp32c6-8mb` profile, 8 MB layout (~830k domains, fits the Aggressive and Strict lists) |
 
 Power it from a stable USB supply. Many routers have a spare USB port that is enough.
 
@@ -235,9 +235,10 @@ list wins over every blocklist.
 **Which list.** *Settings → Updates → Blocklist* picks one of the daily lists this
 project publishes: **Light** (StevenBlack, ~40k domains, fewest false positives),
 **Normal** (default, + HaGeZi Light, ~120k), **Aggressive** (+ HaGeZi Pro, ~255k,
-8 MB boards and up) or **Extended** (Aggressive + HaGeZi Threat Intelligence
-Feeds, ~1.63M, 16 MB boards: the extra 1.4M domains are malware, phishing and
-scam sites, so it breaks no more sites than Aggressive). Counts are after dropping
+8 MB boards and up), **Strict** (Aggressive + HaGeZi Threat Intelligence Feeds
+medium, ~600k, 8 MB boards and up) or **Extended** (Aggressive + the full Threat
+Intelligence Feeds, ~2.1M, 16 MB boards). The threat feeds are malware, phishing
+and scam sites, so Strict and Extended break no more sites than Aggressive. Counts are after dropping
 subdomains of listed names. *Custom URL* takes any
 SHBL or raw list.
 
@@ -246,12 +247,18 @@ SHBL or raw list.
 | Light | StevenBlack | ~40k | ~150 KB | 4 MB |
 | Normal (default) | + HaGeZi Light | ~120k | ~430 KB | 4 MB |
 | Aggressive | StevenBlack + HaGeZi Pro | ~255k | ~850 KB | 8 MB |
-| Extended | Aggressive + HaGeZi TIF | ~1.63M | ~4.6 MB | 16 MB |
+| Strict | Aggressive + HaGeZi TIF medium | ~600k | ~1.8 MB | 8 MB |
+| Extended | Aggressive + HaGeZi TIF | ~2.1M | ~5.7 MB (v4), ~6.5 MB (v2) | 16 MB |
+
+The full threat feeds change by hundreds of thousands of domains from day to day.
+If one day's Extended file does not fit the 16 MB slot, the daily job publishes it
+with the Strict list inside (each format on its own: the v2 file is the bigger
+one), and the full list comes back on the first day it fits again.
 
 Lists that don't fit are greyed out in the picker. If one ends up configured
 anyway (a backup from a bigger board, a URL typed by hand), the device reads its
 header, writes nothing, keeps filtering with the list it has and switches itself
-to the next smaller list (Extended → Aggressive → Normal). Custom lists that
+to the next smaller list (Extended → Strict → Aggressive → Normal). Custom lists that
 don't fit are refused the same way, with the reason shown under *Updates*.
 
 The lists are derived from [StevenBlack/hosts](https://github.com/StevenBlack/hosts)
@@ -267,9 +274,9 @@ No reflashing: lists travel separately from the firmware, over the air.
 
 1. **Daily build.** Every day at 04:41 UTC a GitHub Actions job
    (`.github/workflows/blocklist.yml`) downloads the sources (StevenBlack hosts,
-   HaGeZi Light / Pro / Threat Intelligence Feeds), builds the four lists
-   (`blocklist-light.bin`, `blocklist.bin`, `blocklist-aggressive.bin`,
-   `blocklist-extended.bin`) in both formats (`blocklist.bin` is v2, `blocklist-v4.bin`
+   HaGeZi Light / Pro / Threat Intelligence Feeds and their medium cut), builds the
+   five lists (`blocklist-light.bin`, `blocklist.bin`, `blocklist-aggressive.bin`,
+   `blocklist-strict.bin`, `blocklist-extended.bin`) in both formats (`blocklist.bin` is v2, `blocklist-v4.bin`
    the fuse filter, and so on), signs them when the signing key is configured, checks
    each one fits the smallest board it is offered to and has not shrunk, and replaces the files on the
    [`blocklist` release](https://github.com/joanrra2/pocket-adblock/releases/tag/blocklist).

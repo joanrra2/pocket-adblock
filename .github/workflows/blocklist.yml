@@ -43,6 +43,7 @@ jobs:
           get light.txt "$HZ/light-onlydomains.txt"
           get pro.txt "$HZ/pro-onlydomains.txt"
           get tif.txt "$HZ/tif-onlydomains.txt" || echo "::warning::HaGeZi TIF not downloaded"
+          get tifm.txt "$HZ/tif.medium-onlydomains.txt" || echo "::warning::HaGeZi TIF medium not downloaded"
           # build NAME LOG SOURCES...: NAME.bin (v2, every firmware) and NAME-v4.bin (fuse filter)
           build() {
             name=$1; log=$2; shift 2
@@ -55,9 +56,13 @@ jobs:
           build blocklist-light build-light.log src/sb.txt
           # Aggressive: StevenBlack + HaGeZi Pro, 8 MB boards and up (~255k domains).
           build blocklist-aggressive build-aggressive.log src/sb.txt src/pro.txt
-          # Extended: Aggressive + HaGeZi Threat Intelligence Feeds (malware, phishing,
-          # scams), 16 MB boards (~1.63M). Optional: if it fails, yesterday's files stay
-          # published and the other lists still go out.
+          # Strict: Aggressive + HaGeZi Threat Intelligence Feeds medium (the most
+          # active malware and phishing domains), 8 MB boards and up (~600k).
+          # Extended: Aggressive + the full Threat Intelligence Feeds, 16 MB boards
+          # (~2.1M). Both optional: if one fails, yesterday's files stay published
+          # and the other lists still go out.
+          { [ -f src/tifm.txt ] && build blocklist-strict build-strict.log src/sb.txt src/pro.txt src/tifm.txt; } ||
+            { rm -f blocklist-strict.bin blocklist-strict-v4.bin; echo "::warning::Strict list not built"; }
           { [ -f src/tif.txt ] && build blocklist-extended build-extended.log src/sb.txt src/pro.txt src/tif.txt; } ||
             { rm -f blocklist-extended.bin blocklist-extended-v4.bin; echo "::warning::Extended list not built"; }
           rm -f /tmp/bl.pem
@@ -70,20 +75,42 @@ jobs:
             echo "$1: $size bytes, $n domains (max $3 bytes, min $4 domains)"
             [ "$size" -le "$3" ] && [ "$n" -ge "$4" ]
           }
-          # Each list in both formats; the v2 file must stay v2 (byte 4 of the header).
+          # One format of a list; the v2 file must stay v2 (byte 4 of the header).
+          one() {  # FILE LOG FORMAT MAX MIN
+            [ "$(od -An -tu1 -j4 -N1 "$1" | tr -d ' ')" = "$3" ] && check "$1" "$2" "$4" "$5"
+          }
           both() {
-            [ "$(od -An -tu1 -j4 -N1 "$1.bin" | tr -d ' ')" = 2 ] &&
-            [ "$(od -An -tu1 -j4 -N1 "$1-v4.bin" | tr -d ' ')" = 4 ] &&
-            check "$1.bin" "$2" "$3" "$4" && check "$1-v4.bin" "${2%.log}-v4.log" "$3" "$4"
+            one "$1.bin" "$2" 2 "$3" "$4" && one "$1-v4.bin" "${2%.log}-v4.log" 4 "$3" "$4"
           }
           both blocklist            build.log            $((0xB0000))  50000    # 4 MB layout slot
           both blocklist-light      build-light.log      $((0xB0000))  30000    # 4 MB layout slot
           both blocklist-aggressive build-aggressive.log $((0x270000)) 150000   # 8 MB layout slot
-          if [ -f blocklist-extended.bin ] && \
-             ! both blocklist-extended build-extended.log $((0x670000)) 800000; then  # 16 MB layout slot
-            rm -f blocklist-extended.bin blocklist-extended-v4.bin
-            echo "::warning::Extended list out of bounds: not published today"
+          if [ -f blocklist-strict.bin ] && \
+             ! both blocklist-strict build-strict.log $((0x270000)) 300000; then   # 8 MB layout slot
+            rm -f blocklist-strict.bin blocklist-strict-v4.bin
+            echo "::warning::Strict list out of bounds: not published today"
           fi
+          # Extended, each format on its own (16 MB layout slot). The threat feeds
+          # grow and shrink by hundreds of thousands of domains, and the v2 file is
+          # the bigger one: a file that no longer fits steps down to Strict, under
+          # the Extended name, so boards keep a list close to the one they chose
+          # (and get the full one back when it fits again) instead of stepping
+          # themselves down to Aggressive for good.
+          : > extended-steps.txt
+          for fmt in 2 4; do
+            [ -f blocklist-extended.bin ] || break   # not built: yesterday's files stay
+            if [ "$fmt" = 2 ]; then f=blocklist-extended.bin s=blocklist-strict.bin log=build-extended.log
+            else f=blocklist-extended-v4.bin s=blocklist-strict-v4.bin log=build-extended-v4.log; fi
+            one "$f" "$log" "$fmt" $((0x670000)) 800000 && continue
+            if [ -f "$s" ]; then
+              cp "$s" "$f"
+              echo "v$fmt" >> extended-steps.txt
+              echo "::warning::Extended v$fmt does not fit the 16 MB slot: published as Strict today"
+            else
+              rm -f blocklist-extended.bin blocklist-extended-v4.bin
+              echo "::warning::Extended list out of bounds and no Strict list: not published today"
+            fi
+          done
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -92,9 +119,17 @@ jobs:
           files="blocklist.bin blocklist-light.bin blocklist-aggressive.bin"
           files="$files blocklist-v4.bin blocklist-light-v4.bin blocklist-aggressive-v4.bin"
           ext=""
+          if [ -f blocklist-strict.bin ]; then
+            files="$files blocklist-strict.bin blocklist-strict-v4.bin"
+            ext=" · Strict (8 MB boards): $(n build-strict.log)"
+          fi
           if [ -f blocklist-extended.bin ]; then
             files="$files blocklist-extended.bin blocklist-extended-v4.bin"
-            ext=" · Extended (16 MB boards): $(n build-extended.log)"
+            ext="$ext · Extended (16 MB boards): $(n build-extended.log)"
+            case "$(paste -sd' ' extended-steps.txt)" in
+              "v2 v4") ext="$ext (too big today: both files hold the Strict list)" ;;
+              v2|v4) ext="$ext (too big today: the $(cat extended-steps.txt) file holds the Strict list)" ;;
+            esac
           fi
           notes="Auto-built $(date -u +%F). Normal (blocklist.bin): $(n build.log) domains · Light: $(n build-light.log) · Aggressive (8 MB boards): $(n build-aggressive.log)$ext
 
