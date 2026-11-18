@@ -5,7 +5,8 @@
 #   python tools/keys.py firmware-key keys/firmware_signing.pem   (keep it secret!)
 #   idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/<board>.defaults;boards/signed-firmware.defaults" build
 #
-# ESP32-S3/C3 sign with RSA-3072 (secure boot v2 scheme).
+# ESP32-S3/C3/C6 sign with RSA-3072 (secure boot v2 scheme). Not for the classic
+# ESP32 below chip revision 3, which would need an ECDSA key instead.
 CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
 CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
 CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y

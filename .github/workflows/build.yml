@@ -71,7 +71,10 @@ jobs:
             [ -n "$BL_PUBKEY" ] && echo "CONFIG_SINKHOLE_BLOCKLIST_PUBKEY=\"$BL_PUBKEY\""
           } > ci.defaults
           extra=";ci.defaults"
-          if [ -n "$FW_KEY" ]; then          # signed builds when the secret exists
+          # Signed builds when the secret exists. Not the classic ESP32: RSA signing
+          # needs chip revision 3 there, and older chips would fall back to an ECDSA
+          # scheme this RSA key cannot sign for.
+          if [ -n "$FW_KEY" ] && [ "${{ matrix.target }}" != esp32 ]; then
             mkdir -p keys && printf '%s\n' "$FW_KEY" > keys/firmware_signing.pem
             extra="$extra;boards/signed-firmware.defaults"
           fi
