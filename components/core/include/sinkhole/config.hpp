@@ -26,7 +26,9 @@ struct Settings {
     char apPass[65];
     bool apAlways;    // false (default): AP only while no uplink is configured or connected
 
-    // Web admin (HTTP Basic auth).
+    // Web admin (HTTP Basic auth). From v15 the password lives in adminHash;
+    // adminPass then only holds the default password (still unchanged) or,
+    // for a few seconds after an upgrade, the old plain one (see v15 below).
     char adminUser[32];
     char adminPass[64];
 
@@ -89,6 +91,15 @@ struct Settings {
     bool dhcpServer;                // hand out addresses on the home network (needs static IP)
     uint32_t dhcpFirst, dhcpLast;   // pool, network order
     uint16_t dhcpLeaseMinutes;
+
+    // ---- v15 ----
+    // Admin password as PBKDF2-HMAC-SHA256. adminIter 0 = not hashed: adminPass
+    // holds the password (the built-in default, or settings from older firmware).
+    // Once hashed, adminPass is overwritten with random bytes as soon as the
+    // firmware is confirmed (kept until then, so a rollback can still log in).
+    uint8_t adminHash[32];  // NOSONAR fixed blob layout stored in NVS
+    uint8_t adminSalt[16];  // NOSONAR fixed blob layout stored in NVS
+    uint32_t adminIter;
 };
 
 enum TxPower : uint8_t { TxAuto = 0, TxFull = 1, TxReduced = 2 };
@@ -97,7 +108,7 @@ class Config {
 public:
     // Bump when fields are appended to Settings, and add the previous version's
     // byte length to Config::validBytes() so stored settings migrate.
-    static constexpr uint16_t kVersion = 14;
+    static constexpr uint16_t kVersion = 15;
 
     esp_err_t load();  // defaults if missing / older version
     Settings get();    // copy, thread-safe (~1 KB: avoid on small stacks)
@@ -121,7 +132,19 @@ public:
 
     bool usingDefaultAdminPassword();
 
+    // Admin credentials. checkAdmin is slow on purpose (PBKDF2, ~0.1-0.3 s):
+    // callers cache a successful check.
+    bool checkAdmin(const char* user, const char* pass);
+    esp_err_t setAdmin(const char* user, const char* pass);
+    // After a confirmed firmware: drop the plain copy an upgrade kept.
+    void scrubLegacyAdminPassword();
+
     static void applyDefaults(Settings& s);
+    // Stored blob (any known version) -> current Settings. False if unusable.
+    // Older blobs get their plain admin password hashed (and kept, see v15).
+    static bool upgrade(const uint8_t* raw, size_t len, Settings& out);
+    // Hash pass into s (new random salt).
+    static esp_err_t hashAdmin(Settings& s, const char* pass);
 
 private:
     esp_err_t saveLocked();

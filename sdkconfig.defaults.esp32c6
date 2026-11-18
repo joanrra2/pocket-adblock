@@ -1,0 +1,5 @@
+# ESP32-C6: its Wi-Fi 6 libraries make the image ~170 KB bigger than the C3's,
+# and a signed image must stay under 0x130000 bytes to fit the 4 MB layout's
+# 1.25 MB app slot (signing pads to 64 KB and adds a 4 KB signature block).
+# Error names (ESP_ERR_...) are shown as numbers instead: ~8 KB.
+CONFIG_ESP_ERR_TO_NAME_LOOKUP=n

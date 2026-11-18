@@ -1,5 +1,6 @@
 #include "sinkhole/web_server.hpp"
 
+#include <array>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -10,10 +11,14 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "lwip/inet.h"
+#include "lwip/sockets.h"
+#include "psa/crypto.h"
 #include "sinkhole/json_writer.hpp"
 #include "sinkhole/memory.hpp"
 #include "sinkhole/perf.hpp"
+#include "sinkhole/secret.hpp"
 #include "sinkhole/text.hpp"
 
 extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
@@ -29,31 +34,48 @@ constexpr size_t kFormMax = 768;
 
 void noFree(void*) {}
 
-size_t base64Encode(const uint8_t* in, size_t len, char* out, size_t outLen)
+constexpr size_t kIpText = 46;
+
+void peerIp(httpd_req_t* req, std::array<char, kIpText>& out)
 {
-    static const char tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    size_t o = 0;
-    for (size_t i = 0; i < len; i += 3) {
-        uint32_t v = static_cast<uint32_t>(in[i]) << 16;
-        if (i + 1 < len) v |= static_cast<uint32_t>(in[i + 1]) << 8;
-        if (i + 2 < len) v |= in[i + 2];
-        if (o + 4 >= outLen) break;
-        out[o++] = tbl[(v >> 18) & 63];
-        out[o++] = tbl[(v >> 12) & 63];
-        out[o++] = i + 1 < len ? tbl[(v >> 6) & 63] : '=';
-        out[o++] = i + 2 < len ? tbl[v & 63] : '=';
+    out[0] = '\0';
+    sockaddr_in6 sa{};
+    socklen_t len = sizeof(sa);
+    if (getpeername(httpd_req_to_sockfd(req), reinterpret_cast<sockaddr*>(&sa), &len) != 0) return;
+    if (sa.sin6_family != AF_INET6) {
+        inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in*>(&sa)->sin_addr, out.data(), out.size());
+        return;
     }
-    out[o] = '\0';
-    return o;
+    // IPv4 clients show up as ::ffff:a.b.c.d on a dual-stack socket.
+    const auto* ip = reinterpret_cast<const uint8_t*>(&sa.sin6_addr);
+    static constexpr std::array<uint8_t, 12> kMapped = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
+    if (memcmp(ip, kMapped.data(), kMapped.size()) == 0)
+        snprintf(out.data(), out.size(), "%u.%u.%u.%u", ip[12], ip[13], ip[14], ip[15]);
+    else
+        inet_ntop(AF_INET6, &sa.sin6_addr, out.data(), out.size());
 }
 
-// Constant-time compare for credentials.
-bool safeEquals(const char* a, const char* b)
+bool endsWith(const char* s, size_t n, const char* suffix)
 {
-    size_t la = strlen(a), lb = strlen(b);
-    uint8_t diff = static_cast<uint8_t>(la != lb);
-    for (size_t i = 0; i < la; i++) diff |= static_cast<uint8_t>(a[i] ^ b[i % (lb ? lb : 1)]);
-    return diff == 0;
+    const size_t k = strnlen(suffix, 16);
+    return n > k && strncmp(s + n - k, suffix, k) == 0;
+}
+
+// Names a DNS-rebinding page can't point at us: IP literals, single-label names
+// and local suffixes, which only the LAN's own DNS (or mDNS) answers.
+bool localHostName(char* host, size_t cap)
+{
+    if (!host[0] || host[0] == '[') return true;  // no Host header (not a browser), or an IPv6 literal
+    if (char* colon = strchr(host, ':')) *colon = '\0';  // port
+    size_t n = strnlen(host, cap);
+    while (n && host[n - 1] == '.') host[--n] = '\0';
+    for (size_t i = 0; i < n; i++) host[i] = static_cast<char>(tolower(static_cast<unsigned char>(host[i])));
+    in_addr a{};
+    if (inet_aton(host, &a) || !memchr(host, '.', n)) return true;
+    static constexpr const char* kLocal[] = {".local", ".lan", ".home", ".home.arpa", ".internal", ".localdomain"};
+    for (const char* suffix : kLocal)
+        if (endsWith(host, n, suffix)) return true;
+    return false;
 }
 
 const char* upstreamModeName(UpstreamMode m)
@@ -154,23 +176,115 @@ esp_err_t WebServer::dispatch(httpd_req_t* req)
     return (self->*(route->handler))(req);
 }
 
+bool WebServer::hostAllowed(httpd_req_t* req)
+{
+    if (!d_.cfg.usingDefaultAdminPassword()) return true;
+    std::array<char, 96> host{};
+    httpd_req_get_hdr_value_str(req, "Host", host.data(), host.size());
+    return localHostName(host.data(), host.size());
+}
+
+void WebServer::forgetLogins()
+{
+    goodValid_ = false;
+    for (Digest& d : bad_) d.fill(0);
+    failures_ = 0;
+    lockedUntilUs_ = 0;
+}
+
+esp_err_t WebServer::challenge(httpd_req_t* req)
+{
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"sinkhole\", charset=\"UTF-8\"");
+    return httpd_resp_sendstr(req, "authentication required");
+}
+
+// "Basic base64(user:pass)" checked against the stored hash.
+bool WebServer::credentialsOk(const char* header)
+{
+    static std::array<char, 160> cred;  // httpd task only
+    const char* b64 = header + 6;
+    const int n = base64Decode(b64, strnlen(b64, 200), reinterpret_cast<uint8_t*>(cred.data()), cred.size() - 1);
+    bool ok = false;
+    if (n > 0) {
+        cred[static_cast<size_t>(n)] = '\0';
+        if (char* colon = static_cast<char*>(memchr(cred.data(), ':', static_cast<size_t>(n)))) {
+            *colon = '\0';
+            ok = d_.cfg.checkAdmin(cred.data(), colon + 1);
+        }
+    }
+    secureWipe(cred.data(), cred.size());
+    return ok;
+}
+
+// Seconds left before another guess is checked (0 = go ahead).
+int WebServer::guessWaitSeconds() const
+{
+    const int64_t now = esp_timer_get_time();
+    return now < lockedUntilUs_ ? static_cast<int>((lockedUntilUs_ - now) / 1000000 + 1) : 0;
+}
+
+void WebServer::noteWrongPassword(httpd_req_t* req, const Digest& digest)
+{
+    bad_[badNext_] = digest;
+    badNext_ = (badNext_ + 1) % bad_.size();
+    failures_++;
+    std::array<char, kIpText> ip;
+    peerIp(req, ip);
+    if (failures_ < static_cast<uint32_t>(kFreeGuesses)) {
+        ESP_LOGW(TAG, "wrong admin password from %s", ip.data());
+        return;
+    }
+    // 5 s, 10 s, 20 s ... up to 10 minutes per further guess.
+    const uint32_t steps = failures_ - kFreeGuesses < 7 ? failures_ - kFreeGuesses : 7;
+    lockedUntilUs_ = esp_timer_get_time() + (5LL << steps) * 1000000;
+    ESP_LOGW(TAG, "wrong admin password from %s (%lu in a row): next try in %d s", ip.data(),
+             static_cast<unsigned long>(failures_), 5 << steps);
+}
+
 bool WebServer::authorized(httpd_req_t* req, bool isPost)
 {
-    const Settings s = d_.cfg.get();
-
-    char cred[sizeof(s.adminUser) + sizeof(s.adminPass) + 1];
-    snprintf(cred, sizeof(cred), "%s:%s", s.adminUser, s.adminPass);
-    char expected[200] = "Basic ";
-    base64Encode(reinterpret_cast<const uint8_t*>(cred), strlen(cred), expected + 6,
-                 sizeof(expected) - 6);
-
-    char got[200] = "";
-    if (httpd_req_get_hdr_value_str(req, "Authorization", got, sizeof(got)) != ESP_OK ||
-        !safeEquals(got, expected)) {
-        httpd_resp_set_status(req, "401 Unauthorized");
-        httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"sinkhole\", charset=\"UTF-8\"");
-        httpd_resp_sendstr(req, "authentication required");
+    if (!hostAllowed(req)) {
+        sendError(req, "403 Forbidden",
+                  "open this page by the device's IP address or local name, or change the default password");
         return false;
+    }
+    static std::array<char, 200> got;  // httpd task only
+    got[0] = '\0';
+    if (httpd_req_get_hdr_value_str(req, "Authorization", got.data(), got.size()) != ESP_OK ||
+        strncmp(got.data(), "Basic ", 6) != 0) {
+        challenge(req);
+        return false;
+    }
+    // Browsers send the header with every request: only a new one pays for PBKDF2.
+    Digest digest{};
+    size_t dlen = 0;
+    const bool hashed = psa_hash_compute(PSA_ALG_SHA_256, reinterpret_cast<const uint8_t*>(got.data()),
+                                         strnlen(got.data(), got.size()), digest.data(), digest.size(),
+                                         &dlen) == PSA_SUCCESS;
+    const bool known = hashed && goodValid_ && sameBytes(digest.data(), good_.data(), digest.size());
+    if (!known) {
+        bool retried = !hashed;
+        for (const Digest& b : bad_) retried |= sameBytes(digest.data(), b.data(), digest.size());
+        if (retried) {  // the same wrong password again (a page polling): not a new guess
+            challenge(req);
+            return false;
+        }
+        if (const int wait = guessWaitSeconds()) {
+            std::array<char, 12> after;
+            snprintf(after.data(), after.size(), "%d", wait);
+            httpd_resp_set_hdr(req, "Retry-After", after.data());
+            sendError(req, "429 Too Many Requests", "too many wrong passwords: wait and try again");
+            return false;
+        }
+        if (!credentialsOk(got.data())) {
+            noteWrongPassword(req, digest);
+            challenge(req);
+            return false;
+        }
+        good_ = digest;
+        goodValid_ = true;
+        failures_ = 0;
     }
     if (isPost) {
         char csrf[16] = "";
@@ -574,6 +688,9 @@ void clearSecrets(Settings& s)
     memset(s.apPass, 0, sizeof(s.apPass));
     memset(s.adminPass, 0, sizeof(s.adminPass));
     memset(s.mqttPass, 0, sizeof(s.mqttPass));
+    memset(s.adminHash, 0, sizeof(s.adminHash));
+    memset(s.adminSalt, 0, sizeof(s.adminSalt));
+    s.adminIter = 0;
 }
 }  // namespace
 
@@ -622,6 +739,35 @@ esp_err_t WebServer::getBackup(httpd_req_t* req)
     }
     return httpd_resp_sendstr_chunk(req, nullptr);
 }
+
+namespace {
+// A backup's settings, brought up to this firmware's version (an older file's
+// admin password gets hashed); passwords missing from the file keep the
+// device's current ones. Replaces data with a full Settings blob.
+const char* upgradeBackupSettings(uint8_t*& data, int& len, Config& cfg)
+{
+    static Settings in, cur;  // httpd task only
+    if (len < 64 || !Config::upgrade(data, static_cast<size_t>(len), in)) return "the settings section is not valid";
+    cur = cfg.get();
+    if (!in.staPass[0]) memcpy(in.staPass, cur.staPass, sizeof(in.staPass));
+    if (!in.apPass[0]) memcpy(in.apPass, cur.apPass, sizeof(in.apPass));
+    if (!in.mqttPass[0]) memcpy(in.mqttPass, cur.mqttPass, sizeof(in.mqttPass));
+    if (in.adminIter == 0 && !in.adminPass[0]) {  // no admin password in the file
+        memcpy(in.adminPass, cur.adminPass, sizeof(in.adminPass));
+        memcpy(in.adminHash, cur.adminHash, sizeof(in.adminHash));
+        memcpy(in.adminSalt, cur.adminSalt, sizeof(in.adminSalt));
+        in.adminIter = cur.adminIter;
+    }
+    auto* full = static_cast<uint8_t*>(malloc(sizeof(Settings)));
+    if (!full) return "out of memory";
+    memcpy(full, &in, sizeof(Settings));
+    secureWipe(&cur, sizeof(cur));
+    free(data);
+    data = full;
+    len = sizeof(Settings);
+    return nullptr;
+}
+}  // namespace
 
 esp_err_t WebServer::postRestore(httpd_req_t* req)
 {
@@ -679,26 +825,8 @@ esp_err_t WebServer::postRestore(httpd_req_t* req)
     }
     free(body);
 
-    for (size_t i = 0; i < count && !why; i++) {
-        if (strcmp(items[i].key, "settings") != 0) continue;
-        // Settings: needs a version this firmware can migrate; empty passwords
-        // in the file keep the device's current ones.
-        uint16_t version;
-        memcpy(&version, items[i].data, sizeof(version));
-        if (items[i].len < 64 || version < 2 || version > 999) {
-            why = "the settings section is not valid";
-            break;
-        }
-        const Settings cur = d_.cfg.get();
-        auto keep = [&](size_t off, const char* curField, size_t size) {
-            if (static_cast<size_t>(items[i].len) >= off + size && items[i].data[off] == 0)
-                memcpy(items[i].data + off, curField, size);
-        };
-        keep(offsetof(Settings, staPass), cur.staPass, sizeof(cur.staPass));
-        keep(offsetof(Settings, apPass), cur.apPass, sizeof(cur.apPass));
-        keep(offsetof(Settings, adminPass), cur.adminPass, sizeof(cur.adminPass));
-        keep(offsetof(Settings, mqttPass), cur.mqttPass, sizeof(cur.mqttPass));
-    }
+    for (size_t i = 0; i < count && !why; i++)
+        if (strcmp(items[i].key, "settings") == 0) why = upgradeBackupSettings(items[i].data, items[i].len, d_.cfg);
     if (!why && count == 0) why = "the file contains nothing to restore";
     for (size_t i = 0; i < count && !why; i++)
         if (nvs::saveBlob(items[i].key, items[i].data, static_cast<size_t>(items[i].len)) != ESP_OK)
@@ -894,10 +1022,10 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         field(form, "user", a, 32);
         field(form, "pass", b, 64);
         if (!a[0] || strlen(b) < 8) return sendError(req, "400 Bad Request", "user and an 8+ character password are required");
-        d_.cfg.modify([&](Settings& s) {
-            copyStr(s.adminUser, a);
-            copyStr(s.adminPass, b);
-        });
+        const esp_err_t err = d_.cfg.setAdmin(a, b);
+        secureWipe(b, sizeof(b));
+        if (err != ESP_OK) return sendError(req, "500 Internal Server Error", "could not save the new password");
+        forgetLogins();
         return sendOk(req, "credentials changed; log in again");
     }
     if (strcmp(section, "dns") == 0) {

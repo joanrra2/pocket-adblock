@@ -5,7 +5,14 @@
 //   - every /api/* call needs HTTP Basic auth (admin user/password)
 //   - every POST also needs "X-Requested-With: sinkhole", which a cross-site
 //     <img>/<form> cannot add, so cached Basic credentials can't be CSRF'd.
+//   - the password is checked against a PBKDF2 hash; a good Authorization
+//     header is remembered (as a SHA-256) so only new ones pay for PBKDF2
+//   - wrong passwords: after kFreeGuesses different ones, the device waits
+//     longer and longer (429 + Retry-After) before checking another one
+//   - while the default password is set, the Host header must be an IP address
+//     or a local name (DNS rebinding: a web page can't reach the API)
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -64,6 +71,13 @@ private:
     static esp_err_t dispatch(httpd_req_t* req);
     static esp_err_t notFound(httpd_req_t* req, httpd_err_code_t err);
     bool authorized(httpd_req_t* req, bool isPost);
+    bool hostAllowed(httpd_req_t* req);
+    void forgetLogins();  // after the credentials changed
+    using Digest = std::array<uint8_t, 32>;
+    static esp_err_t challenge(httpd_req_t* req);
+    bool credentialsOk(const char* header);
+    int guessWaitSeconds() const;
+    void noteWrongPassword(httpd_req_t* req, const Digest& digest);
     int readForm(httpd_req_t* req, char* buf, size_t len);
     static bool field(const char* form, const char* key, char* out, size_t outLen);
     esp_err_t sendOk(httpd_req_t* req, const char* message = "ok");
@@ -102,6 +116,16 @@ private:
     WebDeps d_;
     httpd_handle_t server_ = nullptr;
     uint8_t chunk_[2048];  // upload buffer; the httpd task serves one request at a time
+
+    // Login state (httpd task only).
+    static constexpr int kFreeGuesses = 5;
+    static constexpr size_t kBadRemembered = 4;
+    Digest good_{};  // SHA-256 of the last accepted Authorization header
+    bool goodValid_ = false;
+    std::array<Digest, kBadRemembered> bad_{};  // recent wrong headers: retried, not counted again
+    size_t badNext_ = 0;
+    uint32_t failures_ = 0;  // different wrong passwords in a row
+    int64_t lockedUntilUs_ = 0;
 };
 
 }  // namespace sinkhole
