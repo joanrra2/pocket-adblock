@@ -117,6 +117,7 @@ const WebServer::Route WebServer::kRoutes[] = {
     {"/api/reboot", HTTP_POST, &WebServer::postReboot, true},
     {"/api/wol", HTTP_GET, &WebServer::getWol, true},
     {"/api/wol", HTTP_POST, &WebServer::postWol, true},
+    {"/api/restarts", HTTP_GET, &WebServer::getRestarts, true},
 #if CONFIG_SINKHOLE_PERF
     {"/api/perf", HTTP_GET, &WebServer::getPerf, true},
 #endif
@@ -360,6 +361,12 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
     j.str("edition", Updater::flavour());
     j.str("hostname", s.hostname);
     j.num("uptime", now);
+    j.num("time", BootLog::now());
+    {
+        BootLog::Record last{};
+        BootLog::list(&last, 1);
+        j.str("lastRestart", BootLog::why(last));
+    }
     j.num("freeHeap", static_cast<int64_t>(esp_get_free_heap_size()));
     j.num("minFreeHeap", static_cast<int64_t>(esp_get_minimum_free_heap_size()));
     j.boolean("defaultPassword", d_.cfg.usingDefaultAdminPassword());
@@ -833,7 +840,7 @@ esp_err_t WebServer::postRestore(httpd_req_t* req)
             why = "could not write the settings";
     for (size_t i = 0; i < count; i++) free(items[i].data);
     if (why) return sendError(req, "400 Bad Request", why);
-    FirmwareUpdater::restartIn(1500);  // every part reloads its data at boot
+    FirmwareUpdater::restartIn(1500, BootLog::Cause::Restore);  // every part reloads its data at boot
     return sendOk(req, "restored; restarting");
 }
 
@@ -1347,7 +1354,7 @@ esp_err_t WebServer::postFirmwareUpload(httpd_req_t* req)
                                                : "wrong chip or corrupt");
         return sendError(req, "422 Unprocessable Entity", msg);
     }
-    FirmwareUpdater::restartIn(1500);
+    FirmwareUpdater::restartIn(1500, BootLog::Cause::FirmwareUpload);
     return sendOk(req, "firmware accepted, rebooting");
 }
 
@@ -1370,8 +1377,28 @@ esp_err_t WebServer::postFirmwareInstall(httpd_req_t* req)
 
 esp_err_t WebServer::postReboot(httpd_req_t* req)
 {
-    FirmwareUpdater::restartIn(1000);
+    FirmwareUpdater::restartIn(1000, BootLog::Cause::WebRestart);
     return sendOk(req, "rebooting");
+}
+
+// Last restarts, newest first (the first one is this boot).
+esp_err_t WebServer::getRestarts(httpd_req_t* req)
+{
+    static std::array<BootLog::Record, BootLog::kRecords> recs;  // httpd task only
+    const size_t n = BootLog::list(recs.data(), recs.size());
+    JsonWriter j(req);
+    j.beginObject().num("time", BootLog::now()).beginArray("items");
+    for (size_t i = 0; i < n; i++) {
+        j.beginObject()
+            .num("at", recs[i].bootUnix)
+            .num("ranFor", recs[i].ranFor)
+            .str("why", BootLog::why(recs[i]))
+            .boolean("unexpected", BootLog::unexpected(recs[i]))
+            .str("version", recs[i].version)
+            .endObject();
+    }
+    j.endArray().endObject();
+    return j.finish();
 }
 
 esp_err_t WebServer::getWol(httpd_req_t* req)

@@ -8,6 +8,7 @@
 
 #include "esp_err.h"
 #include "esp_ota_ops.h"
+#include "sinkhole/boot_log.hpp"
 #include "sinkhole/blocklist_store.hpp"
 #include "sinkhole/config.hpp"
 #include "sinkhole/rtos.hpp"
@@ -23,7 +24,7 @@ public:
     void abort();
     bool active() const { return handle_ != 0; }
 
-    static void restartIn(uint32_t ms);
+    static void restartIn(uint32_t ms, BootLog::Cause cause);
     static const char* version();
     // Rollback support: a freshly flashed image boots in PENDING_VERIFY state.
     static bool pendingVerify();

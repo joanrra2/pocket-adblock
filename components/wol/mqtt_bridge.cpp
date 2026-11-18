@@ -151,6 +151,7 @@ void MqttBridge::announce()
             {"percent", "Blocked share", "%", "measurement", "mdi:percent"},
             {"domains", "Blocklist domains", "domains", "measurement", "mdi:format-list-bulleted"},
             {"clients", "Active clients", "clients", "measurement", "mdi:devices"},
+            {"uptime", "Uptime", "s", "measurement", "mdi:timer-outline"},
         };
         for (const Sensor& s : kSensors) {
             snprintf(topic, sizeof(topic), "%s/sensor/%s/%s/config", kHaPrefix, nodeId_, s.id);
@@ -161,6 +162,13 @@ void MqttBridge::announce()
                      s.name, nodeId_, s.id, prefix_, s.id, s.unit, s.stateClass, s.icon, dev);
             enqueue(topic, buf_, true);
         }
+        // Text sensor: why the device last restarted (crash, watchdog, update...).
+        snprintf(topic, sizeof(topic), "%s/sensor/%s/restart/config", kHaPrefix, nodeId_);
+        snprintf(buf_, sizeof(buf_),
+                 "{\"name\":\"Last restart\",\"uniq_id\":\"%s_restart\",\"stat_t\":\"%s/stats\","
+                 "\"val_tpl\":\"{{ value_json.restart }}\",\"ent_cat\":\"diagnostic\",\"icon\":\"mdi:restart\",%s}",
+                 nodeId_, prefix_, dev);
+        enqueue(topic, buf_, true);
     }
 
     // One Wake button per host (+ online sensor when it has an IP). Hosts that

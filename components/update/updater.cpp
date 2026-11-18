@@ -427,7 +427,7 @@ void Updater::installFirmware()
     if (err == ESP_OK) {
         copyStr(fwStatus_.message, "installed, restarting");
         ESP_LOGW(TAG, "firmware %s installed, restarting", fwStatus_.latest);
-        FirmwareUpdater::restartIn(2000);
+        FirmwareUpdater::restartIn(2000, BootLog::Cause::FirmwareInstall);
     } else {
         copyStr(fwStatus_.message, why);
         ESP_LOGE(TAG, "firmware install failed: %s", why);

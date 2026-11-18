@@ -24,6 +24,13 @@ menu "DNS Sinkhole"
         string "Default upstream DNS resolver (IPv4)"
         default "9.9.9.9"
 
+    config SINKHOLE_NTP_SERVER
+        string "NTP server for the clock"
+        default "pool.ntp.org"
+        help
+            Sets the clock once there is an uplink, so restarts and logs show the
+            date and time. Empty = no clock (times are shown as uptime only).
+
     config SINKHOLE_BLOCKLIST_URL
         string "Default blocklist URL"
         default "https://github.com/joanrra2/pocket-adblock/releases/download/blocklist/blocklist.bin"

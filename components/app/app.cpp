@@ -27,6 +27,7 @@ void App::start()
              psramAvailable() ? "yes" : "no");
 
     ESP_ERROR_CHECK(nvs::init());
+    BootLog::begin(FirmwareUpdater::version());
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
@@ -74,7 +75,10 @@ void App::onUplinkChange(void* ctx, bool connected)
     auto* self = static_cast<App*>(ctx);
     // Also starts the LAN DHCP server. It stays up while the link is down: a
     // Wi-Fi blip must not wipe its lease table.
-    if (connected) applyUpstream(ctx);
+    if (connected) {
+        applyUpstream(ctx);
+        BootLog::startTimeSync();
+    }
     self->updateCaptive();
 }
 
@@ -193,10 +197,15 @@ size_t App::hookStats(void* ctx, char* out, size_t cap)
     const uint32_t blocked = self->counters_.blocked, allowed = self->counters_.allowed;
     const uint64_t total = static_cast<uint64_t>(blocked) + allowed;
     const unsigned pct10 = total ? static_cast<unsigned>(blocked * 1000ULL / total) : 0;
-    const int n = snprintf(out, cap, "{\"blocked\":%u,\"allowed\":%u,\"percent\":%u.%u,\"domains\":%u,\"clients\":%u}",
+    BootLog::Record last{};
+    BootLog::list(&last, 1);
+    const int n = snprintf(out, cap,
+                           "{\"blocked\":%u,\"allowed\":%u,\"percent\":%u.%u,\"domains\":%u,\"clients\":%u,"
+                           "\"uptime\":%lu,\"restart\":\"%s\"}",
                            static_cast<unsigned>(blocked), static_cast<unsigned>(allowed), pct10 / 10, pct10 % 10,
                            static_cast<unsigned>(self->store_.info().count),
-                           static_cast<unsigned>(self->clients_.activeCount(3600)));
+                           static_cast<unsigned>(self->clients_.activeCount(3600)),
+                           static_cast<unsigned long>(uptimeSeconds()), BootLog::why(last));
     return n > 0 ? static_cast<size_t>(n) : 0;
 }
 
@@ -209,6 +218,7 @@ void App::startHistory()
     args.callback = [](void* arg) {
         auto* self = static_cast<App*>(arg);
         self->history_.sample(self->counters_.allowed, self->counters_.blocked);
+        BootLog::tick();  // a crash later still knows how long this boot ran
     };
     esp_timer_handle_t t = nullptr;
     if (esp_timer_create(&args, &t) == ESP_OK)

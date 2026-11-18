@@ -184,6 +184,7 @@ code{background:var(--s2);padding:1px 6px;border-radius:6px;font-size:12.5px}
     <div class="row mt"><button class="btn p" data-a="fetch">Download now</button></div>
     <label for="blf">Or upload a .bin built with tools/build_blocklist.py</label><div class="row"><input type="file" id="blf" accept=".bin"><button class="btn" data-a="upload" data-v="bl">Upload</button></div><div class="prog" id="blp"></div></div>
    <div class="card"><h2>Firmware</h2><dl class="kv" id="fwinfo"></dl>
+    <h2 class="mt">Restarts</h2><dl class="kv" id="boots"><dt>…</dt><dd></dd></dl>
     <label for="fwf">Upload a firmware image (pocket-adblock.bin)</label><div class="row"><input type="file" id="fwf" accept=".bin"><button class="btn p" data-a="upload" data-v="fw">Install</button></div><div class="prog" id="fwp"></div>
     <p class="mu mt">The device restarts into the new image and goes back to the previous one automatically if it doesn't come up healthy within a minute.</p>
     <h2 class="mt">Online updates</h2><div class="mu" id="fwupd"></div>
@@ -353,7 +354,9 @@ const ES={
 // messages from the device
 'connecting to the new network':'conectando a la nueva red','reconnecting':'reconectando','download started':'descarga iniciada','magic packet sent':'paquete mágico enviado',
 'rebooting':'reiniciando','firmware accepted, rebooting':'firmware aceptado, reiniciando','saved; reboot to apply':'guardado; reinicia para aplicar',
-'credentials changed; log in again':'credenciales cambiadas; vuelve a iniciar sesión','too many wrong passwords: wait and try again':'demasiadas contraseñas incorrectas: espera e inténtalo de nuevo',
+'credentials changed; log in again':'credenciales cambiadas; vuelve a iniciar sesión','Restarts':'Reinicios','Clock':'Reloj','not set yet (NTP)':'aún sin hora (NTP)','Last restart':'Último reinicio','time unknown':'hora desconocida','this boot':'este arranque','ran {0}':'funcionó {0}','up {0}':'encendido {0}',
+'power on':'encendido','reset pin':'botón de reset','crash':'fallo (crash)','watchdog':'watchdog','power dip (brownout)':'bajada de tensión (brownout)','wake from sleep':'despertar','USB reset':'reset por USB','debugger reset':'reset del depurador','unknown':'desconocido',
+'firmware uploaded':'firmware subido','firmware update':'actualización de firmware','settings restored':'ajustes restaurados','restarted from the web UI':'reiniciado desde la web','factory reset':'restablecimiento de fábrica','remote restart':'reinicio remoto','software restart':'reinicio por software','too many wrong passwords: wait and try again':'demasiadas contraseñas incorrectas: espera e inténtalo de nuevo',
 'could not save the new password':'no se pudo guardar la nueva contraseña',"open this page by the device's IP address or local name, or change the default password":'abre esta página con la dirección IP o el nombre local del dispositivo, o cambia la contraseña predeterminada','not a valid domain':'no es un dominio válido','already in the list':'ya está en la lista',
 'list is full':'la lista está llena','not in the list':'no está en la lista','unknown host':'equipo desconocido','switched to DHCP; the address may change':'cambiado a DHCP; la dirección puede cambiar',
 'Wi-Fi forgotten; the setup access point stays on':'Wi-Fi olvidada; el punto de acceso de configuración sigue encendido',
@@ -387,6 +390,10 @@ async function api(u,data){
  if(!r.ok)throw new Error(tr(j.message||'HTTP '+r.status));return j}
 async function act(u,data,after){try{const j=await api(u,data);toast(j.message&&j.message!='ok'?tr(j.message):tr('Saved'));(after||refresh)()}catch(e){toast(e.message,1)}}
 const fill=(f,o)=>{for(const el of $(`form[data-f="${f}"]`).elements)if(el.name&&o[el.name]!==undefined&&el.type!='password'){if(el.type=='checkbox')el.checked=!!o[el.name];else el.value=o[el.name]}};
+const when=t=>new Date(t*1000).toLocaleString(LANG=='es'?'es':undefined,{dateStyle:'medium',timeStyle:'short'});
+let bootsAt=0;
+async function loadBoots(){if(Date.now()-bootsAt<60000)return;bootsAt=Date.now();const r=await api('/api/restarts');
+ $('#boots').innerHTML=r.items.map((b,i)=>`<dt>${b.at?esc(when(b.at)):tr(i?'time unknown':'this boot')}</dt><dd><span class="${b.unexpected?'wa':''}">${esc(tr(b.why))}</span> · ${esc(b.version)}${b.ranFor?' · '+tr(i?'ran {0}':'up {0}',ago(b.ranFor)):''}</dd>`).join('')||'<dt>–</dt><dd></dd>'}
 const kv=rows=>rows.map(([k,v])=>`<dt>${tr(k)}</dt><dd>${v}</dd>`).join('');
 
 // ---------- rendering
@@ -442,7 +449,7 @@ function renderStatus(s){
  $('#fwautonote').textContent=fw.signedBuild?tr('This firmware is signed: updates are verified before they can run.'):tr('Automatic install needs a signed firmware build; this one is unsigned.');
  $('form[data-f="fw"] [name=auto]').disabled=!fw.signedBuild;
  $('#blbar').style.width=(b.capacity?b.count/b.capacity*100:0)+'%';
- $('#fwinfo').innerHTML=kv([['Version',esc(s.version)],['Uptime',ago(s.uptime)],['Internal RAM free',n(s.memory.internalFree/1024|0)+' KB'],['PSRAM free',s.memory.psram?n(s.memory.psramFree/1048576|0)+' MB':tr('none')]]);
+ $('#fwinfo').innerHTML=kv([['Version',esc(s.version)],['Uptime',ago(s.uptime)],['Clock',s.time?esc(when(s.time)):tr('not set yet (NTP)')],['Last restart',esc(tr(s.lastRestart||''))],['Internal RAM free',n(s.memory.internalFree/1024|0)+' KB'],['PSRAM free',s.memory.psram?n(s.memory.psramFree/1048576|0)+' MB':tr('none')]]);
  // settings status lines
  $('#wst').innerHTML=w.connected?'<span class="ok">'+tr('Connected')+'</span> '+esc(tr('to {0}',w.ssid))+' · '+w.ip+' · '+w.rssi+' dBm':w.state=='not configured'?tr('Not configured'):
   '<span class="wa">'+wst(w)+'</span> · '+tr('{0} attempts',w.attempts)+(w.nextRetry?' · '+tr('next in {0}s',w.nextRetry):'');
@@ -858,7 +865,7 @@ function renderTop(){
  $('#topd').innerHTML=(TOP[topTab]||[]).map(d=>row(esc(d.name),n(d.count))).join('')||'<p class="k">'+tr('Nothing yet.')+'</p>';
  for(const b of $('#toptabs').children)b.classList.toggle('on',b.dataset.v==topTab);
 }
-const extra={dash:()=>{loadTop().catch(()=>{});loadHistory().catch(()=>{});return loadDash()},lists:loadLists,devices:loadClients,wake:loadWol,system:()=>{},settings:()=>{}};
+const extra={dash:()=>{loadTop().catch(()=>{});loadHistory().catch(()=>{});return loadDash()},lists:loadLists,devices:loadClients,wake:loadWol,system:()=>loadBoots().catch(()=>{}),settings:()=>{}};
 async function refresh(){try{S=await api('/api/status');renderStatus(S);await extra[tab]()}catch(e){toast(tr('Device unreachable: {0}',e.message),1)}}
 
 // ---------- actions
