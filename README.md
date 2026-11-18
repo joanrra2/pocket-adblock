@@ -30,7 +30,8 @@ PSRAM, and takes advantage of PSRAM when the board has it.
 - **A/B blocklist slots**: updates go to the inactive slot and are verified
   (SHA-256, size, sort order) before going live. A bad download never replaces a working list.
 - **OTA for firmware and blocklists** from the web UI, with automatic rollback if new
-  firmware doesn't come up healthy.
+  firmware doesn't come up healthy. Signed release firmware (every chip but the
+  classic ESP32) can install new releases by itself; lists update by themselves every few hours.
 - **Never unreachable**: a WPA2 setup access point with a captive portal comes up whenever
   the uplink Wi-Fi isn't set or can't be reached; the uplink is retried forever.
 - **Wake-on-LAN** for your PCs, with online status, plus **remote wake over MQTT**
@@ -46,7 +47,7 @@ PSRAM, and takes advantage of PSRAM when the board has it.
 
 | Board | Status | Notes |
 |---|---|---|
-| ESP32-S3 with octal flash + PSRAM (WROOM-2 N16R8V / N32R16V) | tested | use the `esp32s3-octal-flash` profile, 16 MB layout |
+| ESP32-S3 with octal flash + PSRAM (WROOM-2 N16R8V / N32R16V) | tested | use the `esp32s3-octal-flash` profile, 16 MB layout (~2.5M domains, fits every list, Extended included) |
 | ESP32-S3 (quad flash, with or without PSRAM) | builds in CI | PSRAM used when present |
 | ESP32-C3 (SuperMini etc., 4 MB, no PSRAM) | builds in CI | the original $2 target |
 | ESP32 (classic), ESP32-C6 (4 MB) | builds in CI | |
@@ -240,7 +241,8 @@ medium, ~600k, 8 MB boards and up) or **Extended** (Aggressive + the full Threat
 Intelligence Feeds, ~2.1M, 16 MB boards). The threat feeds are malware, phishing
 and scam sites, so Strict and Extended break no more sites than Aggressive. Counts are after dropping
 subdomains of listed names. *Custom URL* takes any
-SHBL or raw list.
+SHBL or raw list. Strict is in the picker from firmware 0.5.2 on; older firmware can
+use it as a custom URL (`…/releases/download/blocklist/blocklist-strict.bin`).
 
 | List | Sources | Domains | File | Smallest layout |
 |---|---|---|---|---|
@@ -258,7 +260,8 @@ one), and the full list comes back on the first day it fits again.
 Lists that don't fit are greyed out in the picker. If one ends up configured
 anyway (a backup from a bigger board, a URL typed by hand), the device reads its
 header, writes nothing, keeps filtering with the list it has and switches itself
-to the next smaller list (Extended → Strict → Aggressive → Normal). Custom lists that
+to the next smaller list (Extended → Strict → Aggressive → Normal; before 0.5.2,
+Extended stepped straight down to Aggressive). Custom lists that
 don't fit are refused the same way, with the reason shown under *Updates*.
 
 The lists are derived from [StevenBlack/hosts](https://github.com/StevenBlack/hosts)
@@ -375,8 +378,10 @@ a few seconds. MQTT changes apply after a restart.
 
 ### Online updates and signing
 
-Release firmware checks `manifest.json` from the latest GitHub release once a day
-(*Updates → Online updates*) and offers **Install**.
+Release firmware checks `manifest.json` from the latest GitHub release 2 minutes
+after booting and then once a day (*Updates → Online updates*, where *Check now*
+asks at once) and offers **Install**. With *Install updates automatically* on (off
+by default), a new release installs itself at that check instead.
 
 | What | How | Effect |
 |---|---|---|
@@ -389,7 +394,9 @@ No eFuses are burned: a board can always be re-flashed over USB. In CI, the
 `BLOCKLIST_PUBKEY` variable) turn signing on for releases and the daily lists.
 Release images are signed from 0.5.1 on, except for the classic ESP32. A board running
 a signed release only accepts updates signed with the same key, so local builds go
-over USB or are built with that key.
+over USB or are built with that key. A board on 0.5.0 or older (unsigned) installs
+0.5.1 or later once with **Install**; from then on it can update itself. The classic
+ESP32 keeps offering **Install** for each release.
 
 ## Security
 
@@ -414,8 +421,8 @@ than asking a public resolver. Lists update by themselves over Wi-Fi (no reflash
 a daily list costs one download when it changed and a 64-byte check otherwise.
 
 **Pick Pocket AdBlock** for a ~3-8 EUR device that draws well under a watt, has no SD
-card to wear out, boots in about 2 s and needs no OS updates, with lists up to ~218k
-domains (4 MB boards) or ~2.2M (16 MB ESP32-S3 boards), plus encrypted upstream,
+card to wear out, boots in about 2 s and needs no OS updates, with lists up to ~216k
+domains (4 MB boards), ~857k (8 MB) or ~2.5M (16 MB ESP32-S3 boards), plus encrypted upstream,
 Wake-on-LAN and Home Assistant built in.
 
 **Pick Pi-hole** (on a Raspberry Pi or a server) if you want multi-million-domain
