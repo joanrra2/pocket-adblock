@@ -19,7 +19,7 @@
 
 namespace sinkhole {
 
-class App {
+class App {  // NOSONAR the one object that wires every service together
 public:
     App();
     void start();

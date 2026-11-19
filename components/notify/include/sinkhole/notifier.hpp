@@ -19,6 +19,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
@@ -32,10 +33,11 @@ namespace sinkhole {
 
 class Notifier {
 public:
+    ~Notifier();
     // Runs a remote command; writes the answer to reply.
     using CommandHandler = void (*)(void* ctx, const char* command, char* reply, size_t cap);  // NOSONAR C-style callback, no heap
 
-    Notifier(Config& cfg, WifiManager& wifi) : cfg_(cfg), wifi_(wifi) {}
+    Notifier(Config& cfg, WifiManager& wifi);
     esp_err_t begin(CommandHandler handler, void* ctx);  // NOSONAR context for the callback
     void reload();  // settings changed: reconnect, re-read the topic / chat
 
@@ -101,16 +103,17 @@ private:
         std::array<char, 24> tgChat;
         uint16_t events;
         bool commands;
-    } c_{};
+    };
+    Cfg c_{};
     std::array<char, 24> ntfySince_{};  // last command id seen ("" = not polled yet)
     std::array<std::array<char, 24>, 8> ranIds_{};  // ntfy ids of the last commands run
     size_t ranNext_ = 0;
     int64_t tgOffset_ = 0;              // next getUpdates offset (0 = not polled yet)
-    Http* ntfyHttp_ = nullptr;
-    Http* tgHttp_ = nullptr;
+    std::unique_ptr<Http> ntfyHttp_;
+    std::unique_ptr<Http> tgHttp_;
     // Sends use their own client, closed after each message: a client that has
     // sent a POST came back empty on later polls (esp_http_client, keep-alive).
-    Http* sendHttp_ = nullptr;
+    std::unique_ptr<Http> sendHttp_;
     char* buf_ = nullptr;  // response buffer (PSRAM when there is some)
     static constexpr size_t kBufSize = 6144;
     StaticTask<6144> task_;

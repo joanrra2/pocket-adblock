@@ -77,7 +77,7 @@ void MqttBridge::onTick(void* arg)
     static_cast<MqttBridge*>(arg)->tick();
 }
 
-void MqttBridge::onHostState(void* ctx, const char* name, bool online)
+void MqttBridge::onHostState(void* ctx, const char* name, bool online)  // NOSONAR C-style listener signature
 {
     auto* self = static_cast<MqttBridge*>(ctx);
     if (!self->connected_) return;
@@ -87,7 +87,7 @@ void MqttBridge::onHostState(void* ctx, const char* name, bool online)
                             online ? "online" : "offline", 0, 1, 1);
 }
 
-void MqttBridge::onHostResult(void* ctx, const char* name, const char* result)
+void MqttBridge::onHostResult(void* ctx, const char* name, const char* result)  // NOSONAR C-style listener signature
 {
     auto* self = static_cast<MqttBridge*>(ctx);
     if (!self->connected_) return;

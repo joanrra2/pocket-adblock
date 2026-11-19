@@ -5,6 +5,7 @@
 // With a list built by tools/build_blocklist.py and its source domains, it also
 // checks that every domain is blocked (directly or through a listed parent) and
 // that random names are not.
+#include <array>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -526,15 +527,17 @@ static void testNotifyParse()
 {
     using namespace sinkhole::notify;
     // ntfy: one object per line; ids and messages, escapes decoded.
-    char ntfy[] =
-        "{\"id\":\"KWjLikMx0VpA\",\"time\":1795045386,\"event\":\"message\",\"topic\":\"t-cmd\",\"message\":\"wake office-pc\"}\n"
-        "{\"id\":\"b2\",\"time\":1795045387,\"event\":\"message\",\"topic\":\"t-cmd\",\"message\":\"say \\\"hi\\\"\\nnow\"}\n"
-        "{\"id\":\"b3\",\"time\":1795045388,\"event\":\"keepalive\",\"topic\":\"t-cmd\"}\n";
-    std::vector<std::string> ids, events, texts;
-    ntfyLines(ntfy, [&](const char* id, const char* ev, const char* text) {
-        ids.push_back(id);
-        events.push_back(ev);
-        texts.push_back(text);
+    std::string ntfy =
+        R"({"id":"KWjLikMx0VpA","time":1795045386,"event":"message","topic":"t-cmd","message":"wake office-pc"})" "\n"
+        R"({"id":"b2","time":1795045387,"event":"message","topic":"t-cmd","message":"say \"hi\"\nnow"})" "\n"
+        R"({"id":"b3","time":1795045388,"event":"keepalive","topic":"t-cmd"})" "\n";
+    std::vector<std::string> ids;
+    std::vector<std::string> events;
+    std::vector<std::string> texts;
+    ntfyLines(ntfy.data(), [&ids, &events, &texts](const char* id, const char* ev, const char* text) {
+        ids.emplace_back(id);
+        events.emplace_back(ev);
+        texts.emplace_back(text);
     });
     CHECK(ids.size() == 3);
     CHECK(ids[0] == "KWjLikMx0VpA" && texts[0] == "wake office-pc");
@@ -544,30 +547,30 @@ static void testNotifyParse()
     // Telegram getUpdates: a private chat, then a group; "from" ids must not be
     // taken for the chat id; \u escapes outside ASCII become '?'.
     const char* tg =
-        "{\"ok\":true,\"result\":["
-        "{\"update_id\":512345001,\"message\":{\"message_id\":5,\"from\":{\"id\":777,\"is_bot\":false,\"first_name\":\"Ana\"},"
-        "\"chat\":{\"id\":111222333,\"first_name\":\"Ana\",\"type\":\"private\"},\"date\":1700000000,\"text\":\"/wake@pocket_bot office-pc\","
-        "\"entities\":[{\"offset\":0,\"length\":16,\"type\":\"bot_command\"}]}},"
-        "{\"update_id\":512345002,\"message\":{\"message_id\":6,\"from\":{\"id\":888,\"is_bot\":false,\"first_name\":\"Bo\"},"
-        "\"chat\":{\"id\":-1001234567890,\"title\":\"Home\",\"type\":\"supergroup\"},\"date\":1700000001,\"text\":\"caf\\u00e9 \\u0041\"}},"
-        "{\"update_id\":512345003,\"edited_message\":{\"message_id\":6,\"chat\":{\"id\":5,\"type\":\"private\"},\"date\":1}}"
-        "]}";
+        R"({"ok":true,"result":[)"
+        R"({"update_id":512345001,"message":{"message_id":5,"from":{"id":777,"is_bot":false,"first_name":"Ana"},)"
+        R"("chat":{"id":111222333,"first_name":"Ana","type":"private"},"date":1700000000,"text":"/wake@pocket_bot office-pc",)"
+        R"("entities":[{"offset":0,"length":16,"type":"bot_command"}]}},)"
+        R"({"update_id":512345002,"message":{"message_id":6,"from":{"id":888,"is_bot":false,"first_name":"Bo"},)"
+        R"("chat":{"id":-1001234567890,"title":"Home","type":"supergroup"},"date":1700000001,"text":"café A"}},)"
+        R"({"update_id":512345003,"edited_message":{"message_id":6,"chat":{"id":5,"type":"private"},"date":1}})"
+        R"(]})";
     std::vector<int64_t> chats;
     std::vector<std::string> said;
-    const int64_t last = telegramUpdates(tg, [&](int64_t, int64_t chat, const char* text) {
+    const int64_t last = telegramUpdates(tg, [&chats, &said](int64_t, int64_t chat, const char* text) {
         chats.push_back(chat);
-        said.push_back(text);
+        said.emplace_back(text);
     });
     CHECK(last == 512345003);
     CHECK(chats.size() == 2);
     CHECK(chats[0] == 111222333 && said[0] == "/wake@pocket_bot office-pc");
     CHECK(chats[1] == -1001234567890LL && said[1] == "caf? A");
     int64_t chat = 0;
-    char name[32];
-    CHECK(telegramLastChat(tg, chat, name, sizeof(name)) && chat == 5 && name[0] == '\0');
-    const char* one = "{\"ok\":true,\"result\":[{\"update_id\":1,\"message\":{\"chat\":{\"id\":42,\"first_name\":\"Joan\",\"type\":\"private\"},\"text\":\"/start\"}}]}";
-    CHECK(telegramLastChat(one, chat, name, sizeof(name)) && chat == 42 && std::string(name) == "Joan");
-    CHECK(telegramUpdates("{\"ok\":true,\"result\":[]}", [](int64_t, int64_t, const char*) {}) == 0);
+    std::array<char, 32> name{};
+    CHECK(telegramLastChat(tg, chat, name.data(), name.size()) && chat == 5 && name[0] == '\0');
+    const char* one = R"({"ok":true,"result":[{"update_id":1,"message":{"chat":{"id":42,"first_name":"Joan","type":"private"},"text":"/start"}}]})";
+    CHECK(telegramLastChat(one, chat, name.data(), name.size()) && chat == 42 && std::string(name.data()) == "Joan");
+    CHECK(telegramUpdates(R"({"ok":true,"result":[]})", [](int64_t, int64_t, const char*) {}) == 0);
 }
 
 int main(int argc, char** argv)

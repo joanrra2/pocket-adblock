@@ -440,7 +440,9 @@ async function loadNotify(){
  $('#nstate').textContent=[line('ntfy',n.ntfy),line('Telegram',n.telegram)].join(' · ')+(n.lastCommandAgo>=0?' · '+tr('last command "{0}" {1} ago',n.lastCommand,ago(n.lastCommandAgo)):'');
 }
 function notifyHelp(n){
- const t=n.ntfyTopic,srv=(n.ntfyServer||'https://ntfy.sh').replace(/\/+$/,'');
+ const t=n.ntfyTopic;
+ let srv=n.ntfyServer||'https://ntfy.sh';
+ while(srv.endsWith('/'))srv=srv.slice(0,-1);
  $('#nsub').textContent=t?tr('In the ntfy app, subscribe to {0} on {1}. Send commands to {0}-cmd.',t,srv):tr('Generate a topic: it works like a password, anyone who knows it can read the alerts.');
 }
 // Device log: polls /api/logs from the last position while the tab is open.

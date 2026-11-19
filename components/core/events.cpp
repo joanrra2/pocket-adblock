@@ -15,7 +15,7 @@ std::atomic<Sink>& sink()
 }
 }  // namespace
 
-void setSink(Sink s)
+void setSink(Sink s)  // NOSONAR a plain function pointer, so the atomic stays lock-free
 {
     sink().store(s);
 }
@@ -25,7 +25,7 @@ bool active()
     return sink().load() != nullptr;
 }
 
-void emit(Kind kind, const char* fmt, ...)
+void emit(Kind kind, const char* fmt, ...)  // NOSONAR printf-style, format checked by the compiler
 {
     const Sink s = sink().load();
     if (!s) return;

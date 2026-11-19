@@ -12,6 +12,20 @@
 
 namespace sinkhole::notify {
 
+// One escape, p just after the backslash; moves p past it.
+inline char jsonEscape(const char*& p)
+{
+    const char e = *p++;
+    if (e == 'n') return '\n';
+    if (e == 't') return '\t';
+    if (e != 'u') return e;  // \" \\ \/
+    if (strnlen(p, 4) < 4) return '?';
+    const std::array<char, 5> hex{p[0], p[1], p[2], p[3], 0};
+    p += 4;
+    if (const long v = strtol(hex.data(), nullptr, 16); v > 0 && v < 128) return static_cast<char>(v);
+    return '?';  // outside ASCII
+}
+
 // Copies the JSON string value at p (just after the opening quote) into out,
 // decoding the common escapes (\uXXXX: ASCII kept, the rest becomes '?').
 // Returns the position after the closing quote.
@@ -20,24 +34,7 @@ inline const char* jsonString(const char* p, char* out, size_t cap)
     size_t n = 0;
     while (*p && *p != '"') {
         char c = *p++;
-        if (c == '\\' && *p) {
-            const char e = *p++;
-            if (e == 'n') {
-                c = '\n';
-            } else if (e == 't') {
-                c = '\t';
-            } else if (e == 'u') {
-                c = '?';
-                if (strnlen(p, 4) == 4) {
-                    const std::array<char, 5> hex{p[0], p[1], p[2], p[3], 0};
-                    const long v = strtol(hex.data(), nullptr, 16);
-                    if (v > 0 && v < 128) c = static_cast<char>(v);
-                    p += 4;
-                }
-            } else {
-                c = e;  // \" \\ \/
-            }
-        }
+        if (c == '\\' && *p) c = jsonEscape(p);
         if (n + 1 < cap) out[n++] = c;
     }
     if (cap) out[n] = '\0';
@@ -48,7 +45,7 @@ inline const char* jsonString(const char* p, char* out, size_t cap)
 inline bool jsonField(const char* from, const char* limit, const char* key, char* out, size_t cap)
 {
     std::array<char, 32> pat;
-    snprintf(pat.data(), pat.size(), "\"%s\":\"", key);
+    snprintf(pat.data(), pat.size(), R"("%s":")", key);
     const char* p = strstr(from, pat.data());
     if (!p || (limit && p >= limit)) return false;
     jsonString(p + strnlen(pat.data(), pat.size()), out, cap);
@@ -59,7 +56,7 @@ inline bool jsonField(const char* from, const char* limit, const char* key, char
 inline bool jsonNumber(const char* from, const char* limit, const char* key, int64_t& out)
 {
     std::array<char, 32> pat;
-    snprintf(pat.data(), pat.size(), "\"%s\":", key);
+    snprintf(pat.data(), pat.size(), R"("%s":)", key);
     const char* p = strstr(from, pat.data());
     if (!p || (limit && p >= limit)) return false;
     out = strtoll(p + strnlen(pat.data(), pat.size()), nullptr, 10);
@@ -98,8 +95,7 @@ int64_t telegramUpdates(const char* buf, F&& fn)
         if (id > last) last = id;
         const char* chat = strstr(p, "\"chat\":{");
         int64_t chatId = 0;
-        std::array<char, 120> text{};
-        if (chat && (!next || chat < next) && jsonNumber(chat, next, "id", chatId) &&
+        if (std::array<char, 120> text{}; chat && (!next || chat < next) && jsonNumber(chat, next, "id", chatId) &&
             jsonField(p, next, "text", text.data(), text.size()))
             fn(id, chatId, text.data());
         p = next;

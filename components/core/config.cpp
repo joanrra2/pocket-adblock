@@ -220,12 +220,13 @@ bool Config::upgradeNotify(const uint8_t* raw, size_t len, NotifySettings& out)
 void Config::loadNotifyLocked()
 {
     static constexpr const char* kKey = "notify";
-    const size_t len = nvs::blobSize(kKey);
-    std::unique_ptr<uint8_t[]> raw(len ? new (std::nothrow) uint8_t[len] : nullptr);
+    // Room for fields a newer firmware appended (a bigger blob is not read,
+    // and stays stored until the notification settings are changed here).
+    std::array<uint8_t, sizeof(NotifySettings) + 256> raw{};  // ~0.5 KB, boot only
     size_t got = 0;
-    if (!raw || nvs::loadBlob(kKey, raw.get(), len, &got) != ESP_OK || !upgradeNotify(raw.get(), got, n_))
+    if (nvs::loadBlob(kKey, raw.data(), raw.size(), &got) != ESP_OK || !upgradeNotify(raw.data(), got, n_))
         applyNotifyDefaults(n_);  // nothing stored yet: saved on the first change
-    if (raw) secureWipe(raw.get(), len);  // tokens
+    secureWipe(raw.data(), raw.size());  // tokens
 }
 
 esp_err_t Config::saveNotifyLocked()
@@ -303,14 +304,17 @@ esp_err_t Config::loadOversized(uint8_t* raw, size_t cap, size_t& n)
     n = 0;
     const size_t full = nvs::blobSize(kSettingsKey);
     if (full <= cap || full > 16 * 1024) return ESP_ERR_NVS_INVALID_LENGTH;
-    std::unique_ptr<uint8_t[]> big(new (std::nothrow) uint8_t[full]);
+    // Not std::vector: on the 4 MB boards every KB of flash counts.
+    std::unique_ptr<uint8_t[]> big(new (std::nothrow) uint8_t[full]);  // NOSONAR owned by unique_ptr; nothrow, no exceptions here
     if (!big) return ESP_ERR_NO_MEM;
     size_t got = 0;
     const esp_err_t err = nvs::loadBlob(kSettingsKey, big.get(), full, &got);
-    if (err != ESP_OK) return err;
-    memcpy(raw, big.get(), cap);
-    n = cap;
+    if (err == ESP_OK) {
+        memcpy(raw, big.get(), cap);
+        n = cap;
+    }
     secureWipe(big.get(), full);  // passwords
+    if (err != ESP_OK) return err;
     return ESP_OK;
 }
 

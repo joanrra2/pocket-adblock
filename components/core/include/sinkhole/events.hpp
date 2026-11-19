@@ -9,7 +9,7 @@
 namespace sinkhole::events {
 
 // Bits of Settings::notifyEvents: which kinds the owner wants to hear about.
-enum Kind : uint16_t {
+enum Kind : uint16_t {  // NOSONAR bit flags, combined with |
     Restart = 1,     // crash, watchdog or power dip; firmware updates
     Wake = 2,        // wake results ("office-pc online after 41 s")
     HostState = 4,   // a host with an IP went online / offline
