@@ -32,7 +32,7 @@ public:
 
     BackupReader(uint8_t* buf, size_t cap) : buf_(buf), cap_(cap) {}
 
-    void feed(const char* p, size_t n)  // NOSONAR the host tests build as C++17: no std::span
+    void feed(const char* p, size_t n)  // NOSONAR a pointer and length straight from httpd_req_recv
     {
         for (size_t i = 0; i < n && !why_; i++) put(p[i]);
     }
@@ -77,42 +77,44 @@ private:
             endLine();
             return;
         }
-        switch (state_) {  // NOSONAR no "using enum": the host tests build as C++17
-            case State::Key:
+        using enum State;
+        switch (state_) {
+            case Key:
                 if (keyLen_ == 0 && c == '#') {
-                    state_ = State::Skip;
+                    state_ = Skip;
                 } else if (c == '=') {
                     key_[keyLen_] = '\0';
                     startValue();
                 } else if (keyLen_ + 1 >= key_.size()) {
-                    state_ = State::Skip;  // longer than any key we know
+                    state_ = Skip;  // longer than any key we know
                 } else {
                     key_[keyLen_++] = c;
                 }
                 break;
-            case State::Format:
+            case Format:
                 formatOne_ = fmtLen_ == 0 && c == '1';
                 fmtLen_++;
                 break;
-            case State::Value:
+            case Value:
                 valueChar(c);
                 break;
-            case State::Skip:
+            case Skip:
                 break;
         }
     }
 
     void startValue()
     {
+        using enum State;
         if (std::strcmp(key_.data(), "format") == 0) {
-            state_ = State::Format;
+            state_ = Format;
             fmtLen_ = 0;
             formatOne_ = false;
             return;
         }
         const char* k = knownKey(key_.data());
         if (!k) {
-            state_ = State::Skip;
+            state_ = Skip;
             return;
         }
         // One slot per known key: a repeated section must not run past items_.
@@ -124,7 +126,7 @@ private:
         items_[count_] = {k, buf_ + used_, 0};
         quadLen_ = 0;
         pad_ = 0;
-        state_ = State::Value;
+        state_ = Value;
     }
 
     void valueChar(char c)
@@ -164,15 +166,16 @@ private:
 
     void endLine()
     {
-        if (state_ == State::Format) {  // NOSONAR no "using enum": the host tests build as C++17
+        using enum State;
+        if (state_ == Format) {
             formatOk_ = formatOk_ || (fmtLen_ == 1 && formatOne_);
-        } else if (state_ == State::Value && !why_) {
+        } else if (state_ == Value && !why_) {
             if (quadLen_ != 0 || items_[count_].len == 0)
                 why_ = kDamaged;
             else
                 count_++;
         }
-        state_ = State::Key;
+        state_ = Key;
         keyLen_ = 0;
     }
 

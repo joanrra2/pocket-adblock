@@ -1,6 +1,6 @@
 // Host unit tests for the platform-independent parts (hash table, DNS packet
 // handling). No ESP-IDF needed, run from the repo root:
-//   g++ -std=c++17 -Icomponents/blocklist/include -Icomponents/dns/include -Icomponents/notify/include
+//   g++ -std=c++20 -Icomponents/blocklist/include -Icomponents/dns/include -Icomponents/notify/include
 //       -Icomponents/web/include test/host/test_logic.cpp -o test_logic
 //   ./test_logic [LIST.bin DOMAINS.txt]
 // With a list built by tools/build_blocklist.py and its source domains, it also

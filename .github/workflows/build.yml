@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Unit tests (hash table, DNS packets, notification answers, restore files)
         run: |
-          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Icomponents/blocklist/include -Icomponents/dns/include -Icomponents/notify/include -Icomponents/web/include \
+          g++ -std=c++20 -O2 -Wall -Wextra -Werror -Icomponents/blocklist/include -Icomponents/dns/include -Icomponents/notify/include -Icomponents/web/include \
               test/host/test_logic.cpp -o test_logic
           ./test_logic
       - name: Lists from tools/build_blocklist.py read the same on the device (v2 and v4)
