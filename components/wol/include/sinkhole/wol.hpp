@@ -3,6 +3,7 @@
 // that shows which hosts are awake, and an optional MQTT bridge so hosts can be
 // woken from outside the LAN without opening any port (outbound connection).
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -35,9 +36,7 @@ constexpr uint8_t kWolAlert = 1;  // tell the owner when it goes offline / comes
 
 inline bool watchOnly(const WolHost& h)
 {
-    for (uint8_t b : h.mac)
-        if (b) return false;
-    return true;
+    return std::ranges::all_of(h.mac, [](uint8_t b) { return b == 0; });
 }
 
 // A host's state as the probe saw it change (passed to the listener).
@@ -125,6 +124,8 @@ private:
     static Probe tcpOpen(uint32_t ip, uint16_t port);
     Probe check(const WolHost& h) { return h.port ? tcpOpen(h.ip, h.port) : ping(h.ip); }
     void setResultLocked(int i, const char* text);
+    bool updateStateLocked(int j, bool up, uint32_t now, WolHostChange& change);
+    void updateWakeLocked(int j, bool up, uint32_t now, uint32_t since);
     void reportResults();  // outside the lock
     esp_err_t saveLocked();
     int findLocked(const char* name);

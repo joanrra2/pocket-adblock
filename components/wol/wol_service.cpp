@@ -342,6 +342,49 @@ void WolService::taskEntry(void* arg)
     static_cast<WolService*>(arg)->run();
 }
 
+// Offline only after two failed checks in a row (a lost packet or a busy
+// service must not flip the state). Known once it answers or misses twice;
+// that first state is reported too (MQTT wants it) but is not a change.
+// Returns true when the listener should hear about it.
+bool WolService::updateStateLocked(int j, bool up, uint32_t now, WolHostChange& change)
+{
+    WolHostState& s = hosts_[j];
+    s.misses = up ? 0 : static_cast<uint8_t>(s.misses < 255 ? s.misses + 1 : 255);
+    const bool online = up || (s.online && s.misses < 2);
+    const bool first = !s.known && (up || s.misses >= 2);
+    const bool changed = first || (s.known && s.online != online);
+    if (changed) {
+        change.first = first;
+        change.prevFor = first ? 0 : now - s.stateSince;
+        s.stateSince = now;
+        s.known = true;
+    }
+    s.online = online;
+    change.online = online;
+    return changed;
+}
+
+// A host being woken: done when it answers, or when its wait runs out.
+void WolService::updateWakeLocked(int j, bool up, uint32_t now, uint32_t since)
+{
+    WolHostState& s = hosts_[j];
+    if (!s.waking) return;
+    std::array<char, 48> text{};
+    if (up) {
+        snprintf(text.data(), text.size(), "online after %u s", static_cast<unsigned>(now - since));
+    } else if (now >= s.wakeDeadline) {
+        const uint32_t waited = timeoutOf(s.host);
+        if (waited % 60 == 0)
+            snprintf(text.data(), text.size(), "no answer after %u min", static_cast<unsigned>(waited / 60));
+        else
+            snprintf(text.data(), text.size(), "no answer after %u s", static_cast<unsigned>(waited));
+    } else {
+        return;
+    }
+    s.waking = false;
+    setResultLocked(j, text.data());
+}
+
 // Every host with an IP is checked every kProbeIntervalMs; a host being
 // woken is checked every 3 s until it answers or its deadline passes.
 void WolService::run()
@@ -380,41 +423,9 @@ void WolService::run()
             WolHostChange change{h.name, up, false, (h.flags & kWolAlert) != 0, 0};
             {
                 LockGuard g(mu_);
-                int j = findLocked(h.name);
-                if (j >= 0 && probe != Probe::Unknown) {
-                    // Offline only after two failed checks in a row (a lost
-                    // packet or a busy service must not flip the state).
-                    hosts_[j].misses = up ? 0 : static_cast<uint8_t>(hosts_[j].misses < 255 ? hosts_[j].misses + 1 : 255);
-                    const bool now_online = up || (hosts_[j].online && hosts_[j].misses < 2);
-                    // Known once it answers or misses twice; that first state
-                    // is reported too (MQTT wants it) but is not a change.
-                    const bool first = !hosts_[j].known && (up || hosts_[j].misses >= 2);
-                    changed = first || (hosts_[j].known && hosts_[j].online != now_online);
-                    if (changed) {
-                        change.first = first;
-                        change.prevFor = first ? 0 : now - hosts_[j].stateSince;
-                        hosts_[j].stateSince = now;
-                        hosts_[j].known = true;
-                    }
-                    hosts_[j].online = now_online;
-                    change.online = now_online;
-                }
-                if (j >= 0) {
-                    if (hosts_[j].waking && up) {
-                        char text[48];
-                        snprintf(text, sizeof(text), "online after %u s", static_cast<unsigned>(now - since));
-                        hosts_[j].waking = false;
-                        setResultLocked(j, text);
-                    } else if (hosts_[j].waking && now >= hosts_[j].wakeDeadline) {
-                        const uint32_t waited = timeoutOf(hosts_[j].host);
-                        std::array<char, 48> text{};
-                        if (waited % 60 == 0)
-                            snprintf(text.data(), text.size(), "no answer after %u min", static_cast<unsigned>(waited / 60));
-                        else
-                            snprintf(text.data(), text.size(), "no answer after %u s", static_cast<unsigned>(waited));
-                        hosts_[j].waking = false;
-                        setResultLocked(j, text.data());
-                    }
+                if (const int j = findLocked(h.name); j >= 0) {
+                    if (probe != Probe::Unknown) changed = updateStateLocked(j, up, now, change);
+                    updateWakeLocked(j, up, now, since);
                 }
             }
             if (changed && listener_) listener_(listenerCtx_, change);
