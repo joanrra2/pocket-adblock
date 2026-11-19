@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <memory>
+#include <new>
 
 #include "esp_log.h"
 #include "esp_random.h"
@@ -250,6 +252,24 @@ bool Config::upgrade(const uint8_t* raw, size_t n, Settings& out)
     return true;
 }
 
+// A blob from a much newer firmware (downgrade): read it whole from the heap and
+// keep the prefix this version knows. Fields are only ever appended.
+esp_err_t Config::loadOversized(uint8_t* raw, size_t cap, size_t& n)
+{
+    n = 0;
+    const size_t full = nvs::blobSize(kSettingsKey);
+    if (full <= cap || full > 16 * 1024) return ESP_ERR_NVS_INVALID_LENGTH;
+    std::unique_ptr<uint8_t[]> big(new (std::nothrow) uint8_t[full]);
+    if (!big) return ESP_ERR_NO_MEM;
+    size_t got = 0;
+    const esp_err_t err = nvs::loadBlob(kSettingsKey, big.get(), full, &got);
+    if (err != ESP_OK) return err;
+    memcpy(raw, big.get(), cap);
+    n = cap;
+    secureWipe(big.get(), full);  // passwords
+    return ESP_OK;
+}
+
 esp_err_t Config::load()
 {
     LockGuard g(mu_);
@@ -259,11 +279,15 @@ esp_err_t Config::load()
     memset(raw, 0, sizeof(raw));
     size_t n = 0;
     esp_err_t err = nvs::loadBlob(kSettingsKey, raw, sizeof(raw), &n);
+    if (err == ESP_ERR_NVS_INVALID_LENGTH) err = loadOversized(raw, sizeof(raw), n);
     uint16_t version = 0;
     if (n >= sizeof(version)) memcpy(&version, raw, sizeof(version));
     if (err != ESP_OK || !upgrade(raw, n, s_)) {
-        ESP_LOGI(TAG, "no usable stored settings (%s), using defaults", esp_err_to_name(err));
-        return saveLocked();
+        ESP_LOGW(TAG, "no usable stored settings (%s), using defaults", esp_err_to_name(err));
+        // Only a missing blob is replaced. One this build cannot read stays as
+        // it is until settings are changed here, so flashing the newer firmware
+        // back still finds it.
+        return err == ESP_ERR_NVS_NOT_FOUND ? saveLocked() : ESP_OK;
     }
     if (version != kVersion) {
         ESP_LOGI(TAG, "settings migrated from v%u to v%u", version, kVersion);

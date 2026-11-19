@@ -86,7 +86,7 @@ public:
     void setListener(Listener fn, void* ctx) { listener_ = fn; listenerCtx_ = ctx; }
     // Notified (from the probe task, about a second later) whenever a host's
     // wake result changes: "waking", "online after 41 s", "cancelled"...
-    using ResultListener = void (*)(void* ctx, const char* name, const char* result);
+    using ResultListener = void (*)(void* ctx, const char* name, const char* result);  // NOSONAR C-style callback like Listener, no heap
     void setResultListener(ResultListener fn, void* ctx) { resultListener_ = fn; resultCtx_ = ctx; }
 
 private:
@@ -107,7 +107,7 @@ private:
     Listener listener_ = nullptr;
     void* listenerCtx_ = nullptr;
     ResultListener resultListener_ = nullptr;
-    void* resultCtx_ = nullptr;
+    void* resultCtx_ = nullptr;  // NOSONAR context for the C-style callback
     StaticTask<3072> task_;
 };
 

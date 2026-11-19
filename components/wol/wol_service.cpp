@@ -1,3 +1,4 @@
+#include <array>
 #include <cstring>
 
 #include <cerrno>
@@ -170,16 +171,16 @@ void WolService::reportResults()
     if (!resultListener_) return;
     for (size_t i = 0; i < kCapacity; i++) {
         WolHost h;
-        char text[sizeof(WolHostState::result)];
+        std::array<char, sizeof(WolHostState::result)> text{};
         {
             LockGuard g(mu_);
             if (i >= count_) break;
             if (!hosts_[i].resultNew) continue;
             hosts_[i].resultNew = false;
             h = hosts_[i].host;
-            copyStr(text, hosts_[i].result);
+            copyStr(text.data(), text.size(), hosts_[i].result);
         }
-        resultListener_(resultCtx_, h.name, text);
+        resultListener_(resultCtx_, h.name, text.data());
     }
 }
 
@@ -376,13 +377,13 @@ void WolService::run()
                         setResultLocked(j, text);
                     } else if (hosts_[j].waking && now >= hosts_[j].wakeDeadline) {
                         const uint32_t waited = timeoutOf(hosts_[j].host);
-                        char text[48];
+                        std::array<char, 48> text{};
                         if (waited % 60 == 0)
-                            snprintf(text, sizeof(text), "no answer after %u min", static_cast<unsigned>(waited / 60));
+                            snprintf(text.data(), text.size(), "no answer after %u min", static_cast<unsigned>(waited / 60));
                         else
-                            snprintf(text, sizeof(text), "no answer after %u s", static_cast<unsigned>(waited));
+                            snprintf(text.data(), text.size(), "no answer after %u s", static_cast<unsigned>(waited));
                         hosts_[j].waking = false;
-                        setResultLocked(j, text);
+                        setResultLocked(j, text.data());
                     }
                 }
             }

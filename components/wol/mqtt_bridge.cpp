@@ -1,3 +1,4 @@
+#include <array>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -92,9 +93,9 @@ void MqttBridge::onHostResult(void* ctx, const char* name, const char* result)
 {
     auto* self = static_cast<MqttBridge*>(ctx);
     if (!self->connected_) return;
-    char topic[128];
-    snprintf(topic, sizeof(topic), "%s/wol/%s/result", self->prefix_, name);
-    self->enqueue(topic, result, true);
+    std::array<char, 128> topic{};
+    snprintf(topic.data(), topic.size(), "%s/wol/%s/result", self->prefix_, name);
+    self->enqueue(topic.data(), result, true);
 }
 
 void MqttBridge::enqueue(const char* topic, const char* payload, bool retain)

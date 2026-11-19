@@ -149,6 +149,7 @@ public:
 private:
     esp_err_t saveLocked();
     static size_t validBytes(uint16_t version);
+    static esp_err_t loadOversized(uint8_t* raw, size_t cap, size_t& n);
 
     Mutex mu_;
     Settings s_{};

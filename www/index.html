@@ -526,6 +526,11 @@ function hostStatus(x){
  if(!x.ip)return '';
  return tr(x.online?'online':'offline');
 }
+function wakeButton(x){
+ const v=esc(x.name);
+ if(x.waking)return `<button class="btn s" data-a="wolcancel" data-v="${v}">${tr('Cancel')}</button>`;
+ return `<button class="btn p s" data-a="wake" data-v="${v}">${tr('Wake')}</button>`;
+}
 function editHost(name){
  const x=WOL.find(h=>h.name==name),f=$('form[data-f="woladd"]');
  if(!x)return;
@@ -542,7 +547,7 @@ async function loadWol(){
  $('#hosts').innerHTML=h.length?h.map(x=>`<div class="host"><div class="row"><span class="dot${x.ip?(x.online?'':' off'):' off'}"></span><b class="g" style="flex:1">${esc(x.name)}</b>
   <span class="k">${hostStatus(x)}</span></div><div class="k mt">${x.mac}${x.ip?' · '+x.ip+(x.port?':'+x.port:''):''}</div>
   ${x.result&&!x.waking&&x.resultAgo>=0?'<div class="k mt">'+tr(x.result.replace(/\d+/,'{0}'),(x.result.match(/\d+/)||[''])[0])+' · '+tr('{0} ago',ago(x.resultAgo))+'</div>':''}
-  <div class="row mt">${x.waking?`<button class="btn s" data-a="wolcancel" data-v="${esc(x.name)}">${tr('Cancel')}</button>`:`<button class="btn p s" data-a="wake" data-v="${esc(x.name)}">${tr('Wake')}</button>`}<button class="btn s" data-a="woledit" data-v="${esc(x.name)}">${tr('Edit')}</button><button class="btn s d" data-a="wolrm" data-v="${esc(x.name)}">${tr('Remove')}</button>
+  <div class="row mt">${wakeButton(x)}<button class="btn s" data-a="woledit" data-v="${esc(x.name)}">${tr('Edit')}</button><button class="btn s d" data-a="wolrm" data-v="${esc(x.name)}">${tr('Remove')}</button>
   ${x.wokeAgo>=0?'<span class="k">'+tr('woken {0} ago',ago(x.wokeAgo))+'</span>':''}</div></div>`).join(''):'<div class="card mu">'+tr('No computers yet. Add one below.')+'</div>';
 }
 // Phone app setup code: a link to the Pocket Wake web app with the broker settings (never a password).
