@@ -18,7 +18,7 @@ namespace sinkhole {
 
 struct WolHost {
     char name[32];
-    uint8_t mac[6];  // all zero: watch-only (never woken, needs the IP)
+    uint8_t mac[6];  // NOSONAR stored in NVS as raw bytes; all zero: watch-only (never woken, needs the IP)
     // kWolAlert...; sits in what used to be padding, so older firmware keeps
     // the size and ignores it (it would show an alerting host as a plain one).
     uint8_t flags;

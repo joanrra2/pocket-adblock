@@ -349,7 +349,10 @@ void WolService::taskEntry(void* arg)
 bool WolService::updateStateLocked(int j, bool up, uint32_t now, WolHostChange& change)
 {
     WolHostState& s = hosts_[j];
-    s.misses = up ? 0 : static_cast<uint8_t>(s.misses < 255 ? s.misses + 1 : 255);
+    if (up)
+        s.misses = 0;
+    else if (s.misses < 255)
+        s.misses++;
     const bool online = up || (s.online && s.misses < 2);
     const bool first = !s.known && (up || s.misses >= 2);
     const bool changed = first || (s.known && s.online != online);
@@ -423,10 +426,9 @@ void WolService::run()
             WolHostChange change{h.name, up, false, (h.flags & kWolAlert) != 0, 0};
             {
                 LockGuard g(mu_);
-                if (const int j = findLocked(h.name); j >= 0) {
-                    if (probe != Probe::Unknown) changed = updateStateLocked(j, up, now, change);
-                    updateWakeLocked(j, up, now, since);
-                }
+                const int j = findLocked(h.name);  // the list may have changed meanwhile
+                if (j >= 0 && probe != Probe::Unknown) changed = updateStateLocked(j, up, now, change);
+                if (j >= 0) updateWakeLocked(j, up, now, since);
             }
             if (changed && listener_) listener_(listenerCtx_, change);
         }
