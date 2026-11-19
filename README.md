@@ -57,8 +57,10 @@ Power it from a stable USB supply. Many routers have a spare USB port that is en
 
 ## Install from the browser
 
-Open the **[web installer](https://joanrra2.github.io/pocket-adblock/)** in Chrome or Edge,
-pick your board and press *Connect and install*. No toolchain needed.
+Open the **[web installer](https://joanrra2.github.io/pocket-adblock/install/)** in Chrome or Edge,
+pick your board and press *Connect and install*. No toolchain needed. The
+[project site](https://joanrra2.github.io/pocket-adblock/) has a shorter
+[setup guide](https://joanrra2.github.io/pocket-adblock/guide.html).
 
 ## Build & flash
 

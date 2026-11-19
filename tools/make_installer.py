@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Assemble the browser installer site (ESP Web Tools) from release images.
+"""Assemble the GitHub Pages site: the docs (site/) at the root, the browser
+installer (ESP Web Tools) at install/, and the release images it flashes.
 
   python tools/make_installer.py --bins dist --version 0.2.0 --out _site
 
@@ -28,6 +29,52 @@ BOARDS = {  # board id -> ESP Web Tools chipFamily
 }
 
 
+def copy_page(src, dest, repo):
+    """An HTML page with {{REPO}} replaced by the source repository URL."""
+    with open(src, encoding='utf-8') as f:
+        page = f.read().replace('{{REPO}}', repo)
+    with open(dest, 'w', encoding='utf-8') as f:  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
+        f.write(page)
+
+
+def write_docs(out, repo):
+    """The docs (site/) at the root, the setup videos, and the installer at install/."""
+    site = os.path.join(ROOT, 'site')
+    for name in sorted(os.listdir(site)):
+        src = os.path.join(site, name)
+        if name.endswith('.html'):
+            copy_page(src, os.path.join(out, name), repo)
+        elif os.path.isfile(src):
+            shutil.copy(src, os.path.join(out, name))
+    os.makedirs(os.path.join(out, 'media'), exist_ok=True)  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
+    for name in ('setup-en.mp4', 'setup-es.mp4'):
+        shutil.copy(os.path.join(ROOT, 'docs', 'media', name), os.path.join(out, 'media', name))
+    # Its manifests, firmware and vendor/ stay at the root.
+    os.makedirs(os.path.join(out, 'install'), exist_ok=True)  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
+    copy_page(os.path.join(ROOT, 'installer', 'index.html'), os.path.join(out, 'install', 'index.html'), repo)
+
+
+def board_parts(board, out, bins, parts_root):
+    """Copies a board's images into out/firmware; returns its manifest parts, or None."""
+    # Preferred: separate images at their offsets, so the settings area (NVS)
+    # is only erased when the user ticks "erase". Fallback: the merged image.
+    pdir = os.path.join(parts_root, board) if parts_root else ''
+    if pdir and os.path.isdir(pdir):
+        dest = os.path.join(out, 'firmware', board)
+        os.makedirs(dest, exist_ok=True)  # NOSONAR - developer/CI tool: paths are arguments
+        parts = []
+        for fname in sorted(os.listdir(pdir), key=lambda n: int(n[:-4], 16)):
+            shutil.copy(os.path.join(pdir, fname), os.path.join(dest, fname))
+            parts.append({'path': f'../firmware/{board}/{fname}', 'offset': int(fname[:-4], 16)})
+        return parts
+    name = f'pocket-adblock-{board}-full.bin'
+    src = os.path.join(bins, name)
+    if not os.path.exists(src):
+        return None
+    shutil.copy(src, os.path.join(out, 'firmware', name))
+    return [{'path': f'../firmware/{name}', 'offset': 0}]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--bins', required=True)
@@ -40,33 +87,15 @@ def main():
 
     os.makedirs(os.path.join(a.out, 'manifests'), exist_ok=True)  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
     os.makedirs(os.path.join(a.out, 'firmware'), exist_ok=True)  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
-    with open(os.path.join(ROOT, 'installer', 'index.html'), encoding='utf-8') as f:
-        page = f.read().replace('{{REPO}}', a.repo)
-    with open(os.path.join(a.out, 'index.html'), 'w', encoding='utf-8') as f:  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
-        f.write(page)
-
+    write_docs(a.out, a.repo)
     if a.web_tools:
         shutil.copytree(a.web_tools, os.path.join(a.out, 'vendor', 'esp-web-tools'), dirs_exist_ok=True)
 
     made = []
     for board, family in BOARDS.items():
-        # Preferred: separate images at their offsets, so the settings area (NVS)
-        # is only erased when the user ticks "erase". Fallback: the merged image.
-        pdir = os.path.join(a.parts, board) if a.parts else ''
-        if pdir and os.path.isdir(pdir):
-            dest = os.path.join(a.out, 'firmware', board)
-            os.makedirs(dest, exist_ok=True)  # NOSONAR - developer/CI tool: paths are arguments
-            parts = []
-            for fname in sorted(os.listdir(pdir), key=lambda n: int(n[:-4], 16)):
-                shutil.copy(os.path.join(pdir, fname), os.path.join(dest, fname))
-                parts.append({'path': f'../firmware/{board}/{fname}', 'offset': int(fname[:-4], 16)})
-        else:
-            name = f'pocket-adblock-{board}-full.bin'
-            src = os.path.join(a.bins, name)
-            if not os.path.exists(src):
-                continue
-            shutil.copy(src, os.path.join(a.out, 'firmware', name))
-            parts = [{'path': f'../firmware/{name}', 'offset': 0}]
+        parts = board_parts(board, a.out, a.bins, a.parts)
+        if parts is None:
+            continue
         manifest = {
             'name': 'pocket-adblock',
             'version': a.version,

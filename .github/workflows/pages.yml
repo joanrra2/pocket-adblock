@@ -1,0 +1,67 @@
+# Publishes docs changes to GitHub Pages between releases. A Pages deploy
+# replaces the whole site, so this rebuilds all of it: the docs from main, and
+# the installer with the firmware of the latest release, taken from that
+# release's own build (the same images its deploy in build.yml used).
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - installer/**
+      - docs/media/**
+      - tools/make_installer.py
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read  # download the release build's artifacts
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Firmware of the latest release
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml --branch "$tag" --status success --limit 1 --json databaseId -q '.[0].databaseId')
+          if [ -z "$run" ]; then
+            echo "::error::no successful build of $tag to take the firmware from: publish a release instead"
+            exit 1
+          fi
+          # Fails (and nothing is deployed) once the artifacts have expired.
+          gh run download "$run" --repo "$GITHUB_REPOSITORY" --pattern 'fw-*' --dir fw
+          gh run download "$run" --repo "$GITHUB_REPOSITORY" --pattern 'parts-*' --dir partsdl
+          mkdir -p dist parts
+          find fw -name '*.bin' -exec mv {} dist/ \;
+          for d in partsdl/parts-*/*/; do mv "$d" parts/; done
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: ESP Web Tools (pinned, integrity-checked)
+        run: |
+          npm pack esp-web-tools@10.4.0 --silent
+          echo "3pwkeFFm5Fj7UQo8SJNYK5RXrtNCpq6X9QoI6bMT4GBZWgrJqjn0YvM9ihG74BtMoSFYXfmDtkehuxe50PTMPQ==  esp-web-tools-10.4.0.tgz" > ewt.sha512b64
+          python3 -c "import base64,hashlib;exp,f=open('ewt.sha512b64').read().split();got=base64.b64encode(hashlib.sha512(open(f,'rb').read()).digest()).decode();assert got==exp,('integrity mismatch',got)"
+          tar xzf esp-web-tools-10.4.0.tgz
+      - name: Assemble site
+        env:
+          TAG: ${{ steps.rel.outputs.tag }}
+        run: python3 tools/make_installer.py --bins dist --version "${TAG#v}" --out _site --repo "https://github.com/${GITHUB_REPOSITORY}" --web-tools package/dist/web --parts parts
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
