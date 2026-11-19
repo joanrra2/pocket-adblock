@@ -236,7 +236,8 @@ private:
         std::array<char, 256> dev{};
         std::array<char, 160> topic{};
         std::array<std::array<char, 24>, WolService::kCapacity> announced{};  // object ids of announced hosts
-    } pub_;
+    };
+    Publisher pub_;
 };
 
 }  // namespace sinkhole

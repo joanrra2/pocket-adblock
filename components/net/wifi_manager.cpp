@@ -1,5 +1,6 @@
 #include "sinkhole/wifi_manager.hpp"
 
+#include <array>
 #include <cstdio>
 #include <cstring>
 
@@ -218,17 +219,18 @@ void WifiManager::onIpTimer(void* arg)
 // On the event task (see kWifiWork).
 void WifiManager::applyStation()
 {
-    char ssid[33], pass[65];
+    std::array<char, 33> ssid{};
+    std::array<char, 65> pass{};
     cfg_.read([&ssid, &pass](const Settings& s) {
-        copyStr(ssid, s.staSsid);
-        copyStr(pass, s.staPass);
+        copyStr(ssid.data(), ssid.size(), s.staSsid);
+        copyStr(pass.data(), pass.size(), s.staPass);
         return 0;
     });
     selfDisconnect_ = connected_.load();
     esp_wifi_disconnect();
-    applyStaConfig(ssid, pass);
+    applyStaConfig(ssid.data(), pass.data());
     applyIpConfig();
-    secureWipe(pass, sizeof(pass));
+    secureWipe(pass.data(), pass.size());
     if (configured_) connectSoon();
 }
 
