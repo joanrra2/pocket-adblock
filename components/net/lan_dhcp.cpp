@@ -136,6 +136,33 @@ esp_err_t LanDhcp::stopInLwip(void* ctx)
     return ESP_OK;
 }
 
+namespace {
+struct HostQuery {
+    dhcps_t* dhcps;
+    const uint8_t* mac;
+    char* out;
+    size_t cap;
+    bool found;
+};
+
+esp_err_t hostInLwip(void* ctx)  // NOSONAR signature required by esp_netif_tcpip_exec
+{
+    auto* q = static_cast<HostQuery*>(ctx);
+    q->found = q->dhcps && dhcps_get_hostname_on_mac(q->dhcps, q->mac, q->out, q->cap);
+    return ESP_OK;
+}
+}  // namespace
+
+bool LanDhcp::hostname(const uint8_t* mac, char* out, size_t cap)
+{
+    if (!running_ || !cap) return false;
+    out[0] = '\0';
+    LockGuard lock(mu_);
+    HostQuery q{static_cast<dhcps_t*>(dhcps_), mac, out, cap, false};
+    esp_netif_tcpip_exec(&hostInLwip, &q);  // the lease list belongs to the lwIP thread
+    return q.found && out[0];
+}
+
 esp_err_t LanDhcp::start(esp_netif_t* sta, const Options& o)
 {
     LockGuard lock(mu_);

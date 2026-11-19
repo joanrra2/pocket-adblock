@@ -20,6 +20,7 @@
 #include "esp_http_server.h"
 #include "sinkhole/blocklist_store.hpp"
 #include "sinkhole/config.hpp"
+#include "sinkhole/device_names.hpp"
 #include "sinkhole/dns_server.hpp"
 #include "sinkhole/domain_filter.hpp"
 #include "sinkhole/domain_list.hpp"
@@ -50,6 +51,7 @@ struct WebDeps {
     StatusLed& led;
     History& history;
     LanDhcp& dhcp;
+    DeviceNames& names;
     void (*applyUpstream)(void* ctx);
     void* appCtx;
 };
@@ -113,11 +115,25 @@ private:
     esp_err_t addWolHost(httpd_req_t* req, const char* form);
     esp_err_t getRestarts(httpd_req_t* req);
     esp_err_t getLogs(httpd_req_t* req);
+    esp_err_t postNames(httpd_req_t* req);
+    // A client's name: yours (by MAC), else a local DNS name for its IP, else the
+    // hostname it gave this device's DHCP server. Returns "you", "dns", "dhcp"
+    // or nullptr (no name).
+    const char* clientName(const ClientInfo& c, char* out, size_t cap);
+    // Names for every tracked client, for the query log / top clients.
+    void snapshotNames();
+    const char* nameOf(const ClientAddr& a);
 
     static const Route kRoutes[];
 
     WebDeps d_;
     httpd_handle_t server_ = nullptr;
+    struct NamedClient {
+        ClientAddr addr;
+        std::array<char, DeviceNames::kMaxName> name;
+    };
+    std::array<NamedClient, ClientTable::kCapacity> named_{};  // httpd task only
+    size_t namedCount_ = 0;
     uint8_t chunk_[2048];  // upload buffer; the httpd task serves one request at a time
 
     // Login state (httpd task only).

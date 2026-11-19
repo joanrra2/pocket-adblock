@@ -18,7 +18,7 @@ constexpr uint64_t kHealthyAfterUs = 60ULL * 1000 * 1000;
 
 App::App()
     : web_(WebDeps{config_, wifi_, store_, custom_, allow_, filter_, clients_, queryLog_, counters_,
-                   dns_, updater_, firmware_, wol_, mqtt_, led_, history_, dhcp_, &App::applyUpstream, this})
+                   dns_, updater_, firmware_, wol_, mqtt_, led_, history_, dhcp_, names_, &App::applyUpstream, this})
 {
 }
 
@@ -45,6 +45,7 @@ void App::start()
     custom_.load();
     allow_.load();
     clients_.load();
+    names_.load();
     queryLog_.begin();
     filter_.setEnabled(s.blocking);
 

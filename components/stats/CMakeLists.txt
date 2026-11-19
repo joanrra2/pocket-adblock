@@ -1,4 +1,4 @@
-idf_component_register(SRCS "stats.cpp"
+idf_component_register(SRCS "stats.cpp" "device_names.cpp"
                        INCLUDE_DIRS "include"
                        REQUIRES core
                        PRIV_REQUIRES esp_netif lwip)
