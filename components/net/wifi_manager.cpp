@@ -11,6 +11,9 @@
 #include "mdns.h"
 #include "sdkconfig.h"
 #include "sinkhole/rtos.hpp"
+#if CONFIG_SINKHOLE_ETH_W5500
+#include "esp_eth.h"
+#endif
 #include "sinkhole/secret.hpp"
 #include "sinkhole/text.hpp"
 
@@ -50,6 +53,15 @@ esp_err_t WifiManager::begin()
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &WifiManager::onEvent, this);
     esp_event_handler_register(IP_EVENT, IP_EVENT_GOT_IP6, &WifiManager::onEvent, this);
     esp_event_handler_register(kWifiWork, ESP_EVENT_ANY_ID, &WifiManager::onEvent, this);
+#if CONFIG_SINKHOLE_ETH_W5500
+    eth_ = startW5500();
+    if (eth_) {
+        esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &WifiManager::onEvent, this);
+        esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_LOST_IP, &WifiManager::onEvent, this);
+        esp_event_handler_register(ETH_EVENT, ETHERNET_EVENT_CONNECTED, &WifiManager::onEvent, this);
+        esp_event_handler_register(ETH_EVENT, ETHERNET_EVENT_DISCONNECTED, &WifiManager::onEvent, this);
+    }
+#endif
 
     esp_timer_create_args_t retry{};
     retry.callback = &WifiManager::onRetryTimer;
@@ -180,24 +192,28 @@ void WifiManager::applyIpConfig()
         s = {c.staticIp, c.ipAddr, c.ipMask, c.ipGw, c.ipDns};
         return 0;
     });
+    // With a W5500 the IP settings belong to the cable; Wi-Fi then uses DHCP
+    // (one static address on two interfaces of the same network would clash).
+    esp_netif_t* nif = eth_ ? eth_ : sta_;
+    if (eth_) esp_netif_dhcpc_start(sta_);
     if (s.staticIp && s.ipAddr && s.ipMask) {
-        esp_netif_dhcpc_stop(sta_);
+        esp_netif_dhcpc_stop(nif);
         esp_netif_ip_info_t info{};
         info.ip.addr = s.ipAddr;
         info.netmask.addr = s.ipMask;
         info.gw.addr = s.ipGw;
-        esp_netif_set_ip_info(sta_, &info);
+        esp_netif_set_ip_info(nif, &info);
         if (s.ipDns) {
             esp_netif_dns_info_t dns{};
             dns.ip.type = ESP_IPADDR_TYPE_V4;
             dns.ip.u_addr.ip4.addr = s.ipDns;
-            esp_netif_set_dns_info(sta_, ESP_NETIF_DNS_MAIN, &dns);
+            esp_netif_set_dns_info(nif, ESP_NETIF_DNS_MAIN, &dns);
         }
         char ip[16];
         formatIp4(s.ipAddr, ip);
         ESP_LOGI(TAG, "static IP %s", ip);
     } else {
-        esp_netif_dhcpc_start(sta_);  // no-op error if already running
+        esp_netif_dhcpc_start(nif);  // no-op error if already running
     }
 }
 
@@ -238,7 +254,7 @@ void WifiManager::applyStation()
 
 bool WifiManager::apWanted()
 {
-    if (!configured_ || !connected_) return true;
+    if (!ethUp_ && (!configured_ || !connected_)) return true;
     if (uptimeSeconds() < forcedUntil_) return true;
     return cfg_.read([](const Settings& s) { return s.apAlways; });
 }
@@ -474,9 +490,11 @@ void WifiManager::handleEvent(esp_event_base_t base, int32_t id, void* data)
             case WIFI_EVENT_STA_DISCONNECTED: {
                 auto* ev = static_cast<wifi_event_sta_disconnected_t*>(data);
                 linkUp_ = false;
-                const bool was = connected_;
-                connected_ = false;
-                staIp_ = 0;
+                const bool was = staUp_.exchange(false);
+                if (!ethUp_) {  // with the cable up, Wi-Fi isn't the uplink
+                    connected_ = false;
+                    staIp_ = 0;
+                }
                 // Disconnects we caused ourselves (new credentials, forget, reconnect)
                 // are not failures: keep the retry, skip the error bookkeeping.
                 // ASSOC_LEAVE while not connected = we aborted an attempt in progress.
@@ -504,7 +522,7 @@ void WifiManager::handleEvent(esp_event_base_t base, int32_t id, void* data)
         // during a scan, scan() restarts the attempt itself.
         if (configured_ && !scanning_ && !esp_timer_is_active(retryTimer_)) scheduleRetry();
                 updateAp();  // never leave the device unreachable
-                if (was && listener_) listener_(listenerCtx_, false);
+                if (was && !ethUp_ && listener_) listener_(listenerCtx_, false);
                 break;
             }
             case WIFI_EVENT_AP_STACONNECTED:
@@ -524,6 +542,17 @@ void WifiManager::handleEvent(esp_event_base_t base, int32_t id, void* data)
             default:
                 break;
         }
+#if CONFIG_SINKHOLE_ETH_W5500
+    } else if (base == ETH_EVENT && id == ETHERNET_EVENT_CONNECTED) {
+        ethLink_ = true;
+    } else if (base == IP_EVENT && id == IP_EVENT_ETH_GOT_IP) {
+        // Like Wi-Fi: a static address raises GOT_IP before there is a link.
+        if (ethLink_) onEthernet(true, &static_cast<ip_event_got_ip_t*>(data)->ip_info);
+    } else if ((base == IP_EVENT && id == IP_EVENT_ETH_LOST_IP) ||
+               (base == ETH_EVENT && id == ETHERNET_EVENT_DISCONNECTED)) {
+        if (base == ETH_EVENT) ethLink_ = false;
+        onEthernet(false, nullptr);
+#endif
     } else if (base == IP_EVENT && id == IP_EVENT_GOT_IP6) {
         auto* ev = static_cast<ip_event_got_ip6_t*>(data);
         char a[46];
@@ -537,14 +566,19 @@ void WifiManager::handleEvent(esp_event_base_t base, int32_t id, void* data)
             return;
         }
         auto* ev = static_cast<ip_event_got_ip_t*>(data);
-        staIp_ = ev->ip_info.ip.addr;
-        staMask_ = ev->ip_info.netmask.addr;
-        gateway_ = ev->ip_info.gw.addr;
-        connected_ = true;
+        staUp_ = true;
         attempts_ = 0;
         lastReason_ = 0;
         retryAt_ = 0;
         retryDelayMs_ = 1000;
+        if (ethUp_) {
+            ESP_LOGI(TAG, "Wi-Fi up too; the cable stays the uplink");
+            return;
+        }
+        staIp_ = ev->ip_info.ip.addr;
+        staMask_ = ev->ip_info.netmask.addr;
+        gateway_ = ev->ip_info.gw.addr;
+        connected_ = true;
         char ip[16];
         formatIp4(staIp_, ip);
         ESP_LOGI(TAG, "uplink up, ip %s, tx %.1f dBm", ip, txPowerDbm());
@@ -557,13 +591,49 @@ void WifiManager::handleEvent(esp_event_base_t base, int32_t id, void* data)
     }
 }
 
+#if CONFIG_SINKHOLE_ETH_W5500
+// The cable comes first: while it has an address it is the uplink. When it
+// goes, Wi-Fi takes over if it has an address of its own.
+void WifiManager::onEthernet(bool up, const esp_netif_ip_info_t* info)
+{
+    if (up) {
+        ethUp_ = true;
+        staIp_ = info->ip.addr;
+        staMask_ = info->netmask.addr;
+        gateway_ = info->gw.addr;
+        connected_ = true;
+        char ip[16];
+        formatIp4(staIp_, ip);
+        ESP_LOGI(TAG, "uplink up on the cable, ip %s", ip);
+        updateAp();
+        if (listener_) listener_(listenerCtx_, true);
+        return;
+    }
+    if (!ethUp_.exchange(false)) return;
+    esp_netif_ip_info_t sta{};
+    if (staUp_ && esp_netif_get_ip_info(sta_, &sta) == ESP_OK && sta.ip.addr) {
+        staIp_ = sta.ip.addr;
+        staMask_ = sta.netmask.addr;
+        gateway_ = sta.gw.addr;
+        ESP_LOGW(TAG, "cable unplugged: Wi-Fi is the uplink");
+        if (listener_) listener_(listenerCtx_, true);  // upstream and DHCP follow Wi-Fi
+    } else {
+        connected_ = false;
+        staIp_ = 0;
+        ESP_LOGW(TAG, "cable unplugged, no uplink");
+        if (listener_) listener_(listenerCtx_, false);
+    }
+    updateAp();
+}
+#endif
+
 // ------------------------------------------------------------------ status
 
 WifiStatus WifiManager::status() const
 {
     WifiStatus s{};
-    s.state = !configured_ ? LinkState::NotConfigured
-              : connected_ ? LinkState::Connected
+    s.state = ethUp_ || connected_ ? LinkState::Connected
+              : !configured_ ? LinkState::NotConfigured
               : attempts_  ? LinkState::Failed
                            : LinkState::Connecting;
     s.lastReason = lastReason_;
@@ -609,14 +679,14 @@ const char* WifiManager::reasonText(uint8_t r)
 uint32_t WifiManager::staDns() const
 {
     esp_netif_dns_info_t dns{};
-    if (esp_netif_get_dns_info(sta_, ESP_NETIF_DNS_MAIN, &dns) != ESP_OK) return 0;
+    if (esp_netif_get_dns_info(uplink(), ESP_NETIF_DNS_MAIN, &dns) != ESP_OK) return 0;
     return dns.ip.type == ESP_IPADDR_TYPE_V4 ? dns.ip.u_addr.ip4.addr : 0;
 }
 
 size_t WifiManager::ip6Addresses(char out[][46], size_t max, bool* hasGlobal) const
 {
     esp_ip6_addr_t addrs[LWIP_IPV6_NUM_ADDRESSES];
-    const int n = connected_ ? esp_netif_get_all_ip6(sta_, addrs) : 0;
+    const int n = connected_ ? esp_netif_get_all_ip6(uplink(), addrs) : 0;
     size_t count = 0;
     if (hasGlobal) *hasGlobal = false;
     for (int i = 0; i < n && count < max; i++) {
