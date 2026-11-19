@@ -894,31 +894,33 @@ esp_err_t WebServer::postRestore(httpd_req_t* req)
     size_t count = 0;
     const char* why = nullptr;
     char* save = nullptr;
-    for (char* line = strtok_r(body, "\n", &save); line && !why; line = strtok_r(nullptr, "\n", &save)) {
+    char* line = strtok_r(body, "\n", &save);
+    while (line && !why) {
         char* eq = strchr(line, '=');
-        if (!eq || line[0] == '#') continue;
-        *eq = '\0';
-        const char* val = eq + 1;
-        size_t vlen = strlen(val);
-        while (vlen && (val[vlen - 1] == '\r' || val[vlen - 1] == ' ')) vlen--;
-        for (const char* key : kBackupKeys) {
-            if (strcmp(line, key) != 0) continue;
-            // One slot per known key: a repeated section must not run past items[].
-            bool seen = false;
-            for (size_t k = 0; k < count && !seen; k++) seen = items[k].key == key;
-            if (seen || count >= std::size(items)) {
-                why = "a section appears twice";
-                break;
-            }
+        const char* key = nullptr;
+        if (eq && line[0] != '#') {
+            *eq = '\0';
+            for (const char* k : kBackupKeys)
+                if (strcmp(line, k) == 0) key = k;
+        }
+        // One slot per known key: a repeated section must not run past items[].
+        bool seen = false;
+        for (size_t k = 0; key && k < count; k++) seen = seen || items[k].key == key;
+        if (key && (seen || count >= std::size(items))) why = "a section appears twice";
+        if (key && !why) {
+            const char* val = eq + 1;
+            size_t vlen = strlen(val);
+            while (vlen && (val[vlen - 1] == '\r' || val[vlen - 1] == ' ')) vlen--;
             auto* data = static_cast<uint8_t*>(malloc(vlen / 4 * 3 + 4));
             const int n = data ? base64Decode(val, vlen, data, vlen / 4 * 3 + 4) : -1;
-            if (n <= 0) {
+            if (n > 0) {
+                items[count++] = {key, data, n};
+            } else {
                 free(data);
                 why = "a section of the file is damaged";
-                break;
             }
-            items[count++] = {key, data, n};
         }
+        line = strtok_r(nullptr, "\n", &save);
     }
     free(body);
 

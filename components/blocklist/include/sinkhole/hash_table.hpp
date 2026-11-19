@@ -319,7 +319,7 @@ private:
         // 64-bit: these come from the file, and a 32-bit sum or product could
         // wrap into a size that matches while the lookups index far past it.
         if (segCountLen == 0 || segCountLen % segLen ||
-            len != static_cast<uint64_t>(segCountLen) + 2ull * segLen)
+            len != static_cast<uint64_t>(segCountLen) + 2ULL * segLen)
             return false;
         return bytes_ == kV4HeadBytes + (static_cast<uint64_t>(len) * f + 7) / 8 + kV4Pad && count_ > 0;
     }
