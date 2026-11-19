@@ -1,5 +1,6 @@
 #include "sinkhole/stats.hpp"
 
+#include <array>
 #include <cstring>
 
 #include "esp_log.h"
@@ -217,11 +218,11 @@ size_t ClientTable::snapshot(ClientInfo* out, size_t max)
     ArpLookup job{out, n};
     esp_netif_tcpip_exec(resolveMacs, &job);
     // Keep the MACs it found in the same slots (unless a slot was reused meanwhile).
-    static const uint8_t zero[6] = {};
+    static constexpr std::array<uint8_t, 6> kNoMac{};
     LockGuard g(mu_);
     for (size_t i = 0; i < n && i < count_; i++) {
         ClientInfo& c = clients_[i];
-        if (memcmp(&c.addr, &out[i].addr, sizeof(c.addr)) == 0 && memcmp(c.mac, zero, 6) == 0)
+        if (memcmp(&c.addr, &out[i].addr, sizeof(c.addr)) == 0 && memcmp(c.mac, kNoMac.data(), kNoMac.size()) == 0)
             memcpy(c.mac, out[i].mac, 6);
     }
     return n;

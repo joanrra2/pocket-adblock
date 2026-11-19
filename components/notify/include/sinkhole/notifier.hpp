@@ -86,6 +86,7 @@ private:
     void pollTelegram();
     void runCommand(uint8_t channel, const char* text);
     esp_err_t findTelegramChat(char* chatId, size_t idCap, char* name, size_t nameCap);
+    void runFindChat();
     void note(ChannelStatus& st, bool ok, const char* error);
 
     Config& cfg_;
@@ -97,10 +98,12 @@ private:
     Mutex netMu_;     // one HTTPS request at a time
     Status status_{};
     // "Find chat": requested by the web UI, run by the task (result under mu_).
-    std::atomic<bool> findWanted_{false};
-    esp_err_t findErr_ = ESP_ERR_NOT_FINISHED;
-    std::array<char, 24> findChat_{};
-    std::array<char, 40> findName_{};
+    struct FindChat {
+        std::atomic<bool> wanted{false};
+        esp_err_t err = ESP_ERR_NOT_FINISHED;
+        std::array<char, 24> chat{};
+        std::array<char, 40> name{};
+    } find_;
     std::atomic<bool> reload_{true};
 
     // Settings copy (task only, refreshed on reload).

@@ -1374,8 +1374,8 @@ esp_err_t WebServer::getWifiScan(httpd_req_t* req)
     size_t n = 0;
     esp_err_t err = d_.wifi.scan(nets, WifiManager::kMaxScanResults, n);
     if (err != ESP_OK) return sendError(req, "503 Service Unavailable", "scan failed, try again");
-    char current[sizeof(Settings::staSsid)];
-    d_.cfg.read([&current](const Settings& s) { return copyStr(current, s.staSsid); });
+    std::array<char, sizeof(Settings::staSsid)> current{};
+    d_.cfg.read([&current](const Settings& s) { return copyStr(current.data(), current.size(), s.staSsid); });
     JsonWriter j(req);
     j.beginArray();
     for (size_t i = 0; i < n; i++) {
@@ -1385,7 +1385,7 @@ esp_err_t WebServer::getWifiScan(httpd_req_t* req)
             .num("channel", nets[i].channel)
             .str("auth", WifiManager::authText(nets[i].authmode))
             .boolean("secure", nets[i].authmode != WIFI_AUTH_OPEN)
-            .boolean("current", strcmp(nets[i].ssid, current) == 0)
+            .boolean("current", strcmp(nets[i].ssid, current.data()) == 0)
             .endObject();
     }
     j.endArray();
@@ -1624,6 +1624,30 @@ const char* notifyFormError(const char* server, const char* topic, const char* t
 }
 }  // namespace
 
+// Find chat: started here, run by the notifier's task; the page asks again
+// (poll=1) until it is done, so the web server never waits on Telegram.
+esp_err_t WebServer::findChat(httpd_req_t* req, const char* form)
+{
+    std::array<char, 4> poll{};
+    field(form, "poll", poll.data(), poll.size());
+    if (poll[0] != '1') d_.notifier->startFindChat();
+    std::array<char, 24> chat{};
+    std::array<char, 40> name{};
+    const esp_err_t err = d_.notifier->findChatResult(chat.data(), chat.size(), name.data(), name.size());
+    if (err == ESP_ERR_NOT_FINISHED) {
+        JsonWriter j(req);
+        j.beginObject().boolean("ok", true).boolean("pending", true).endObject();
+        return j.finish();
+    }
+    if (err == ESP_ERR_INVALID_STATE) return sendError(req, "409 Conflict", "save the bot token first");
+    if (err == ESP_ERR_INVALID_ARG) return sendError(req, "400 Bad Request", "bot token not accepted");
+    if (err == ESP_ERR_NOT_FOUND) return sendError(req, "404 Not Found", "no message yet: send /start to your bot, then try again");
+    if (err != ESP_OK) return sendError(req, "502 Bad Gateway", "could not reach Telegram");
+    JsonWriter j(req);
+    j.beginObject().boolean("ok", true).str("chat", chat.data()).str("name", name.data()).endObject();
+    return j.finish();
+}
+
 // action=save (server, topic, token, tgToken, tgChat, events, commands;
 // empty token = keep, clearNtfyToken=1 / clearTgToken=1 remove), action=test,
 // action=findchat (Telegram chat that last wrote to the bot).
@@ -1637,28 +1661,7 @@ esp_err_t WebServer::postNotify(httpd_req_t* req)
         d_.notifier->test();
         return sendOk(req, "test sent");
     }
-    if (strcmp(action.data(), "findchat") == 0) {
-        // Started here, run by the notifier's task; the page asks again
-        // (poll=1) until it is done, so the web server never waits on Telegram.
-        std::array<char, 4> poll{};
-        field(form.data(), "poll", poll.data(), poll.size());
-        if (poll[0] != '1') d_.notifier->startFindChat();
-        std::array<char, 24> chat{};
-        std::array<char, 40> name{};
-        const esp_err_t err = d_.notifier->findChatResult(chat.data(), chat.size(), name.data(), name.size());
-        if (err == ESP_ERR_NOT_FINISHED) {
-            JsonWriter j(req);
-            j.beginObject().boolean("ok", true).boolean("pending", true).endObject();
-            return j.finish();
-        }
-        if (err == ESP_ERR_INVALID_STATE) return sendError(req, "409 Conflict", "save the bot token first");
-        if (err == ESP_ERR_INVALID_ARG) return sendError(req, "400 Bad Request", "bot token not accepted");
-        if (err == ESP_ERR_NOT_FOUND) return sendError(req, "404 Not Found", "no message yet: send /start to your bot, then try again");
-        if (err != ESP_OK) return sendError(req, "502 Bad Gateway", "could not reach Telegram");
-        JsonWriter j(req);
-        j.beginObject().boolean("ok", true).str("chat", chat.data()).str("name", name.data()).endObject();
-        return j.finish();
-    }
+    if (strcmp(action.data(), "findchat") == 0) return findChat(req, form.data());
     if (strcmp(action.data(), "save") != 0) return sendError(req, "400 Bad Request", "unknown action");
     std::array<char, 64> server{};
     std::array<char, 48> topic{};

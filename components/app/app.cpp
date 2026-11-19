@@ -259,16 +259,20 @@ void App::applyUpstream(void* ctx)
     // The few fields needed, not a 1.3 KB Settings copy on the event task.
     struct Upstream {
         UpstreamMode upstreamMode;
-        uint32_t upstreamIp, upstreamIp2;
-        bool dot, cnameCheck;
-        uint8_t bypassGuard, safeSearch, privacy;
+        uint32_t upstreamIp;
+        uint32_t upstreamIp2;
+        bool dot;
+        bool cnameCheck;
+        uint8_t bypassGuard;
+        uint8_t safeSearch;
+        uint8_t privacy;
         uint16_t rateLimit;
-        char dotHost[sizeof(Settings::dotHost)];
+        std::array<char, sizeof(Settings::dotHost)> dotHost;
     };
     const Upstream s = self->config_.read([](const Settings& c) {
         Upstream u{c.upstreamMode, c.upstreamIp, c.upstreamIp2, c.dot, c.cnameCheck,
                    c.bypassGuard, c.safeSearch, c.privacy, c.rateLimit, {}};
-        copyStr(u.dotHost, c.dotHost);
+        copyStr(u.dotHost.data(), u.dotHost.size(), c.dotHost);
         return u;
     });
     const uint32_t self4 = self->wifi_.staIp();
@@ -288,7 +292,7 @@ void App::applyUpstream(void* ctx)
     // DNS over TLS: everything allowed goes through the local TLS proxy, with no
     // plain-UDP backup (it would leak the queries the user wants encrypted).
     const bool dot = DotProxy::available() && s.dot && s.dotHost[0];
-    self->dns_.dot().setHost(dot ? s.dotHost : "", up);
+    self->dns_.dot().setHost(dot ? s.dotHost.data() : "", up);
     if (dot)
         self->dns_.setUpstream(htonl(INADDR_LOOPBACK), 0);
     else
@@ -304,7 +308,7 @@ void App::applyUpstream(void* ctx)
     formatIp4(up, ip);
     if (self->dns_.backupUpstream()) formatIp4(self->dns_.backupUpstream(), ip2);
     if (dot)
-        ESP_LOGI(TAG, "upstream DNS over TLS: %s:853", s.dotHost);
+        ESP_LOGI(TAG, "upstream DNS over TLS: %s:853", s.dotHost.data());
     else
         ESP_LOGI(TAG, "upstream DNS %s, backup %s", ip, ip2);
 }

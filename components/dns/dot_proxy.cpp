@@ -66,7 +66,7 @@ bool readExact(esp_tls_t* tls, uint8_t* out, size_t n)
 // plain upstream (port 53), not through the device's own resolver: that is
 // often this device, whose DNS server forwards to this same task (stuck in
 // connect) and whose bypass guard answers NXDOMAIN for DoT names.
-bool resolveA(const char* host, uint32_t server, uint32_t& out)
+bool resolveA(const char* host, size_t hostCap, uint32_t server, uint32_t& out)
 {
     static std::array<uint8_t, 512> pkt;  // dot task only
     const auto id = static_cast<uint16_t>(esp_random());
@@ -75,14 +75,18 @@ bool resolveA(const char* host, uint32_t server, uint32_t& out)
     dns::wr16(pkt.data(), id);
     pkt[2] = 0x01;  // RD
     dns::wr16(pkt.data() + 4, 1);
-    for (const char* p = host; *p;) {
-        const char* dot = strchr(p, '.');
-        const size_t l = dot ? static_cast<size_t>(dot - p) : strlen(p);
+    // The name as labels: "dns.quad9.net" -> 3 dns 5 quad9 3 net 0.
+    const size_t hostLen = strnlen(host, hostCap);
+    size_t start = 0;
+    while (start < hostLen) {
+        const auto* dot = static_cast<const char*>(memchr(host + start, '.', hostLen - start));
+        const size_t end = dot ? static_cast<size_t>(dot - host) : hostLen;
+        const size_t l = end - start;
         if (l == 0 || l > 63 || n + l + 6 > pkt.size()) return false;
         pkt[n++] = static_cast<uint8_t>(l);
-        memcpy(pkt.data() + n, p, l);
+        memcpy(pkt.data() + n, host + start, l);
         n += l;
-        p += l + (dot ? 1 : 0);
+        start = end + 1;
     }
     pkt[n++] = 0;
     dns::wr16(pkt.data() + n, dns::kTypeA);
@@ -101,8 +105,8 @@ bool resolveA(const char* host, uint32_t server, uint32_t& out)
     if (sendto(s, pkt.data(), n, 0, reinterpret_cast<sockaddr*>(&to), sizeof(to)) == static_cast<int>(n))
         len = recv(s, pkt.data(), pkt.size(), 0);
     close(s);
-    if (len < static_cast<int>(dns::kHeaderLen) || dns::rd16(pkt.data()) != id || !(pkt[2] & 0x80) || (pkt[3] & 0x0F))
-        return false;
+    const bool answer = len >= static_cast<int>(dns::kHeaderLen) && dns::rd16(pkt.data()) == id;
+    if (!answer || !(pkt[2] & 0x80) || (pkt[3] & 0x0F)) return false;  // NOSONAR QR bit and RCODE of the DNS header
     const auto size = static_cast<size_t>(len);
     size_t i = dns::questionEnd(pkt.data(), size);
     for (unsigned a = dns::rd16(pkt.data() + 6); i && a > 0; a--) {
@@ -180,12 +184,12 @@ void DotProxy::run()
         tls = esp_tls_init();
         if (!tls) return false;
         // Connect to the address, check the certificate (and send SNI) for the name.
-        char addr[16];
+        std::array<char, 16> addr{};
         uint32_t ip = 0;
         if (parseIp4(host, ip)) {
-            copyStr(addr, host);
-        } else if (bootstrap && resolveA(host, bootstrap, ip)) {
-            formatIp4(ip, addr);
+            copyStr(addr.data(), addr.size(), host);
+        } else if (bootstrap && resolveA(host, sizeof(host), bootstrap, ip)) {
+            formatIp4(ip, addr.data());
         } else {
             ESP_LOGW(TAG, "could not look up %s", host);
             esp_tls_conn_destroy(tls);
@@ -197,7 +201,7 @@ void DotProxy::run()
         cfg.timeout_ms = 4000;
         cfg.non_block = false;
         cfg.common_name = host;
-        if (esp_tls_conn_new_sync(addr, static_cast<int>(strlen(addr)), 853, &cfg, tls) != 1) {
+        if (esp_tls_conn_new_sync(addr.data(), static_cast<int>(strnlen(addr.data(), addr.size())), 853, &cfg, tls) != 1) {
             ESP_LOGW(TAG, "connect to %s:853 failed", host);
             esp_tls_conn_destroy(tls);
             tls = nullptr;

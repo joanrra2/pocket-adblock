@@ -121,6 +121,7 @@ private:
     esp_err_t postNames(httpd_req_t* req);
     esp_err_t getNotify(httpd_req_t* req);
     esp_err_t postNotify(httpd_req_t* req);
+    esp_err_t findChat(httpd_req_t* req, const char* form);
     // A client's name: yours (by MAC), else a local DNS name for its IP, else the
     // hostname it gave this device's DHCP server. Returns "you", "dns", "dhcp"
     // or nullptr (no name).
