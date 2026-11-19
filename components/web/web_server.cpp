@@ -858,9 +858,9 @@ esp_err_t WebServer::getBackup(httpd_req_t* req)
 
 namespace {
 // Restore scratch, httpd task only (one request at a time).
-Settings gRestoreSettings;
-Settings gCurrentSettings;
-NotifySettings gRestoreNotify;
+Settings gRestoreSettings;        // NOSONAR scratch, written on every restore: const is not possible
+Settings gCurrentSettings;        // NOSONAR as above
+NotifySettings gRestoreNotify;    // NOSONAR as above
 
 // A backup's settings, brought up to this firmware's version (an older file's
 // admin password gets hashed), into gRestoreSettings; passwords missing from

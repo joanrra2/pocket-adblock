@@ -32,7 +32,7 @@ public:
 
     BackupReader(uint8_t* buf, size_t cap) : buf_(buf), cap_(cap) {}
 
-    void feed(const char* p, size_t n)
+    void feed(const char* p, size_t n)  // NOSONAR the host tests build as C++17: no std::span
     {
         for (size_t i = 0; i < n && !why_; i++) put(p[i]);
     }
@@ -77,7 +77,7 @@ private:
             endLine();
             return;
         }
-        switch (state_) {
+        switch (state_) {  // NOSONAR no "using enum": the host tests build as C++17
             case State::Key:
                 if (keyLen_ == 0 && c == '#') {
                     state_ = State::Skip;
@@ -162,7 +162,7 @@ private:
         quad_ = 0;
     }
 
-    void endLine()
+    void endLine()  // NOSONAR no "using enum": the host tests build as C++17
     {
         if (state_ == State::Format) {
             formatOk_ = formatOk_ || (fmtLen_ == 1 && formatOne_);

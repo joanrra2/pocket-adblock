@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "sinkhole/backup_reader.hpp"
@@ -606,7 +607,7 @@ static void testNotifyParse()
 }
 
 // Feeds a restore file in pieces of `step` bytes; returns finish().
-static const char* readBackup(BackupReader& r, const std::string& file, size_t step)
+static const char* readBackup(BackupReader& r, std::string_view file, size_t step)
 {
     for (size_t i = 0; i < file.size(); i += step) r.feed(file.data() + i, std::min(step, file.size() - i));
     return r.finish();

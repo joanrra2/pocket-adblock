@@ -275,7 +275,7 @@ Updater::ListFetch Updater::downloadList(const char* url, char* why, size_t whyL
     snprintf(why, whyLen, "ok");
     // Checked here too, so a skipped download doesn't erase the other slot first.
     if (!tlsRoom()) {
-        snprintf(why, whyLen, "not enough free memory for HTTPS right now");
+        snprintf(why, whyLen, "not enough free memory for HTTPS right now");  // NOSONAR copyStr is inlined: more flash on the 4 MB C6
         return ListFetch::Failed;
     }
     esp_err_t err = store_.beginWrite();
@@ -460,7 +460,7 @@ esp_err_t Updater::httpGet(const char* url, Sink sink, void* ctx, char* why, siz
     cfg.keep_alive_enable = false;
 
     if (!tlsRoom()) {  // the next scheduled check tries again
-        snprintf(why, whyLen, "not enough free memory for HTTPS right now");
+        snprintf(why, whyLen, "not enough free memory for HTTPS right now");  // NOSONAR copyStr is inlined: more flash on the 4 MB C6
         return ESP_ERR_NO_MEM;
     }
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
