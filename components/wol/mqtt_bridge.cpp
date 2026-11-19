@@ -7,7 +7,8 @@
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
 #include "esp_mac.h"
-#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "mqtt_client.h"
 #include "sinkhole/text.hpp"
 #include "sinkhole/wol.hpp"
@@ -16,9 +17,17 @@ namespace sinkhole {
 
 namespace {
 constexpr const char* TAG = "mqtt";
-constexpr uint64_t kTickUs = 5ULL * 1000 * 1000;  // announce/refresh check
-constexpr uint32_t kStatsEveryTicks = 12;         // stats every 60 s
+constexpr uint32_t kTickMs = 5000;         // announce/refresh check
+constexpr uint32_t kStatsEveryTicks = 12;  // stats every 60 s
 constexpr const char* kHaPrefix = "homeassistant";
+// Every queued QoS 1 message is a heap copy kept until the broker acks it.
+// The limit bounds that heap; bulk messages (discovery) wait for the queue to
+// drain below kPaceBytes, so state changes and wake results keep room.
+constexpr uint64_t kOutboxLimit = 8 * 1024;
+constexpr int kPaceBytes = 4 * 1024;
+constexpr int kPaceWaits = 100;  // x 100 ms: give up on a broker that stopped acking
+// Discovery + stats: one 768-byte payload and snprintf; measured on the S3.
+constexpr uint32_t kTaskStack = 3072;
 }  // namespace
 
 esp_err_t MqttBridge::start()
@@ -51,18 +60,23 @@ esp_err_t MqttBridge::start()
     cfg.session.last_will.qos = 1;
     cfg.session.last_will.retain = 1;
     cfg.session.keepalive = 60;
+    cfg.outbox.limit = kOutboxLimit;
 
     auto client = esp_mqtt_client_init(&cfg);
     if (!client) return ESP_ERR_NO_MEM;
     client_ = client;
     esp_mqtt_client_register_event(client, MQTT_EVENT_ANY, &MqttBridge::onEvent, this);
 
-    esp_timer_create_args_t targs{};
-    targs.callback = &MqttBridge::onTick;
-    targs.arg = this;
-    targs.name = "mqtt_tick";
-    esp_timer_handle_t timer = nullptr;
-    if (esp_timer_create(&targs, &timer) == ESP_OK) esp_timer_start_periodic(timer, kTickUs);
+    // Discovery, stats and the switch state are published from a task of
+    // their own, not an esp_timer callback: they wait for the MQTT client lock
+    // (held while it reconnects) and for the outbox to drain, which would
+    // stall every other timer (LED, Wi-Fi retry, restart). Created here, at
+    // boot and only with a broker set, so boards without MQTT keep the RAM.
+    TaskHandle_t task = nullptr;
+    if (xTaskCreate(&MqttBridge::taskEntry, "mqtt_pub", kTaskStack, this, 2, &task) == pdPASS)
+        task_ = task;
+    else
+        ESP_LOGE(TAG, "no memory for the publisher task: no discovery or stats");
     return esp_mqtt_client_start(client);
 }
 
@@ -72,9 +86,14 @@ void MqttBridge::onEvent(void* arg, const char* base, int32_t id, void* data)
     static_cast<MqttBridge*>(arg)->handleEvent(id, data);
 }
 
-void MqttBridge::onTick(void* arg)
+void MqttBridge::taskEntry(void* arg)  // NOSONAR FreeRTOS task entry: the signature takes void*
 {
-    static_cast<MqttBridge*>(arg)->tick();
+    auto* self = static_cast<MqttBridge*>(arg);
+    for (;;) {
+        // Woken early on connect, so Home Assistant gets the entities at once.
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(kTickMs));
+        self->tick();
+    }
 }
 
 void MqttBridge::onHostState(void* ctx, const char* name, bool online)  // NOSONAR C-style listener signature
@@ -99,27 +118,44 @@ void MqttBridge::onHostResult(void* ctx, const char* name, const char* result)  
 
 // Retained "watch only" results for hosts without a MAC, on every connect:
 // a result set while offline (or before boot) must still reach the broker.
-void MqttBridge::publishWatchOnly()
+bool MqttBridge::publishWatchOnly()
 {
-    std::array<char, 128> topic{};
-    wol_.forEachHost([this, &topic](const WolHost& h) {
-        if (!watchOnly(h)) return;
-        snprintf(topic.data(), topic.size(), "%s/wol/%s/result", prefix_, h.name);
-        enqueue(topic.data(), kWatchOnlyResult, true);
-    });
+    WolHost h{};
+    for (size_t i = 0; wol_.hostAt(i, h); i++) {
+        if (!watchOnly(h)) continue;
+        snprintf(pub_.topic.data(), pub_.topic.size(), "%s/wol/%s/result", prefix_, h.name);
+        if (!paced(pub_.topic.data(), kWatchOnlyResult)) return false;
+    }
+    return true;
 }
 
-void MqttBridge::enqueue(const char* topic, const char* payload, bool retain)
+bool MqttBridge::enqueue(const char* topic, const char* payload, bool retain)
 {
-    esp_mqtt_client_enqueue(static_cast<esp_mqtt_client_handle_t>(client_), topic, payload,
-                            static_cast<int>(strlen(payload)), 1, retain ? 1 : 0, true);
+    const int id = esp_mqtt_client_enqueue(static_cast<esp_mqtt_client_handle_t>(client_), topic, payload,
+                                           static_cast<int>(strlen(payload)), 1, retain ? 1 : 0, true);
+    if (id == -2) ESP_LOGW(TAG, "queue full, not sent: %s", topic);
+    return id >= 0;
+}
+
+// Waits for the outbox to drain below kPaceBytes, then queues. False when the
+// broker went away or stopped acking: the caller retries the whole batch later.
+bool MqttBridge::paced(const char* topic, const char* payload)
+{
+    auto client = static_cast<esp_mqtt_client_handle_t>(client_);
+    for (int i = 0; i < kPaceWaits; i++) {
+        if (!connected_) return false;
+        if (esp_mqtt_client_get_outbox_size(client) <= kPaceBytes) return enqueue(topic, payload, true);
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    ESP_LOGW(TAG, "broker is not acking, will retry");
+    return false;
 }
 
 void MqttBridge::publishBlocking()
 {
     if (!hooks_.blocking) return;
     const bool on = hooks_.blocking(hooks_.ctx);
-    lastBlocking_ = on;
+    pub_.lastBlocking = on;
     char topic[80];
     snprintf(topic, sizeof(topic), "%s/blocking", prefix_);
     enqueue(topic, on ? "ON" : "OFF", true);
@@ -146,18 +182,18 @@ void MqttBridge::deviceJson(char* out, size_t cap)
 
 // Retained discovery configs. Home Assistant creates the entities, and
 // re-creates them whenever it restarts (it reads the retained messages).
-void MqttBridge::announce()
+// Paced: false when the broker went away part way (retried as a whole).
+bool MqttBridge::announce()
 {
-    char dev[256], topic[160];
-    deviceJson(dev, sizeof(dev));
+    deviceJson(pub_.dev.data(), pub_.dev.size());
 
     if (hooks_.setBlocking) {
-        snprintf(topic, sizeof(topic), "%s/switch/%s/blocking/config", kHaPrefix, nodeId_);
-        snprintf(buf_, sizeof(buf_),
+        snprintf(pub_.topic.data(), pub_.topic.size(), "%s/switch/%s/blocking/config", kHaPrefix, nodeId_);
+        snprintf(pub_.buf.data(), pub_.buf.size(),
                  "{\"name\":\"Blocking\",\"uniq_id\":\"%s_blocking\",\"stat_t\":\"%s/blocking\","
                  "\"cmd_t\":\"%s/blocking/set\",\"icon\":\"mdi:shield-check\",%s}",
-                 nodeId_, prefix_, prefix_, dev);
-        enqueue(topic, buf_, true);
+                 nodeId_, prefix_, prefix_, pub_.dev.data());
+        if (!paced(pub_.topic.data(), pub_.buf.data())) return false;
     }
     if (hooks_.stats) {
         struct Sensor {
@@ -176,90 +212,101 @@ void MqttBridge::announce()
             {"uptime", "Uptime", "s", "measurement", "mdi:timer-outline"},
         };
         for (const Sensor& s : kSensors) {
-            snprintf(topic, sizeof(topic), "%s/sensor/%s/%s/config", kHaPrefix, nodeId_, s.id);
-            snprintf(buf_, sizeof(buf_),
+            snprintf(pub_.topic.data(), pub_.topic.size(), "%s/sensor/%s/%s/config", kHaPrefix, nodeId_, s.id);
+            snprintf(pub_.buf.data(), pub_.buf.size(),
                      "{\"name\":\"%s\",\"uniq_id\":\"%s_%s\",\"stat_t\":\"%s/stats\","
                      "\"val_tpl\":\"{{ value_json.%s }}\",\"unit_of_meas\":\"%s\",\"stat_cla\":\"%s\","
                      "\"icon\":\"%s\",%s}",
-                     s.name, nodeId_, s.id, prefix_, s.id, s.unit, s.stateClass, s.icon, dev);
-            enqueue(topic, buf_, true);
+                     s.name, nodeId_, s.id, prefix_, s.id, s.unit, s.stateClass, s.icon, pub_.dev.data());
+            if (!paced(pub_.topic.data(), pub_.buf.data())) return false;
         }
         // Text sensor: why the device last restarted (crash, watchdog, update...).
-        snprintf(topic, sizeof(topic), "%s/sensor/%s/restart/config", kHaPrefix, nodeId_);
-        snprintf(buf_, sizeof(buf_),
+        snprintf(pub_.topic.data(), pub_.topic.size(), "%s/sensor/%s/restart/config", kHaPrefix, nodeId_);
+        snprintf(pub_.buf.data(), pub_.buf.size(),
                  "{\"name\":\"Last restart\",\"uniq_id\":\"%s_restart\",\"stat_t\":\"%s/stats\","
                  "\"val_tpl\":\"{{ value_json.restart }}\",\"ent_cat\":\"diagnostic\",\"icon\":\"mdi:restart\",%s}",
-                 nodeId_, prefix_, dev);
-        enqueue(topic, buf_, true);
+                 nodeId_, prefix_, pub_.dev.data());
+        if (!paced(pub_.topic.data(), pub_.buf.data())) return false;
     }
 
-    // One Wake button per host (+ online sensor when it has an IP). Hosts that
-    // were removed get an empty retained config, which deletes the entity.
-    char current[WolService::kCapacity][24] = {};
-    size_t n = 0;
-    wol_.forEachHost([&](const WolHost& h) {
-        if (n >= WolService::kCapacity) return;
-        const size_t i = n++;
-        const char* name = h.name;
-        objectId(name, current[i], sizeof(current[i]));
-        snprintf(topic, sizeof(topic), "%s/button/%s/wol_%s/config", kHaPrefix, nodeId_, current[i]);
-        if (watchOnly(h)) {
-            enqueue(topic, "", true);  // nothing to wake: no button
-        } else {
-            snprintf(buf_, sizeof(buf_),
-                     "{\"name\":\"Wake %s\",\"uniq_id\":\"%s_wol_%s\",\"cmd_t\":\"%s/wol/%s/set\","
-                     "\"pl_prs\":\"wake\",\"icon\":\"mdi:power\",%s}",
-                     name, nodeId_, current[i], prefix_, name, dev);
-            enqueue(topic, buf_, true);
-        }
-        snprintf(topic, sizeof(topic), "%s/binary_sensor/%s/wol_%s/config", kHaPrefix, nodeId_, current[i]);
-        if (h.ip) {
-            snprintf(buf_, sizeof(buf_),
-                     "{\"name\":\"%s online\",\"uniq_id\":\"%s_wol_%s_online\",\"stat_t\":\"%s/wol/%s/state\","
-                     "\"pl_on\":\"online\",\"pl_off\":\"offline\",\"dev_cla\":\"connectivity\",%s}",
-                     name, nodeId_, current[i], prefix_, name, dev);
-            enqueue(topic, buf_, true);
-        } else {
-            enqueue(topic, "", true);
-        }
-    });
-    for (auto& old : announced_) {
+    // Hosts are copied one at a time (hostAt): pacing waits, and must not
+    // hold the WoL lock (the probe and the web UI need it) while it does.
+    std::array<char, 24> id{};
+    WolHost h{};
+    // Hosts that were removed get an empty retained config, which deletes
+    // the entity. Done first: the loop below overwrites pub_.announced.
+    for (const auto& old : pub_.announced) {
         if (!old[0]) continue;
         bool still = false;
-        for (size_t i = 0; i < n && !still; i++) still = strcmp(old, current[i]) == 0;
+        for (size_t i = 0; !still && wol_.hostAt(i, h); i++) {
+            objectId(h.name, id.data(), id.size());
+            still = strcmp(old.data(), id.data()) == 0;
+        }
         if (still) continue;
-        snprintf(topic, sizeof(topic), "%s/button/%s/wol_%s/config", kHaPrefix, nodeId_, old);
-        enqueue(topic, "", true);
-        snprintf(topic, sizeof(topic), "%s/binary_sensor/%s/wol_%s/config", kHaPrefix, nodeId_, old);
-        enqueue(topic, "", true);
+        snprintf(pub_.topic.data(), pub_.topic.size(), "%s/button/%s/wol_%.23s/config", kHaPrefix, nodeId_, old.data());
+        if (!paced(pub_.topic.data(), "")) return false;
+        snprintf(pub_.topic.data(), pub_.topic.size(), "%s/binary_sensor/%s/wol_%.23s/config", kHaPrefix, nodeId_, old.data());
+        if (!paced(pub_.topic.data(), "")) return false;
     }
-    memcpy(announced_, current, sizeof(announced_));
+
+    // One Wake button per host (+ online sensor when it has an IP).
+    size_t n = 0;
+    for (; n < WolService::kCapacity && wol_.hostAt(n, h); n++) {
+        objectId(h.name, pub_.announced[n].data(), pub_.announced[n].size());
+        const char* oid = pub_.announced[n].data();
+        snprintf(pub_.topic.data(), pub_.topic.size(), "%s/button/%s/wol_%s/config", kHaPrefix, nodeId_, oid);
+        if (watchOnly(h)) {
+            pub_.buf[0] = '\0';  // nothing to wake: no button
+        } else {
+            snprintf(pub_.buf.data(), pub_.buf.size(),
+                     "{\"name\":\"Wake %s\",\"uniq_id\":\"%s_wol_%s\",\"cmd_t\":\"%s/wol/%s/set\","
+                     "\"pl_prs\":\"wake\",\"icon\":\"mdi:power\",%s}",
+                     h.name, nodeId_, oid, prefix_, h.name, pub_.dev.data());
+        }
+        if (!paced(pub_.topic.data(), pub_.buf.data())) return false;
+        snprintf(pub_.topic.data(), pub_.topic.size(), "%s/binary_sensor/%s/wol_%s/config", kHaPrefix, nodeId_, oid);
+        if (h.ip) {
+            snprintf(pub_.buf.data(), pub_.buf.size(),
+                     "{\"name\":\"%s online\",\"uniq_id\":\"%s_wol_%s_online\",\"stat_t\":\"%s/wol/%s/state\","
+                     "\"pl_on\":\"online\",\"pl_off\":\"offline\",\"dev_cla\":\"connectivity\",%s}",
+                     h.name, nodeId_, oid, prefix_, h.name, pub_.dev.data());
+        } else {
+            pub_.buf[0] = '\0';
+        }
+        if (!paced(pub_.topic.data(), pub_.buf.data())) return false;
+    }
+    for (size_t i = n; i < WolService::kCapacity; i++) pub_.announced[i][0] = '\0';
     ESP_LOGI(TAG, "Home Assistant discovery sent (%u WoL hosts)", static_cast<unsigned>(n));
+    return true;
 }
 
 void MqttBridge::tick()
 {
     if (!connected_) return;
+    if (watchOnlyNow_.exchange(false) && !publishWatchOnly()) watchOnlyNow_ = true;
     if (ha_) {
         // Re-announce when the WoL host list changed (names and IPs).
         const uint32_t h = wol_.fingerprint();
-        if (announceNow_.exchange(false) || h != hostsHash_) {
-            hostsHash_ = h;
-            announce();
-            ticks_ = kStatsEveryTicks;  // fresh states right after announcing
+        if (announceNow_.exchange(false) || h != pub_.hostsHash) {
+            if (announce()) {
+                pub_.hostsHash = h;
+                statsNow_ = true;  // fresh states right after announcing
+            } else {
+                announceNow_ = true;  // broker gone or slow: again on the next tick
+            }
         }
     }
     // Switch changed elsewhere (web UI, pause ending): tell Home Assistant now.
-    if (hooks_.blocking && lastBlocking_ >= 0 && hooks_.blocking(hooks_.ctx) != (lastBlocking_ == 1))
+    if (hooks_.blocking && pub_.lastBlocking >= 0 && hooks_.blocking(hooks_.ctx) != (pub_.lastBlocking == 1))
         publishBlocking();
-    if (++ticks_ >= kStatsEveryTicks) {
-        ticks_ = 0;
+    ++pub_.ticks;
+    if (statsNow_.exchange(false) || pub_.ticks >= kStatsEveryTicks) {
+        pub_.ticks = 0;
         publishBlocking();
         if (hooks_.stats) {
-            hooks_.stats(hooks_.ctx, buf_, sizeof(buf_));
-            char topic[80];
-            snprintf(topic, sizeof(topic), "%s/stats", prefix_);
-            enqueue(topic, buf_, false);
+            hooks_.stats(hooks_.ctx, pub_.buf.data(), pub_.buf.size());
+            snprintf(pub_.topic.data(), pub_.topic.size(), "%s/stats", prefix_);
+            enqueue(pub_.topic.data(), pub_.buf.data(), false);
         }
     }
 }
@@ -279,9 +326,11 @@ void MqttBridge::handleEvent(int32_t id, void* data)
             esp_mqtt_client_subscribe_single(client, topic, 1);
         }
         esp_mqtt_client_publish(client, statusTopic_, "online", 0, 1, 1);
-        publishWatchOnly();
+        // The rest is bulk: the publisher task sends it, paced.
+        watchOnlyNow_ = true;
         announceNow_ = ha_;
-        ticks_ = kStatsEveryTicks;  // publish states on the next tick
+        statsNow_ = true;
+        if (task_) xTaskNotifyGive(task_);
         ESP_LOGI(TAG, "connected%s", ha_ ? ", Home Assistant discovery on" : "");
     } else if (id == MQTT_EVENT_DISCONNECTED) {
         connected_ = false;

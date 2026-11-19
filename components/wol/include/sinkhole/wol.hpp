@@ -84,6 +84,15 @@ public:
         LockGuard g(mu_);
         for (size_t i = 0; i < count_; i++) fn(static_cast<const WolHost&>(hosts_[i].host));
     }
+    // Copies host i. For callers that must not wait while holding the lock
+    // (the list may change between calls: check fingerprint() afterwards).
+    bool hostAt(size_t i, WolHost& out)
+    {
+        LockGuard g(mu_);
+        if (i >= count_) return false;
+        out = hosts_[i].host;
+        return true;
+    }
     // Changes whenever a host is added, removed or edited.
     uint32_t fingerprint()
     {
@@ -187,13 +196,14 @@ public:
 
 private:
     static void onEvent(void* arg, const char* base, int32_t id, void* data);  // NOSONAR esp_event handler signature
-    static void onTick(void* arg);
+    static void taskEntry(void* arg);  // NOSONAR FreeRTOS task entry: the signature takes void*
     void handleEvent(int32_t id, void* data);
     void tick();
-    void announce();
+    bool announce();
+    bool publishWatchOnly();
     void publishBlocking();
-    void publishWatchOnly();
-    void enqueue(const char* topic, const char* payload, bool retain);
+    bool enqueue(const char* topic, const char* payload, bool retain);
+    bool paced(const char* topic, const char* payload);
     void deviceJson(char* out, size_t cap);
     static void objectId(const char* name, char* out, size_t cap);
 
@@ -201,12 +211,13 @@ private:
     WolService& wol_;
     MqttHooks hooks_;
     void* client_ = nullptr;  // esp_mqtt_client_handle_t
+    TaskHandle_t task_ = nullptr;  // the publisher task
     std::atomic<bool> connected_{false};
+    // Set by the MQTT task on connect, done by the publisher task.
     std::atomic<bool> announceNow_{false};
+    std::atomic<bool> watchOnlyNow_{false};
+    std::atomic<bool> statsNow_{false};
     bool ha_ = false;
-    uint32_t hostsHash_ = 0;
-    uint32_t ticks_ = 0;
-    int8_t lastBlocking_ = -1;  // last published switch state, -1 = none
     // Strings the MQTT client keeps pointers to.
     char uri_[128]{};
     char user_[64]{};
@@ -216,9 +227,17 @@ private:
     char clientId_[32]{};
     char nodeId_[24]{};
     char hostname_[32]{};
-    // Only used from the tick timer (single context).
-    char buf_[768]{};
-    char announced_[WolService::kCapacity][24]{};  // object ids of announced hosts
+    // Publisher task only: members rather than its stack.
+    struct Publisher {
+        uint32_t hostsHash = 0;
+        uint32_t ticks = 0;
+        int8_t lastBlocking = -1;  // last published switch state, -1 = none
+        std::array<char, 768> buf{};
+        std::array<char, 256> dev{};
+        std::array<char, 160> topic{};
+        std::array<std::array<char, 24>, WolService::kCapacity> announced{};  // object ids of announced hosts
+    };
+    Publisher pub_;
 };
 
 }  // namespace sinkhole
