@@ -210,6 +210,40 @@ local name above that points at its IP, else the hostname it sent with its DHCP 
 when this device is the network's DHCP server. Fixed DHCP addresses (reservations) stay
 a job for the router: its DHCP server does them, and this one hands out a pool only.
 
+### Away from home (Tailscale)
+
+The device can't run Tailscale itself, but your phone and laptop can still use it as
+their DNS when they're away, through [Tailscale](https://tailscale.com) and one
+always-on machine at home:
+
+1. On that machine (a Raspberry Pi, a NAS, a PC, or a router that runs Tailscale),
+   share your home network with the tailnet as a
+   [subnet router](https://tailscale.com/kb/1019/subnets):
+   `sudo tailscale set --advertise-routes=192.168.1.0/24` (your network's range;
+   on Linux, turn on IP forwarding first as that guide shows), then approve the
+   route in the Tailscale admin console.
+2. In the admin console, on the *DNS* page under *Global nameservers*, add a custom
+   nameserver with this device's LAN address. Turn on *Override DNS servers*, so
+   devices use it on any network, not just at home.
+3. Linux devices only: `sudo tailscale set --accept-routes`. Phones, Windows and
+   macOS pick up subnet routes by themselves.
+
+Tailnet names (`*.ts.net`, MagicDNS) keep working: Tailscale answers those itself
+and sends everything else here. The queries travel inside Tailscale's encrypted
+tunnel, and the web UI is reachable at the same address while you're away.
+
+Things to know:
+
+- **All tailnet devices show up as one client:** the subnet router's address. Stats,
+  per-device rules and the rate limit (*Settings → Extra protection*, 1000 queries a
+  minute per device by default) apply to all of them together. Give that address a
+  name under *Devices*, and raise the limit if many devices are out at once.
+- **No home Internet or no power here means no DNS away from home** while *Override
+  DNS servers* is on. A second nameserver in the admin console would answer instead,
+  without blocking.
+- An *exit node* at home only reaches this device if it also advertises the home
+  subnet (step 1).
+
 ## Blocklists
 
 ```bash
