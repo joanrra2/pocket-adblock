@@ -281,12 +281,7 @@ void Notifier::run()
 {
     uint32_t lastPoll = 0;
     for (;;) {
-        if (reload_.exchange(false)) {
-            LockGuard net(netMu_);
-            loadSettings();
-            ntfyHttp_->close();
-            tgHttp_->close();
-        }
+        reloadIfAsked();
         const bool any = status_.ntfy.configured || status_.telegram.configured;
         const bool polling = any && c_.commands;
         Msg m{};
@@ -298,13 +293,27 @@ void Notifier::run()
             continue;
         }
         if (find_.wanted.exchange(false)) runFindChat();
-        const uint32_t now = uptimeSeconds();
-        if (polling && now - lastPoll >= kPollMs / 1000) {
-            lastPoll = now;
-            if (status_.ntfy.configured) pollNtfy();
-            if (status_.telegram.configured) pollTelegram();
-        }
+        if (polling) pollCommands(lastPoll);
     }
+}
+
+void Notifier::reloadIfAsked()
+{
+    if (!reload_.exchange(false)) return;
+    LockGuard net(netMu_);
+    loadSettings();
+    ntfyHttp_->close();
+    tgHttp_->close();
+}
+
+// Commands from the phone, every kPollMs.
+void Notifier::pollCommands(uint32_t& lastPoll)
+{
+    const uint32_t now = uptimeSeconds();
+    if (now - lastPoll < kPollMs / 1000) return;
+    lastPoll = now;
+    if (status_.ntfy.configured) pollNtfy();
+    if (status_.telegram.configured) pollTelegram();
 }
 
 void Notifier::deliver(const Msg& m)

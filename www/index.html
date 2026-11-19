@@ -1025,8 +1025,9 @@ const A={
  },
  ntest:()=>act('/api/notify',{action:'test'},()=>setTimeout(()=>loadNotify().catch(()=>{}),4000)),
  tgfind:async()=>{
+  const poll=async n=>{await new Promise(z=>setTimeout(z,1000));const r=await api('/api/notify',{action:'findchat',poll:1});return r.pending&&n>1?poll(n-1):r};
   try{let r=await api('/api/notify',{action:'findchat'});
-   for(let i=0;i<30&&r.pending;i++){await new Promise(z=>setTimeout(z,1000));r=await api('/api/notify',{action:'findchat',poll:1})} // NOSONAR each poll waits for the one before
+   if(r.pending)r=await poll(30);
    if(r.pending)throw new Error(tr('could not reach Telegram'));
    $('form[data-f="notify"]').tgChat.value=r.chat;toast(tr('Found: {0}. Save to use it.',r.name||r.chat))}
   catch(e){toast(e.message,1)}

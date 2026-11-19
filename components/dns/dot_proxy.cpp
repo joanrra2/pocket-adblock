@@ -109,7 +109,9 @@ bool resolveA(const char* host, size_t hostCap, uint32_t server, uint32_t& out)
     if (!answer || !(pkt[2] & 0x80) || (pkt[3] & 0x0F)) return false;  // NOSONAR QR bit and RCODE of the DNS header
     const auto size = static_cast<size_t>(len);
     size_t i = dns::questionEnd(pkt.data(), size);
-    for (unsigned a = dns::rd16(pkt.data() + 6); i && a > 0; a--) {
+    unsigned answers = dns::rd16(pkt.data() + 6);
+    while (i && answers > 0) {
+        answers--;
         i = dns::skipName(pkt.data(), size, i);
         if (!i || i + 10 > size) return false;
         const uint16_t type = dns::rd16(pkt.data() + i);

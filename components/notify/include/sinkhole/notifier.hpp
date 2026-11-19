@@ -87,6 +87,8 @@ private:
     void runCommand(uint8_t channel, const char* text);
     esp_err_t findTelegramChat(char* chatId, size_t idCap, char* name, size_t nameCap);
     void runFindChat();
+    void reloadIfAsked();
+    void pollCommands(uint32_t& lastPoll);
     void note(ChannelStatus& st, bool ok, const char* error);
 
     Config& cfg_;
@@ -103,7 +105,8 @@ private:
         esp_err_t err = ESP_ERR_NOT_FINISHED;
         std::array<char, 24> chat{};
         std::array<char, 40> name{};
-    } find_;
+    };
+    FindChat find_;
     std::atomic<bool> reload_{true};
 
     // Settings copy (task only, refreshed on reload).
