@@ -44,9 +44,12 @@ public:
     // Queues a test message to every configured service.
     void test();
     // Telegram: the chat that last wrote to the bot (after the owner sent it
-    // /start), so the UI can fill in the chat ID. Runs in the caller's task,
-    // between the notifier's own requests. ESP_ERR_NOT_FOUND: nobody wrote yet.
-    esp_err_t findTelegramChat(char* chatId, size_t idCap, char* name, size_t nameCap);
+    // /start), so the UI can fill in the chat ID. The request runs on the
+    // notifier's task (it can take 20 s); the web UI starts it, then asks for
+    // the result. ESP_ERR_NOT_FINISHED: still running. ESP_ERR_NOT_FOUND:
+    // nobody wrote yet. ESP_ERR_INVALID_STATE: no bot token.
+    void startFindChat();
+    esp_err_t findChatResult(char* chatId, size_t idCap, char* name, size_t nameCap);
 
     struct ChannelStatus {
         bool configured;
@@ -82,6 +85,7 @@ private:
     void pollNtfy();
     void pollTelegram();
     void runCommand(uint8_t channel, const char* text);
+    esp_err_t findTelegramChat(char* chatId, size_t idCap, char* name, size_t nameCap);
     void note(ChannelStatus& st, bool ok, const char* error);
 
     Config& cfg_;
@@ -90,8 +94,13 @@ private:
     void* handlerCtx_ = nullptr;  // NOSONAR context for the callback
     QueueHandle_t queue_ = nullptr;
     Mutex mu_;        // status_, settings copy
-    Mutex netMu_;     // one HTTPS request at a time (task + findTelegramChat)
+    Mutex netMu_;     // one HTTPS request at a time
     Status status_{};
+    // "Find chat": requested by the web UI, run by the task (result under mu_).
+    std::atomic<bool> findWanted_{false};
+    esp_err_t findErr_ = ESP_ERR_NOT_FINISHED;
+    std::array<char, 24> findChat_{};
+    std::array<char, 40> findName_{};
     std::atomic<bool> reload_{true};
 
     // Settings copy (task only, refreshed on reload).

@@ -60,6 +60,7 @@ private:
     Notifier notifier_{config_, wifi_};
 #endif
     uint32_t uplinkDownAt_ = 0;  // uptime s when the uplink went down, 0 = up
+    Mutex upstreamMu_;           // applyUpstream
     BootButton button_{wifi_};
     StatusLed led_;
     History history_;

@@ -78,6 +78,12 @@ private:
     void importKey();
     bool allocateBloom();
     void rebuildBloom(const HashTable& table);
+    bool bloomExcludes(uint64_t hash) const;
+    void invalidateBloom()
+    {
+        bloomReady_ = false;
+        bloomGen_++;
+    }
     bool verifySignature(const BlocklistHeader& hdr, const uint8_t* sig);
 
     const esp_partition_t* slots_[2] = {nullptr, nullptr};
@@ -112,6 +118,7 @@ private:
     bool bloomFailed_ = false;
     bool bloomAtStartup_ = false;  // allocation failed once: don't retry on every update
     std::atomic<bool> bloomReady_{false};
+    std::atomic<uint32_t> bloomGen_{0};  // +1 whenever the filter stops answering
     std::atomic<uint32_t> bloomSkips_{0};
 };
 

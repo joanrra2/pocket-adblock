@@ -206,16 +206,25 @@ size_t ClientTable::activeCount(uint32_t seconds)
 
 size_t ClientTable::snapshot(ClientInfo* out, size_t max)
 {
+    size_t n = 0;
     {
         LockGuard g(mu_);
-        ArpLookup job{clients_, count_};
-        // Holding mu_ while the lwIP thread walks the table: the DNS task only
-        // blocks briefly on record(); lwIP never takes mu_, so no deadlock.
-        esp_netif_tcpip_exec(resolveMacs, &job);
-        size_t n = count_ < max ? count_ : max;
+        n = count_ < max ? count_ : max;
         memcpy(out, clients_, n * sizeof(ClientInfo));
-        return n;
     }
+    // The ARP walk runs on the copy, without mu_: the DNS task takes mu_ for
+    // every query and would otherwise wait behind the lwIP thread.
+    ArpLookup job{out, n};
+    esp_netif_tcpip_exec(resolveMacs, &job);
+    // Keep the MACs it found in the same slots (unless a slot was reused meanwhile).
+    static const uint8_t zero[6] = {};
+    LockGuard g(mu_);
+    for (size_t i = 0; i < n && i < count_; i++) {
+        ClientInfo& c = clients_[i];
+        if (memcmp(&c.addr, &out[i].addr, sizeof(c.addr)) == 0 && memcmp(c.mac, zero, 6) == 0)
+            memcpy(c.mac, out[i].mac, 6);
+    }
+    return n;
 }
 
 // ------------------------------------------------------------ QueryLog

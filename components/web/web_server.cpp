@@ -1356,7 +1356,8 @@ esp_err_t WebServer::postWifi(httpd_req_t* req)
     if (readForm(req, form, sizeof(form)) < 0 || !field(form, "action", action, sizeof(action)))
         return sendError(req, "400 Bad Request", "action is required");
     if (strcmp(action, "reconnect") == 0) {
-        if (!d_.cfg.get().staSsid[0]) return sendError(req, "409 Conflict", "no Wi-Fi network configured");
+        if (!d_.cfg.read([](const Settings& s) { return s.staSsid[0] != '\0'; }))
+            return sendError(req, "409 Conflict", "no Wi-Fi network configured");
         d_.wifi.reconnect();
         return sendOk(req, "reconnecting");
     }
@@ -1373,7 +1374,8 @@ esp_err_t WebServer::getWifiScan(httpd_req_t* req)
     size_t n = 0;
     esp_err_t err = d_.wifi.scan(nets, WifiManager::kMaxScanResults, n);
     if (err != ESP_OK) return sendError(req, "503 Service Unavailable", "scan failed, try again");
-    const Settings s = d_.cfg.get();
+    char current[sizeof(Settings::staSsid)];
+    d_.cfg.read([&current](const Settings& s) { return copyStr(current, s.staSsid); });
     JsonWriter j(req);
     j.beginArray();
     for (size_t i = 0; i < n; i++) {
@@ -1383,7 +1385,7 @@ esp_err_t WebServer::getWifiScan(httpd_req_t* req)
             .num("channel", nets[i].channel)
             .str("auth", WifiManager::authText(nets[i].authmode))
             .boolean("secure", nets[i].authmode != WIFI_AUTH_OPEN)
-            .boolean("current", strcmp(nets[i].ssid, s.staSsid) == 0)
+            .boolean("current", strcmp(nets[i].ssid, current) == 0)
             .endObject();
     }
     j.endArray();
@@ -1636,9 +1638,19 @@ esp_err_t WebServer::postNotify(httpd_req_t* req)
         return sendOk(req, "test sent");
     }
     if (strcmp(action.data(), "findchat") == 0) {
+        // Started here, run by the notifier's task; the page asks again
+        // (poll=1) until it is done, so the web server never waits on Telegram.
+        std::array<char, 4> poll{};
+        field(form.data(), "poll", poll.data(), poll.size());
+        if (poll[0] != '1') d_.notifier->startFindChat();
         std::array<char, 24> chat{};
         std::array<char, 40> name{};
-        const esp_err_t err = d_.notifier->findTelegramChat(chat.data(), chat.size(), name.data(), name.size());
+        const esp_err_t err = d_.notifier->findChatResult(chat.data(), chat.size(), name.data(), name.size());
+        if (err == ESP_ERR_NOT_FINISHED) {
+            JsonWriter j(req);
+            j.beginObject().boolean("ok", true).boolean("pending", true).endObject();
+            return j.finish();
+        }
         if (err == ESP_ERR_INVALID_STATE) return sendError(req, "409 Conflict", "save the bot token first");
         if (err == ESP_ERR_INVALID_ARG) return sendError(req, "400 Bad Request", "bot token not accepted");
         if (err == ESP_ERR_NOT_FOUND) return sendError(req, "404 Not Found", "no message yet: send /start to your bot, then try again");

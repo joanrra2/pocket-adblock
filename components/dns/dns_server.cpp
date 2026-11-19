@@ -18,6 +18,12 @@ namespace sinkhole {
 namespace {
 constexpr const char* TAG = "dns";
 constexpr uint16_t kDnsPort = 53;
+
+// Port for an upstream address: the DoT proxy listens on loopback.
+uint16_t portFor(uint32_t ip)
+{
+    return ip == htonl(INADDR_LOOPBACK) ? DotProxy::kPort : kDnsPort;
+}
 constexpr TickType_t kTimeout = pdMS_TO_TICKS(CONFIG_SINKHOLE_DNS_UPSTREAM_TIMEOUT_MS);
 constexpr int kDrain = 16;  // datagrams per socket per select() wake
 constexpr uint32_t kLocalTtl = 60;  // local names: short, so edits show up quickly
@@ -318,7 +324,7 @@ bool DnsServer::onClientPacket(int sock, int flags)
     for (uint32_t target : {p->upstreamIp, p->upstreamIp2}) {
         if (!target) continue;
         // Primary may be the local DNS-over-TLS proxy; forward rules and the backup use 53.
-        to.sin_port = htons(target == p->upstreamIp && !forwardTo ? upstreamPort_.load() : kDnsPort);
+        to.sin_port = htons(portFor(target));
         to.sin_addr.s_addr = target;
         if (sendto(upstreamSock_, buf_, static_cast<size_t>(len), 0,
                    reinterpret_cast<sockaddr*>(&to), sizeof(to)) >= 0)
@@ -360,7 +366,7 @@ void DnsServer::refreshInBackground(size_t len, uint32_t qkey, uint32_t ckey)
     dns::wr16(buf_, id);
     sockaddr_in to{};
     to.sin_family = AF_INET;
-    to.sin_port = htons(upstreamPort_.load());
+    to.sin_port = htons(portFor(up));
     to.sin_addr.s_addr = up;
     if (sendto(upstreamSock_, buf_, len, 0, reinterpret_cast<sockaddr*>(&to), sizeof(to)) < 0) {
         p->used = false;
@@ -377,7 +383,7 @@ bool DnsServer::onUpstreamPacket(int flags)
                        &fromLen);
     if (len < static_cast<int>(dns::kHeaderLen)) return len >= 0;
     SINKHOLE_PERF_MARK(lap, perf::URecv);
-    if (from.sin_port != htons(kDnsPort) && from.sin_port != htons(upstreamPort_.load())) return true;
+    if (from.sin_port != htons(kDnsPort) && from.sin_port != htons(DotProxy::kPort)) return true;
 
     const uint16_t id = dns::rd16(buf_);
     const size_t qend = dns::questionEnd(buf_, static_cast<size_t>(len));
@@ -512,7 +518,7 @@ void DnsServer::refreshSafeTargets()
         pendingInUse_++;
         sockaddr_in to{};
         to.sin_family = AF_INET;
-        to.sin_port = htons(upstreamPort_.load());
+        to.sin_port = htons(portFor(up));
         to.sin_addr.s_addr = up;
         sendto(upstreamSock_, pkt, n, 0, reinterpret_cast<sockaddr*>(&to), sizeof(to));
     }

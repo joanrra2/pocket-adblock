@@ -1,5 +1,6 @@
 #include "sinkhole/log_buffer.hpp"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdarg>
@@ -82,23 +83,36 @@ void LogBuffer::begin()
 
 LogBuffer::Chunk LogBuffer::read(uint32_t from, char* out, size_t cap)
 {
+    // Copied in short slices: a critical section turns interrupts off on this
+    // core, and a 2 KB copy (from PSRAM on Pro) is too long for that.
+    constexpr size_t kSlice = 256;
     Ring& r = ring();
     Chunk c{from, from, 0};
     if (!r.buf || !cap) return c;
-    taskENTER_CRITICAL(&r.lock);
-    const uint32_t oldest = r.total > r.cap ? r.total - static_cast<uint32_t>(r.cap) : 0;
     uint32_t pos = from;
-    if (pos < oldest || pos > r.total) {  // overwritten (or a position from before a restart)
-        pos = oldest;
-        if (oldest > 0) {  // start at the next whole line
-            while (pos < r.total && r.buf[pos % r.cap] != '\n') pos++;
-            if (pos < r.total) pos++;
+    for (bool first = true; c.len < cap; first = false) {
+        taskENTER_CRITICAL(&r.lock);
+        const uint32_t oldest = r.total > r.cap ? r.total - static_cast<uint32_t>(r.cap) : 0;
+        if (pos < oldest || pos > r.total) {
+            if (!first) {  // the writer lapped this read: stop here, the next one resyncs
+                taskEXIT_CRITICAL(&r.lock);
+                break;
+            }
+            pos = oldest;  // overwritten (or a position from before a restart)
+            if (oldest > 0) {  // start at the next whole line
+                const uint32_t stop = r.total - pos > kSlice ? pos + kSlice : r.total;
+                while (pos < stop && r.buf[pos % r.cap] != '\n') pos++;
+                if (pos < r.total) pos++;
+            }
+            c.start = pos;
         }
+        const size_t before = c.len;
+        const size_t limit = std::min(cap, c.len + kSlice);
+        while (pos < r.total && c.len < limit) out[c.len++] = r.buf[pos++ % r.cap];
+        taskEXIT_CRITICAL(&r.lock);
+        if (c.len == before) break;  // caught up
     }
-    c.start = pos;
-    while (pos < r.total && c.len < cap) out[c.len++] = r.buf[pos++ % r.cap];
     c.next = pos;
-    taskEXIT_CRITICAL(&r.lock);
     return c;
 }
 

@@ -194,6 +194,27 @@ void Notifier::sink(events::Kind kind, const char* text)
     }
 }
 
+void Notifier::startFindChat()
+{
+    {
+        LockGuard g(mu_);
+        findErr_ = ESP_ERR_NOT_FINISHED;
+    }
+    findWanted_ = true;
+    Msg wake{};  // kind 0: wakes the task, delivers nothing
+    if (queue_) xQueueSend(queue_, &wake, 0);
+}
+
+esp_err_t Notifier::findChatResult(char* chatId, size_t idCap, char* name, size_t nameCap)
+{
+    LockGuard g(mu_);
+    if (findErr_ == ESP_OK) {
+        copyStr(chatId, idCap, findChat_.data());
+        copyStr(name, nameCap, findName_.data());
+    }
+    return findErr_;
+}
+
 void Notifier::test()
 {
     Msg m{};
@@ -264,6 +285,15 @@ void Notifier::run()
         } else if (!wifi_.connected()) {
             vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
+        }
+        if (findWanted_.exchange(false)) {
+            std::array<char, 24> chat{};
+            std::array<char, 40> name{};
+            const esp_err_t err = findTelegramChat(chat.data(), chat.size(), name.data(), name.size());
+            LockGuard g(mu_);
+            findChat_ = chat;
+            findName_ = name;
+            findErr_ = err;
         }
         const uint32_t now = uptimeSeconds();
         if (polling && now - lastPoll >= kPollMs / 1000) {
