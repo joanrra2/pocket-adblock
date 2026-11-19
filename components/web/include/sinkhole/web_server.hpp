@@ -28,6 +28,7 @@
 #include "sinkhole/updaters.hpp"
 #include "sinkhole/status_led.hpp"
 #include "sinkhole/lan_dhcp.hpp"
+#include "sinkhole/notifier.hpp"
 #include "sinkhole/wifi_manager.hpp"
 #include "sinkhole/wol.hpp"
 
@@ -52,6 +53,7 @@ struct WebDeps {
     History& history;
     LanDhcp& dhcp;
     DeviceNames& names;
+    Notifier* notifier;  // nullptr without CONFIG_SINKHOLE_NOTIFY
     void (*applyUpstream)(void* ctx);
     void* appCtx;
 };
@@ -116,6 +118,8 @@ private:
     esp_err_t getRestarts(httpd_req_t* req);
     esp_err_t getLogs(httpd_req_t* req);
     esp_err_t postNames(httpd_req_t* req);
+    esp_err_t getNotify(httpd_req_t* req);
+    esp_err_t postNotify(httpd_req_t* req);
     // A client's name: yours (by MAC), else a local DNS name for its IP, else the
     // hostname it gave this device's DHCP server. Returns "you", "dns", "dhcp"
     // or nullptr (no name).

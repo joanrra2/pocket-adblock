@@ -14,6 +14,7 @@
 #include "nvs_flash.h"
 #include "psa/crypto.h"
 #include "sdkconfig.h"
+#include "sinkhole/events.hpp"
 #include "sinkhole/secret.hpp"
 #include "sinkhole/text.hpp"
 
@@ -189,6 +190,49 @@ void Config::applyDefaults(Settings& s)
     s.dhcpLeaseMinutes = 720;
 }
 
+void Config::applyNotifyDefaults(NotifySettings& n)
+{
+    memset(&n, 0, sizeof(n));
+    n.version = kNotifyVersion;
+    copyStr(n.ntfyServer, "https://ntfy.sh");
+    // Host online/offline is opt-in: a wake already reports when the PC answers.
+    n.notifyEvents = events::kAllKinds & ~events::HostState;
+}
+
+bool Config::upgradeNotify(const uint8_t* raw, size_t len, NotifySettings& out)
+{
+    applyNotifyDefaults(out);
+    uint16_t version = 0;
+    if (len < sizeof(version)) return false;
+    memcpy(&version, raw, sizeof(version));
+    if (version == 0 || version >= 1000) return false;
+    // Version 1 is the first layout; a newer one only appended fields.
+    memcpy(&out, raw, len < sizeof(out) ? len : sizeof(out));
+    out.version = kNotifyVersion;
+    out.ntfyServer[sizeof(out.ntfyServer) - 1] = '\0';
+    out.ntfyTopic[sizeof(out.ntfyTopic) - 1] = '\0';
+    out.ntfyToken[sizeof(out.ntfyToken) - 1] = '\0';
+    out.tgToken[sizeof(out.tgToken) - 1] = '\0';
+    out.tgChat[sizeof(out.tgChat) - 1] = '\0';
+    return true;
+}
+
+void Config::loadNotifyLocked()
+{
+    static constexpr const char* kKey = "notify";
+    const size_t len = nvs::blobSize(kKey);
+    std::unique_ptr<uint8_t[]> raw(len ? new (std::nothrow) uint8_t[len] : nullptr);
+    size_t got = 0;
+    if (!raw || nvs::loadBlob(kKey, raw.get(), len, &got) != ESP_OK || !upgradeNotify(raw.get(), got, n_))
+        applyNotifyDefaults(n_);  // nothing stored yet: saved on the first change
+    if (raw) secureWipe(raw.get(), len);  // tokens
+}
+
+esp_err_t Config::saveNotifyLocked()
+{
+    return nvs::saveBlob("notify", &n_, sizeof(n_));
+}
+
 // Bytes of Settings that were meaningful in a given stored version. Fields are
 // only ever appended, so an older blob is a valid prefix of the current struct.
 size_t Config::validBytes(uint16_t version)
@@ -273,6 +317,7 @@ esp_err_t Config::loadOversized(uint8_t* raw, size_t cap, size_t& n)
 esp_err_t Config::load()
 {
     LockGuard g(mu_);
+    loadNotifyLocked();
     // Only used here, under mu_ (keeps ~1 KB off the stack). Room for fields a
     // newer firmware appended, so a rollback keeps the settings.
     static uint8_t raw[sizeof(Settings) + 256];

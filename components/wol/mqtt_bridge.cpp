@@ -56,8 +56,6 @@ esp_err_t MqttBridge::start()
     if (!client) return ESP_ERR_NO_MEM;
     client_ = client;
     esp_mqtt_client_register_event(client, MQTT_EVENT_ANY, &MqttBridge::onEvent, this);
-    wol_.setListener(&MqttBridge::onHostState, this);
-    wol_.setResultListener(&MqttBridge::onHostResult, this);
 
     esp_timer_create_args_t targs{};
     targs.callback = &MqttBridge::onTick;

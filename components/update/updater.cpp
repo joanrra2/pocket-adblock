@@ -6,6 +6,7 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
+#include "sinkhole/events.hpp"
 #include "sinkhole/text.hpp"
 #include "sinkhole/updaters.hpp"
 
@@ -331,6 +332,7 @@ void Updater::fetchBlocklist()
         ESP_LOGW(TAG, "blocklist: %s; switching to %s", why, strrchr(smaller, '/') + 1);
         snprintf(why, sizeof(why), "too big for this board: switched to %s", strrchr(smaller, '/') + 1);
         report(false, why, bytes);
+        events::emit(events::Update, "Blocklist %s", why);
         manual_ = true;
         task_.notify();
         return;
@@ -341,6 +343,7 @@ void Updater::fetchBlocklist()
         report(true, msg, bytes);
     } else {
         report(false, why, bytes);
+        events::emit(events::Update, "Blocklist update failed: %s", why);
     }
     ESP_LOGI(TAG, "blocklist: %s (%lu bytes)", err == ESP_OK ? "done" : why, static_cast<unsigned long>(bytes));
 }

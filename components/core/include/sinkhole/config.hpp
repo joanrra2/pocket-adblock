@@ -102,6 +102,21 @@ struct Settings {
     uint32_t adminIter;
 };
 
+// Notifications (CONFIG_SINKHOLE_NOTIFY builds). Their own NVS blob ("notify"),
+// not part of Settings: older firmware must always be able to read Settings,
+// and it only keeps up to 256 bytes it doesn't know. Fields are only appended.
+// Empty topic / token = that channel is off.
+struct NotifySettings {
+    uint16_t version;
+    char ntfyServer[64];    // NOSONAR fixed blob layout stored in NVS; e.g. https://ntfy.sh
+    char ntfyTopic[40];     // NOSONAR alerts here; commands read from <topic>-cmd
+    char ntfyToken[64];     // NOSONAR optional access token (secret)
+    char tgToken[64];       // NOSONAR Telegram bot token (secret)
+    char tgChat[24];        // NOSONAR Telegram chat ID
+    uint16_t notifyEvents;  // events::Kind bits
+    bool notifyCommands;    // accept remote commands
+};
+
 enum TxPower : uint8_t { TxAuto = 0, TxFull = 1, TxReduced = 2 };
 
 class Config {
@@ -130,6 +145,21 @@ public:
         return saveLocked();
     }
 
+    // Notification settings, same pattern as read() / modify().
+    template <typename F>
+    auto readNotify(F&& fn)
+    {
+        LockGuard g(mu_);
+        return fn(static_cast<const NotifySettings&>(n_));
+    }
+    template <typename F>
+    esp_err_t modifyNotify(F&& fn)
+    {
+        LockGuard g(mu_);
+        fn(n_);
+        return saveNotifyLocked();
+    }
+
     bool usingDefaultAdminPassword();
 
     // Admin credentials. checkAdmin is slow on purpose (PBKDF2, ~0.1-0.3 s):
@@ -146,13 +176,21 @@ public:
     // Hash pass into s (new random salt).
     static esp_err_t hashAdmin(Settings& s, const char* pass);
 
+    static constexpr uint16_t kNotifyVersion = 1;
+    static void applyNotifyDefaults(NotifySettings& n);
+    // Stored / backed-up notification blob -> current layout. False if unusable.
+    static bool upgradeNotify(const uint8_t* raw, size_t len, NotifySettings& out);
+
 private:
     esp_err_t saveLocked();
     static size_t validBytes(uint16_t version);
     static esp_err_t loadOversized(uint8_t* raw, size_t cap, size_t& n);
+    void loadNotifyLocked();
+    esp_err_t saveNotifyLocked();
 
     Mutex mu_;
     Settings s_{};
+    NotifySettings n_{};
 };
 
 // NVS helpers for fixed-size tables, all in the "sinkhole" namespace.

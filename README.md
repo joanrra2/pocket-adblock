@@ -384,6 +384,33 @@ active clients, uptime and the last restart reason, and for every Wake-on-LAN ho
 sensor (hosts with an IP). Adding or removing hosts updates Home Assistant within
 a few seconds. MQTT changes apply after a restart.
 
+## Notifications and remote commands (Pro)
+
+*Settings → Notifications* sends alerts to your phone through
+[ntfy](https://ntfy.sh) (free app, no account) and/or a Telegram bot, and can take a
+few commands back. Outgoing HTTPS only, nothing to open on the router.
+
+- **ntfy:** press **Generate** for a random topic (it works like a password: anyone
+  who knows it can read the alerts), save, and subscribe to that topic in the ntfy
+  app. Commands go to `<topic>-cmd`: subscribe to it too and send from there. A
+  self-hosted ntfy server and an access token work as well.
+- **Telegram:** create a bot with [@BotFather](https://t.me/BotFather), paste its token,
+  save, send `/start` to the bot, then press **Find** to fill in your chat ID. Only that
+  chat can send commands.
+- **Alerts** (each one can be switched off): a crash, watchdog reset or power dip, and
+  firmware updates; wake results ("office-pc: online after 41 s"); computers going
+  online or offline (off by default); failed blocklist updates; Wi-Fi back after an
+  outage of 2 minutes or more.
+- **Commands** (off until you tick *Accept commands*): `help`, `status`, `hosts`,
+  `wake NAME`, `cancel NAME`, `pause [minutes]` (15 by default), `resume`. Telegram's
+  `/wake NAME` form works too. Only saved Wake-on-LAN hosts can be woken, and nothing
+  else on the device can be changed this way.
+- **Cost:** about 30 KB of internal RAM per service while connected (commands are
+  checked every 15 s over a kept-open connection), plus a 6 KB task. That is why it is
+  in the Pro edition only (`ENABLE_NOTIFY` in `FEATURES.cfg` for your own builds).
+- Tokens are never shown again in the UI or the API, and backups leave them out
+  unless *include passwords* is ticked.
+
 ## Updates
 
 - **Firmware:** upload `build/pocket-adblock.bin` (or a release's `*-ota.bin`) under

@@ -17,6 +17,7 @@
 #include "sinkhole/bypass_guard.hpp"
 #include "sinkhole/dns_packet.hpp"
 #include "sinkhole/hash_table.hpp"
+#include "sinkhole/notify_parse.hpp"
 #include "sinkhole/safe_search.hpp"
 
 using namespace sinkhole;
@@ -520,6 +521,55 @@ static void testSafeSearch()
     CHECK(safe::kDefaultIps[safe::Google] == safe::ip4(216, 239, 38, 120));
 }
 
+// ntfy / Telegram answers, as the notifier reads them (notify_parse.hpp).
+static void testNotifyParse()
+{
+    using namespace sinkhole::notify;
+    // ntfy: one object per line; ids and messages, escapes decoded.
+    char ntfy[] =
+        "{\"id\":\"KWjLikMx0VpA\",\"time\":1795045386,\"event\":\"message\",\"topic\":\"t-cmd\",\"message\":\"wake office-pc\"}\n"
+        "{\"id\":\"b2\",\"time\":1795045387,\"event\":\"message\",\"topic\":\"t-cmd\",\"message\":\"say \\\"hi\\\"\nnow\"}\n"
+        "{\"id\":\"b3\",\"time\":1795045388,\"event\":\"keepalive\",\"topic\":\"t-cmd\"}\n";
+    std::vector<std::string> ids, events, texts;
+    ntfyLines(ntfy, [&](const char* id, const char* ev, const char* text) {
+        ids.push_back(id);
+        events.push_back(ev);
+        texts.push_back(text);
+    });
+    CHECK(ids.size() == 3);
+    CHECK(ids[0] == "KWjLikMx0VpA" && texts[0] == "wake office-pc");
+    CHECK(texts[1] == "say \"hi\"\nnow");
+    CHECK(events[2] == "keepalive" && texts[2].empty());
+
+    // Telegram getUpdates: a private chat, then a group; "from" ids must not be
+    // taken for the chat id; \u escapes outside ASCII become '?'.
+    const char* tg =
+        "{\"ok\":true,\"result\":["
+        "{\"update_id\":512345001,\"message\":{\"message_id\":5,\"from\":{\"id\":777,\"is_bot\":false,\"first_name\":\"Ana\"},"
+        "\"chat\":{\"id\":111222333,\"first_name\":\"Ana\",\"type\":\"private\"},\"date\":1700000000,\"text\":\"/wake@pocket_bot office-pc\","
+        "\"entities\":[{\"offset\":0,\"length\":16,\"type\":\"bot_command\"}]}},"
+        "{\"update_id\":512345002,\"message\":{\"message_id\":6,\"from\":{\"id\":888,\"is_bot\":false,\"first_name\":\"Bo\"},"
+        "\"chat\":{\"id\":-1001234567890,\"title\":\"Home\",\"type\":\"supergroup\"},\"date\":1700000001,\"text\":\"caf\u00e9 \u0041\"}},"
+        "{\"update_id\":512345003,\"edited_message\":{\"message_id\":6,\"chat\":{\"id\":5,\"type\":\"private\"},\"date\":1}}"
+        "]}";
+    std::vector<int64_t> chats;
+    std::vector<std::string> said;
+    const int64_t last = telegramUpdates(tg, [&](int64_t, int64_t chat, const char* text) {
+        chats.push_back(chat);
+        said.push_back(text);
+    });
+    CHECK(last == 512345003);
+    CHECK(chats.size() == 2);
+    CHECK(chats[0] == 111222333 && said[0] == "/wake@pocket_bot office-pc");
+    CHECK(chats[1] == -1001234567890LL && said[1] == "caf? A");
+    int64_t chat = 0;
+    char name[32];
+    CHECK(telegramLastChat(tg, chat, name, sizeof(name)) && chat == 5 && name[0] == '\0');
+    const char* one = "{\"ok\":true,\"result\":[{\"update_id\":1,\"message\":{\"chat\":{\"id\":42,\"first_name\":\"Joan\",\"type\":\"private\"},\"text\":\"/start\"}}]}";
+    CHECK(telegramLastChat(one, chat, name, sizeof(name)) && chat == 42 && std::string(name) == "Joan");
+    CHECK(telegramUpdates("{\"ok\":true,\"result\":[]}", [](int64_t, int64_t, const char*) {}) == 0);
+}
+
 int main(int argc, char** argv)
 {
     if (argc == 3) testBuiltList(argv[1], argv[2]);
@@ -530,6 +580,7 @@ int main(int argc, char** argv)
     testCompactFormat();
     testDnsPacket();
     testBypassGuard();
+    testNotifyParse();
     std::printf(failures ? "%d FAILED\n" : "all host tests passed\n", failures);
     return failures ? 1 : 0;
 }

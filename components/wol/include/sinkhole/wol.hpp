@@ -138,10 +138,12 @@ public:
     esp_err_t start();  // no-op when no broker URI is configured
     bool connected() const { return connected_; }
 
-private:
-    static void onEvent(void* arg, const char* base, int32_t id, void* data);
+    // Host state / wake result publishers (the app calls them; ctx = the bridge).
     static void onHostState(void* ctx, const char* name, bool online);
     static void onHostResult(void* ctx, const char* name, const char* result);
+
+private:
+    static void onEvent(void* arg, const char* base, int32_t id, void* data);  // NOSONAR esp_event handler signature
     static void onTick(void* arg);
     void handleEvent(int32_t id, void* data);
     void tick();

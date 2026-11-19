@@ -168,6 +168,16 @@ menu "DNS Sinkhole"
         default 2048
         range 64 32768
 
+    config SINKHOLE_NOTIFY
+        bool "Phone notifications and remote commands (ntfy / Telegram)"
+        default n
+        help
+            Adds Settings -> Notifications: alerts on your phone through ntfy
+            and/or a Telegram bot (crashes, wake results, failed updates, Wi-Fi
+            outages), and optional commands (wake, status, pause). Outbound
+            HTTPS only. ~30 KB of RAM per service while connected, 6 KB task.
+            Recommended: boards with PSRAM.
+
     config SINKHOLE_DNS_OVER_TLS
         bool "Encrypted upstream: DNS over TLS (uses ~40 KB RAM)"
         default n
