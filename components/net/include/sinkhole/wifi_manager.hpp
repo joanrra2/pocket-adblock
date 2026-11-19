@@ -20,6 +20,7 @@
 #include "esp_netif.h"
 #include "esp_timer.h"
 #include "esp_wifi_types.h"
+#include "sdkconfig.h"
 #include "sinkhole/config.hpp"
 #include "sinkhole/rtos.hpp"
 
@@ -77,7 +78,9 @@ public:
     uint32_t staNetmask() const { return staMask_; }
     uint32_t staDns() const;                   // DHCP-provided DNS, 0 if none
     uint32_t gateway() const { return gateway_; }
-    esp_netif_t* staNetif() const { return sta_; }
+    // The uplink's interface: the W5500 cable while it has an address, else Wi-Fi.
+    esp_netif_t* staNetif() const { return uplink(); }
+    bool ethernet() const { return ethUp_; }  // the uplink is the cable (CONFIG_SINKHOLE_ETH_W5500)
     uint32_t apIp() const;
     // IPv6 addresses of the uplink as text; hasGlobal = the network routes IPv6.
     size_t ip6Addresses(char out[][46], size_t max, bool* hasGlobal) const;
@@ -103,17 +106,25 @@ private:
     bool apWanted();
     void updateAp();
     void setApEnabled(bool on);
+    esp_netif_t* uplink() const { return ethUp_ ? eth_ : sta_; }
+#if CONFIG_SINKHOLE_ETH_W5500
+    void onEthernet(bool up, const esp_netif_ip_info_t* info);
+#endif
 
     Config& cfg_;
     esp_netif_t* sta_ = nullptr;
     esp_netif_t* ap_ = nullptr;
+    esp_netif_t* eth_ = nullptr;  // W5500 builds, once its driver started
     esp_timer_handle_t retryTimer_ = nullptr;
     esp_timer_handle_t apTimer_ = nullptr;
     esp_timer_handle_t ipTimer_ = nullptr;
     Listener listener_ = nullptr;
     void* listenerCtx_ = nullptr;
 
-    std::atomic<bool> connected_{false};  // link up AND address assigned
+    std::atomic<bool> connected_{false};  // the uplink (cable or Wi-Fi) has an address
+    std::atomic<bool> staUp_{false};      // Wi-Fi has an address (it may not be the uplink)
+    std::atomic<bool> ethUp_{false};      // the cable has an address: it is the uplink
+    std::atomic<bool> ethLink_{false};    // the cable is plugged in (link up)
     std::atomic<bool> linkUp_{false};     // associated with the uplink AP
     std::atomic<bool> configured_{false};
     std::atomic<bool> selfDisconnect_{false};
@@ -132,6 +143,11 @@ private:
     std::atomic<uint32_t> retryAt_{0};      // uptime seconds
     uint32_t retryDelayMs_ = 1000;
 };
+
+#if CONFIG_SINKHOLE_ETH_W5500
+// Starts the W5500 (eth_w5500.cpp); nullptr if it could not.
+esp_netif_t* startW5500();
+#endif
 
 class Mdns {
 public:

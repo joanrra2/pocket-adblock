@@ -104,9 +104,25 @@ or firmware upload).
 | `FEATURES.cfg` | Editions | RAM | Recommended for |
 |---|---|---|---|
 | `ENABLE_LONG_HISTORY` (+ `LONG_HISTORY_ENTRIES`, 4096) | Lite off (32 queries), Pro on | 76 B per entry, PSRAM | boards with PSRAM (on in the octal S3 profile, 4096) |
-| `ENABLE_DNS_OVER_TLS` | Lite off, Pro on | ~26 KB internal while connected (closes after 2 min idle) + 6 KB task | boards with PSRAM; not the C3. Encrypted upstream (port 853); on the S3 uncached lookups were no slower than plain UDP |
+| `ENABLE_DNS_OVER_TLS` | Lite off, Pro on | ~26 KB internal while connected (closes after 2 min idle) + 7 KB task | boards with PSRAM; not the C3. Encrypted upstream (port 853); on the S3 uncached lookups were no slower than plain UDP |
 | `ENABLE_TOP_DOMAINS` (+ `TOP_DOMAINS_ENTRIES`, 2048) | Lite off, Pro on | ~60 B per counter, PSRAM only (~120 KB) | boards with PSRAM; turns itself off without it. Top allowed / blocked domains on the overview (top clients are always shown) |
 | `ENABLE_BLOOM_FILTER` (bits per entry: `menuconfig`, 10) | Lite off, Pro on | ~1.25 B per slot entry: ~270 KB (4 MB layout), ~1 MB (8 MB), ~2.7 MB (16 MB) | boards with PSRAM; not the C3 (it needs that RAM for HTTPS). On an S3: not-listed lookups 80.8 → 54.7 µs |
+| `ENABLE_ETH_W5500` (pins: `menuconfig`) | off in both (custom builds) | the Ethernet driver's task and buffers | boards with a WIZnet W5500 module wired to SPI: see [Wired Ethernet](#wired-ethernet-w5500) |
+
+#### Wired Ethernet (W5500)
+
+With `ENABLE_ETH_W5500 = 1`, a WIZnet W5500 module on SPI becomes the uplink:
+
+- **Wiring:** set the pins under `idf.py menuconfig` → *DNS Sinkhole* → *W5500 pins*
+  (SCLK, MOSI, MISO, CS; INT and RST are optional). The defaults are only an example.
+  Without INT the chip is checked every 10 ms.
+- **The cable comes first:** while it has an address it is the uplink, even with Wi-Fi
+  set up. Unplug it and Wi-Fi takes over if it is connected. The setup access point
+  works as usual.
+- **IP settings** (static or DHCP, under *Settings → IP address*) apply to the cable.
+  Wi-Fi then always uses DHCP, so the two never share one static address.
+
+It has only been build-tested so far (ESP32-S3 and ESP32-C3), not run with a module.
 
 Prebuilt images for every board are attached to each
 [release](../../releases): flash `*-full.bin` at `0x0` the first time.

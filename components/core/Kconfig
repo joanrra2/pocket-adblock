@@ -189,6 +189,50 @@ menu "DNS Sinkhole"
             Recommended: boards with PSRAM (ESP32-S3 / WROVER). Not recommended on
             the ESP32-C3: it needs that RAM for HTTPS updates.
 
+    config SINKHOLE_ETH_W5500
+        bool "Wired Ethernet with a W5500 module (SPI)"
+        default n
+        help
+            Uses a WIZnet W5500 Ethernet module on SPI as the uplink. When the
+            cable has an address it is the uplink, even with Wi-Fi set up; Wi-Fi
+            takes over when the cable is unplugged. The setup access point works
+            as usual. The IP settings (static or DHCP) apply to the cable; Wi-Fi
+            then always uses DHCP. Set the pins below to your wiring.
+            Custom builds only (FEATURES.cfg: ENABLE_ETH_W5500).
+
+    menu "W5500 pins"
+        depends on SINKHOLE_ETH_W5500
+
+        config SINKHOLE_ETH_SCLK_GPIO
+            int "SCLK GPIO"
+            default 12
+        config SINKHOLE_ETH_MOSI_GPIO
+            int "MOSI GPIO"
+            default 11
+        config SINKHOLE_ETH_MISO_GPIO
+            int "MISO GPIO"
+            default 13
+        config SINKHOLE_ETH_CS_GPIO
+            int "CS GPIO"
+            default 10
+        config SINKHOLE_ETH_INT_GPIO
+            int "INT GPIO (-1 = not wired: poll every 10 ms)"
+            default -1
+            range -1 64
+        config SINKHOLE_ETH_RST_GPIO
+            int "RST GPIO (-1 = not wired)"
+            default -1
+            range -1 64
+        config SINKHOLE_ETH_SPI_MHZ
+            int "SPI clock (MHz)"
+            default 20
+            range 1 40
+        config SINKHOLE_ETH_SPI_HOST
+            int "SPI host (1 = SPI2, 2 = SPI3)"
+            default 1
+            range 1 2
+    endmenu
+
     config SINKHOLE_TOP_DOMAINS
         bool "Top domains statistics (PSRAM only)"
         default n
