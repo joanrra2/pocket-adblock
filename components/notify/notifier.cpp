@@ -1,5 +1,8 @@
 #include "sinkhole/notifier.hpp"
 
+#include <memory>
+#include <chrono>
+#include <atomic>
 #include <cctype>
 #include <cinttypes>
 #include <cstdio>
@@ -19,14 +22,20 @@ namespace {
 constexpr const char* TAG = "notify";
 constexpr uint32_t kPollMs = 15000;  // command check interval
 constexpr UBaseType_t kQueueLen = 8;
-Notifier* sSelf = nullptr;
+constexpr size_t kMaxBody = 2048;  // request bodies built here stay under 1 KB
+
+std::atomic<Notifier*>& selfRef()  // for the event sink, a plain function
+{
+    static std::atomic<Notifier*> self{nullptr};
+    return self;
+}
 
 void urlEncode(const char* in, char* out, size_t cap)
 {
     static constexpr char kHex[] = "0123456789ABCDEF";
     size_t n = 0;
-    for (; *in && n + 4 < cap; in++) {
-        const auto c = static_cast<unsigned char>(*in);
+    while (*in && n + 4 < cap) {
+        const auto c = static_cast<unsigned char>(*in++);
         if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
             out[n++] = static_cast<char>(c);
         } else {
@@ -83,7 +92,7 @@ struct Notifier::Http {
     {
         auto* b = static_cast<Body*>(e->user_data);
         if (e->event_id != HTTP_EVENT_ON_DATA || !b || b->len + 1 >= b->cap) return ESP_OK;
-        size_t n = static_cast<size_t>(e->data_len);
+        auto n = static_cast<size_t>(e->data_len);
         if (n > b->cap - 1 - b->len) n = b->cap - 1 - b->len;  // too long: the rest is dropped
         memcpy(b->out + b->len, e->data, n);
         b->len += n;
@@ -115,7 +124,7 @@ struct Notifier::Http {
         esp_http_client_delete_header(h, "Content-Type");
         if (contentType) esp_http_client_set_header(h, "Content-Type", contentType);
         for (const char* const* hd = headers; hd && *hd; hd += 2) esp_http_client_set_header(h, hd[0], hd[1]);
-        esp_http_client_set_post_field(h, body, body ? static_cast<int>(strlen(body)) : 0);
+        esp_http_client_set_post_field(h, body, body ? static_cast<int>(strnlen(body, kMaxBody)) : 0);
         const esp_err_t err = esp_http_client_perform(h);
         esp_http_client_set_user_data(h, nullptr);
         out[b.len] = 0;
@@ -127,6 +136,9 @@ struct Notifier::Http {
     }
 };
 
+Notifier::Notifier(Config& cfg, WifiManager& wifi) : cfg_(cfg), wifi_(wifi) {}
+Notifier::~Notifier() = default;
+
 esp_err_t Notifier::begin(CommandHandler handler, void* ctx)  // NOSONAR context for the callback
 {
     handler_ = handler;
@@ -134,11 +146,11 @@ esp_err_t Notifier::begin(CommandHandler handler, void* ctx)  // NOSONAR context
     buf_ = static_cast<char*>(heap_caps_malloc(kBufSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (!buf_) buf_ = static_cast<char*>(heap_caps_malloc(kBufSize, MALLOC_CAP_8BIT));
     queue_ = xQueueCreate(kQueueLen, sizeof(Msg));
-    ntfyHttp_ = new Http();
-    tgHttp_ = new Http();
-    sendHttp_ = new Http();
+    ntfyHttp_ = std::make_unique<Http>();
+    tgHttp_ = std::make_unique<Http>();
+    sendHttp_ = std::make_unique<Http>();
     if (!buf_ || !queue_) return ESP_ERR_NO_MEM;
-    sSelf = this;
+    selfRef().store(this);
     events::setSink(&Notifier::sink);
     return task_.start("notify", &Notifier::taskEntry, this, 3) ? ESP_OK : ESP_ERR_NO_MEM;
 }
@@ -152,7 +164,7 @@ void Notifier::reload()
 
 void Notifier::sink(events::Kind kind, const char* text)
 {
-    Notifier* self = sSelf;
+    Notifier* self = selfRef().load();
     if (!self) return;
     Msg m{};
     m.kind = kind;
@@ -257,9 +269,10 @@ bool Notifier::sendNtfy(const Msg& m)
     snprintf(url.data(), url.size(), "%s/%s", c_.ntfyServer.data(), c_.ntfyTopic.data());
     std::array<char, 80> bearer{};
     if (c_.ntfyToken[0]) snprintf(bearer.data(), bearer.size(), "Bearer %s", c_.ntfyToken.data());
-    const char* headers[] = {"Title", "Pocket AdBlock", "Tags", ntfyTags(m.kind),
-                             c_.ntfyToken[0] ? "Authorization" : nullptr, bearer.data(), nullptr};
-    const int st = sendHttp_->request(url.data(), HTTP_METHOD_POST, m.text.data(), "text/plain", headers, buf_, 512);
+    const std::array<const char*, 7> headers{"Title", "Pocket AdBlock", "Tags", ntfyTags(m.kind),
+                                             c_.ntfyToken[0] ? "Authorization" : nullptr, bearer.data(), nullptr};
+    const int st =
+        sendHttp_->request(url.data(), HTTP_METHOD_POST, m.text.data(), "text/plain", headers.data(), buf_, 512);
     sendHttp_->close();
     const bool ok = st >= 200 && st < 300;
     std::array<char, 48> why{};
@@ -302,8 +315,8 @@ void Notifier::pollNtfy()
              ntfySince_[0] ? ntfySince_.data() : "all");
     std::array<char, 80> bearer{};
     if (c_.ntfyToken[0]) snprintf(bearer.data(), bearer.size(), "Bearer %s", c_.ntfyToken.data());
-    const char* headers[] = {c_.ntfyToken[0] ? "Authorization" : nullptr, bearer.data(), nullptr};
-    const int st = ntfyHttp_->request(url.data(), HTTP_METHOD_GET, nullptr, nullptr, headers, buf_, kBufSize);
+    const std::array<const char*, 3> headers{c_.ntfyToken[0] ? "Authorization" : nullptr, bearer.data(), nullptr};
+    const int st = ntfyHttp_->request(url.data(), HTTP_METHOD_GET, nullptr, nullptr, headers.data(), buf_, kBufSize);
     if (st != 200) return;
     const bool first = !ntfySince_[0];
     notify::ntfyLines(buf_, [this, first](const char* id, const char* event, const char* text) {
@@ -319,7 +332,9 @@ void Notifier::pollNtfy()
     });
     if (first && !ntfySince_[0]) {
         // Nothing there yet: from now on, ask for messages newer than this poll.
-        snprintf(ntfySince_.data(), ntfySince_.size(), "%" PRIu32, static_cast<uint32_t>(time(nullptr)));
+        const auto now = std::chrono::system_clock::now().time_since_epoch();
+        snprintf(ntfySince_.data(), ntfySince_.size(), "%" PRIu32,
+                 static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::seconds>(now).count()));
     }
 }
 

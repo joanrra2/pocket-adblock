@@ -131,6 +131,14 @@ void splitCommand(const char* in, char* verb, size_t verbCap, char* arg, size_t 
 }
 }  // namespace
 
+namespace {
+const char* hostWord(const WolHostState& h)
+{
+    if (!h.host.ip) return "?";  // no IP: its state is unknown
+    return h.online ? "online" : "offline";
+}
+}  // namespace
+
 void App::onCommand(void* ctx, const char* command, char* reply, size_t cap)  // NOSONAR C-style listener signature
 {
     auto* self = static_cast<App*>(ctx);
@@ -148,7 +156,8 @@ void App::onCommand(void* ctx, const char* command, char* reply, size_t cap)  //
             snprintf(state.data(), state.size(), "paused (%u min left)", static_cast<unsigned>((resume - now + 59) / 60));
         else
             copyStr(state.data(), state.size(), self->filter_.enabled() ? "on" : "off");
-        const uint32_t b = self->counters_.blocked, a = self->counters_.allowed;
+        const uint32_t b = self->counters_.blocked;
+        const uint32_t a = self->counters_.allowed;
         snprintf(reply, cap, "Blocking %s. %u of %u queries blocked, %u domains on the list, up %u h. Firmware %s.",
                  state.data(), static_cast<unsigned>(b), static_cast<unsigned>(a + b),
                  static_cast<unsigned>(self->store_.info().count), static_cast<unsigned>(now / 3600),
@@ -156,9 +165,9 @@ void App::onCommand(void* ctx, const char* command, char* reply, size_t cap)  //
     } else if (strcmp(v, "hosts") == 0) {
         static std::array<WolHostState, WolService::kCapacity> hosts;  // notifier task only
         const size_t n = self->wol_.list(hosts.data(), hosts.size());
-        size_t used = static_cast<size_t>(snprintf(reply, cap, n ? "Hosts:" : "No Wake-on-LAN hosts yet."));
+        auto used = static_cast<size_t>(snprintf(reply, cap, n ? "Hosts:" : "No Wake-on-LAN hosts yet."));
         for (size_t i = 0; i < n && used < cap; i++) {
-            const char* st = !hosts[i].host.ip ? "?" : hosts[i].online ? "online" : "offline";
+            const char* st = hostWord(hosts[i]);
             used += static_cast<size_t>(snprintf(reply + used, cap - used, " %s (%s)%s", hosts[i].host.name, st, i + 1 < n ? "," : ""));
         }
     } else if (strcmp(v, "wake") == 0) {
@@ -170,7 +179,9 @@ void App::onCommand(void* ctx, const char* command, char* reply, size_t cap)  //
         else snprintf(reply, cap, verifying ? "Waking %s; I'll tell you when it answers." : "Magic packet sent to %s.", arg.data());
     } else if (strcmp(v, "cancel") == 0) {
         const esp_err_t err = self->wol_.cancel(arg.data());
-        snprintf(reply, cap, err == ESP_OK ? "Stopped waiting for %s." : err == ESP_ERR_NOT_FOUND ? "No host called '%s'." : "%s is not being woken.", arg.data());
+        if (err == ESP_OK) snprintf(reply, cap, "Stopped waiting for %s.", arg.data());
+        else if (err == ESP_ERR_NOT_FOUND) snprintf(reply, cap, "No host called '%s'.", arg.data());
+        else snprintf(reply, cap, "%s is not being woken.", arg.data());
     } else if (strcmp(v, "pause") == 0) {
         unsigned long m = arg[0] ? strtoul(arg.data(), nullptr, 10) : 15;
         if (m < 1 || m > 1440) m = 15;

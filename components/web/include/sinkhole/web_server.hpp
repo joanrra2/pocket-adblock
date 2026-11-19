@@ -34,7 +34,7 @@
 
 namespace sinkhole {
 
-struct WebDeps {
+struct WebDeps {  // NOSONAR the services the web UI uses, passed in one place
     Config& cfg;
     WifiManager& wifi;
     BlocklistStore& store;

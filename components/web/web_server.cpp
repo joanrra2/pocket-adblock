@@ -821,12 +821,12 @@ const char* upgradeBackupNotify(uint8_t*& data, int& len, Config& cfg)
         if (!in.tgToken[0]) memcpy(in.tgToken, cur.tgToken, sizeof(in.tgToken));
         return 0;
     });
-    auto* full = static_cast<uint8_t*>(malloc(sizeof(NotifySettings)));
+    auto* full = static_cast<uint8_t*>(malloc(sizeof(NotifySettings)));  // NOSONAR freed by postRestore with free(), like every item
     if (!full) return "out of memory";
     memcpy(full, &in, sizeof(NotifySettings));
     secureWipe(&in, sizeof(in));
     secureWipe(data, static_cast<size_t>(len));
-    free(data);
+    free(data);  // NOSONAR allocated by postRestore with malloc()
     data = full;
     len = sizeof(NotifySettings);
     return nullptr;
@@ -1559,6 +1559,26 @@ esp_err_t WebServer::getNotify(httpd_req_t* req)
     return j.finish();
 }
 
+namespace {
+// The save form's fields; nullptr when they are fine, else what to show.
+const char* notifyFormError(const char* server, const char* topic, const char* token, const char* tgToken,
+                            const char* tgChat)
+{
+    if (server[0] && strncmp(server, "https://", 8) != 0 && strncmp(server, "http://", 7) != 0)  // NOSONAR http:// for a self-hosted ntfy on the LAN
+        return "ntfy server must start with https://";
+    if (!safeToken(topic, sizeof(NotifySettings::ntfyTopic) - 5, true))  // room for "-cmd"
+        return "topic: letters, digits, - and _ only (up to 34)";
+    if (!safeToken(token, sizeof(NotifySettings::ntfyToken) - 1, true) ||
+        !safeToken(tgToken, sizeof(NotifySettings::tgToken) - 1, true))
+        return "token has characters that can't be right";
+    bool chatOk = true;
+    for (size_t i = 0; tgChat[i]; i++) chatOk &= isdigit(static_cast<unsigned char>(tgChat[i])) || (i == 0 && tgChat[i] == '-');
+    if (!chatOk || strnlen(tgChat, sizeof(NotifySettings::tgChat)) >= sizeof(NotifySettings::tgChat))
+        return "chat ID: digits only (use Find)";
+    return nullptr;
+}
+}  // namespace
+
 // action=save (server, topic, token, tgToken, tgChat, events, commands;
 // empty token = keep, clearNtfyToken=1 / clearTgToken=1 remove), action=test,
 // action=findchat (Telegram chat that last wrote to the bot).
@@ -1603,16 +1623,8 @@ esp_err_t WebServer::postNotify(httpd_req_t* req)
     field(form.data(), "commands", cmds.data(), cmds.size());
     field(form.data(), "clearNtfyToken", clearN.data(), clearN.size());
     field(form.data(), "clearTgToken", clearT.data(), clearT.size());
-    if (server[0] && strncmp(server.data(), "https://", 8) != 0 && strncmp(server.data(), "http://", 7) != 0)  // NOSONAR http:// for a self-hosted ntfy on the LAN
-        return sendError(req, "400 Bad Request", "ntfy server must start with https://");
-    if (!safeToken(topic.data(), sizeof(NotifySettings::ntfyTopic) - 5, true))  // room for "-cmd"
-        return sendError(req, "400 Bad Request", "topic: letters, digits, - and _ only (up to 34)");
-    if (!safeToken(token.data(), sizeof(NotifySettings::ntfyToken) - 1, true) || !safeToken(tgToken.data(), sizeof(NotifySettings::tgToken) - 1, true))
-        return sendError(req, "400 Bad Request", "token has characters that can't be right");
-    bool chatOk = true;
-    for (size_t i = 0; tgChat[i]; i++) chatOk &= isdigit(static_cast<unsigned char>(tgChat[i])) || (i == 0 && tgChat[i] == '-');
-    if (!chatOk || strnlen(tgChat.data(), tgChat.size()) >= sizeof(NotifySettings::tgChat))
-        return sendError(req, "400 Bad Request", "chat ID: digits only (use Find)");
+    if (const char* bad = notifyFormError(server.data(), topic.data(), token.data(), tgToken.data(), tgChat.data()))
+        return sendError(req, "400 Bad Request", bad);
     const auto evMask = static_cast<uint16_t>(strtoul(ev.data(), nullptr, 10) & events::kAllKinds);
     d_.cfg.modifyNotify([&](NotifySettings& s) {
         copyStr(s.ntfyServer, server[0] ? server.data() : "https://ntfy.sh");
