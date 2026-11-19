@@ -1,6 +1,7 @@
 #include "sinkhole/notifier.hpp"
 
 #include <memory>
+#include <new>
 #include <chrono>
 #include <atomic>
 #include <cctype>
@@ -147,10 +148,11 @@ esp_err_t Notifier::begin(CommandHandler handler, void* ctx)  // NOSONAR context
     buf_ = static_cast<char*>(heap_caps_malloc(kBufSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (!buf_) buf_ = static_cast<char*>(heap_caps_malloc(kBufSize, MALLOC_CAP_8BIT));
     queue_ = xQueueCreate(kQueueLen, sizeof(Msg));
-    ntfyHttp_ = std::make_unique<Http>();
-    tgHttp_ = std::make_unique<Http>();
-    sendHttp_ = std::make_unique<Http>();
-    if (!buf_ || !queue_) return ESP_ERR_NO_MEM;
+    // nothrow: without exceptions a failed plain new aborts instead of failing begin().
+    ntfyHttp_.reset(new (std::nothrow) Http());  // NOSONAR make_unique has no nothrow form
+    tgHttp_.reset(new (std::nothrow) Http());    // NOSONAR as above
+    sendHttp_.reset(new (std::nothrow) Http());  // NOSONAR as above
+    if (!buf_ || !queue_ || !ntfyHttp_ || !tgHttp_ || !sendHttp_) return ESP_ERR_NO_MEM;
     selfRef().store(this);
     events::setSink(&Notifier::sink);
     return task_.start("notify", &Notifier::taskEntry, this, 3) ? ESP_OK : ESP_ERR_NO_MEM;

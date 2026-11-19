@@ -24,17 +24,21 @@ public:
     bool isAllowed(const char* domain, size_t len);
 
     // Global switch with optional auto-resume (pause for N seconds).
-    void setEnabled(bool on) { enabled_ = on; resumeAt_ = 0; }
+    void setEnabled(bool on);
     void pauseFor(uint32_t seconds);
     bool enabled();
-    uint32_t resumeAt() const { return resumeAt_; }
+    uint32_t resumeAt() const;  // uptime seconds; 0 = on, or off with no resume
 
 private:
+    // On, off, or paused until an uptime second, in one atomic so a resume
+    // can't cancel a pause set at the same moment by another task.
+    static constexpr uint32_t kOn = 0;
+    static constexpr uint32_t kOff = UINT32_MAX;
+
     BlocklistStore& store_;
     DomainList& custom_;
     DomainList& allow_;
-    std::atomic<bool> enabled_{true};
-    std::atomic<uint32_t> resumeAt_{0};  // uptime seconds, 0 = not scheduled
+    std::atomic<uint32_t> state_{kOn};
 };
 
 }  // namespace sinkhole

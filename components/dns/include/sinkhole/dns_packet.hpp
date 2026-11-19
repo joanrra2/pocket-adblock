@@ -136,6 +136,8 @@ inline size_t skipName(const uint8_t* pkt, size_t len, size_t i)
 template <typename F>
 inline bool forEachRecord(uint8_t* pkt, size_t len, size_t questionEnd, F&& fn)
 {
+    // 0 = the question didn't parse: don't read the header as records.
+    if (questionEnd < kHeaderLen || questionEnd > len) return false;
     const unsigned total = rd16(pkt + 6) + rd16(pkt + 8) + rd16(pkt + 10);
     size_t i = questionEnd;
     for (unsigned r = 0; r < total; r++) {
@@ -143,9 +145,9 @@ inline bool forEachRecord(uint8_t* pkt, size_t len, size_t questionEnd, F&& fn)
         if (!i || i + 10 > len) return false;
         const uint16_t type = rd16(pkt + i);
         const uint16_t rdlen = rd16(pkt + i + 8);
+        if (i + 10 + rdlen > len) return false;  // before fn: it may read the data
         fn(pkt + i + 4, type);
         i += 10 + rdlen;
-        if (i > len) return false;
     }
     return true;
 }

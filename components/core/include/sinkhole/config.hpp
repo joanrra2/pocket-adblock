@@ -137,12 +137,16 @@ public:
     }
 
     // Apply a change and persist it: cfg.modify([](Settings& s){ ... });
+    // If the flash write fails, RAM goes back to what is stored and the error
+    // is returned: the device never runs settings a restart would drop.
     template <typename F>
     esp_err_t modify(F&& fn)
     {
         LockGuard g(mu_);
         fn(s_);
-        return saveLocked();
+        const esp_err_t err = saveLocked();
+        if (err != ESP_OK) revertLocked();
+        return err;
     }
 
     // Notification settings, same pattern as read() / modify().
@@ -157,7 +161,9 @@ public:
     {
         LockGuard g(mu_);
         fn(n_);
-        return saveNotifyLocked();
+        const esp_err_t err = saveNotifyLocked();
+        if (err != ESP_OK) loadNotifyLocked();  // back to what is stored
+        return err;
     }
 
     bool usingDefaultAdminPassword();
@@ -183,6 +189,7 @@ public:
 
 private:
     esp_err_t saveLocked();
+    void revertLocked();
     static size_t validBytes(uint16_t version);
     static esp_err_t loadOversized(uint8_t* raw, size_t cap, size_t& n);
     void loadNotifyLocked();

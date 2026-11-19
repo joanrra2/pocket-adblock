@@ -4,6 +4,7 @@
 // woken from outside the LAN without opening any port (outbound connection).
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -131,11 +132,13 @@ private:
     void updateWakeLocked(int j, bool up, uint32_t now, uint32_t since);
     void reportResults();  // outside the lock
     esp_err_t saveLocked();
+    void migrateOldHostsLocked();
     int findLocked(const char* name);
 
     WifiManager& wifi_;
     Mutex mu_;
     WolHostState hosts_[kCapacity]{};
+    static std::array<WolHost, kCapacity> stored_;  // NVS layout scratch, under mu_ (one service)
     size_t count_ = 0;
     Listener listener_ = nullptr;
     void* listenerCtx_ = nullptr;

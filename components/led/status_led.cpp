@@ -17,7 +17,8 @@ constexpr uint32_t kRmtHz = 10 * 1000 * 1000;  // 0.1 us ticks for the WS2812 ti
 
 bool StatusLed::pinUsable(int pin)
 {
-    return pin >= 0 && GPIO_IS_VALID_OUTPUT_GPIO(pin) && !esp_gpio_is_reserved(1ULL << pin);
+    // Range first: the checks below shift 1ULL by the pin, undefined from 64 up.
+    return pin >= 0 && pin < GPIO_NUM_MAX && GPIO_IS_VALID_OUTPUT_GPIO(pin) && !esp_gpio_is_reserved(1ULL << pin);
 }
 
 void StatusLed::release()

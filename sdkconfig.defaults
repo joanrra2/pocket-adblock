@@ -37,7 +37,10 @@ CONFIG_HTTPD_MAX_URI_LEN=512
 CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
 
 # ---- lwIP ----
-CONFIG_LWIP_MAX_SOCKETS=16
+# Worst case with every Pro feature on is 18: web server 7 (listen, control,
+# 5 sessions), DNS 3, DNS over TLS 2, MQTT 1, notifications 3, updater 1,
+# Wake-on-LAN probe 1. A failed socket() would read as "host offline".
+CONFIG_LWIP_MAX_SOCKETS=20
 CONFIG_LWIP_RAW=y
 # IPv6: get a global address by SLAAC where the network has one, so the DNS
 # server can be offered as the IPv6 resolver too.

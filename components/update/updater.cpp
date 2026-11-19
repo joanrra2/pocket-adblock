@@ -326,9 +326,13 @@ void Updater::fetchBlocklist()
     if (r == ListFetch::TooBig && smallerList(url, smaller, sizeof(smaller))) {
         // Nothing was written; the active list keeps filtering. Switch for good
         // and fetch the smaller list right away.
-        cfg_.modify([&](Settings& s) {
-            if (strcmp(s.blocklistUrl, url) == 0) copyStr(s.blocklistUrl, smaller);
-        });
+        if (cfg_.modify([&](Settings& s) {
+                if (strcmp(s.blocklistUrl, url) == 0) copyStr(s.blocklistUrl, smaller);
+            }) != ESP_OK) {
+            // Not saved: fetching again would pick the same big list, over and over.
+            report(false, "too big for this board, and the switch to a smaller list could not be saved", bytes);
+            return;
+        }
         ESP_LOGW(TAG, "blocklist: %s; switching to %s", why, strrchr(smaller, '/') + 1);
         snprintf(why, sizeof(why), "too big for this board: switched to %s", strrchr(smaller, '/') + 1);
         report(false, why, bytes);

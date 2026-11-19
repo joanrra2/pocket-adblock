@@ -4,6 +4,8 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "sinkhole/updaters.hpp"
 
 namespace sinkhole {
@@ -15,7 +17,18 @@ void restartCb(void*)
 {
     esp_restart();
 }
+
+esp_timer_handle_t gRestartTimer = nullptr;  // created once at boot
 }  // namespace
+
+esp_err_t FirmwareUpdater::initRestartTimer()
+{
+    if (gRestartTimer) return ESP_OK;
+    esp_timer_create_args_t args{};
+    args.callback = &restartCb;
+    args.name = "restart";
+    return esp_timer_create(&args, &gRestartTimer);
+}
 
 esp_err_t FirmwareUpdater::begin()
 {
@@ -58,14 +71,15 @@ void FirmwareUpdater::abort()
 void FirmwareUpdater::restartIn(uint32_t ms, BootLog::Cause cause)
 {
     BootLog::noteRestart(cause);
-    static esp_timer_handle_t timer = nullptr;
-    if (!timer) {
-        esp_timer_create_args_t args{};
-        args.callback = &restartCb;
-        args.name = "restart";
-        esp_timer_create(&args, &timer);
-    }
-    esp_timer_start_once(timer, static_cast<uint64_t>(ms) * 1000);
+    const esp_err_t err = gRestartTimer ? esp_timer_start_once(gRestartTimer, static_cast<uint64_t>(ms) * 1000)
+                                        : ESP_ERR_INVALID_STATE;
+    if (err == ESP_OK || (gRestartTimer && esp_timer_is_active(gRestartTimer))) return;  // started, or already coming
+    // No timer: restart from here after the delay rather than not at all. The
+    // caller's reply may not go out, but the device never runs on half-applied
+    // state (a restore that is in flash but not in RAM).
+    ESP_LOGW(TAG, "restart timer unavailable (%s), restarting directly", esp_err_to_name(err));
+    vTaskDelay(pdMS_TO_TICKS(ms));
+    esp_restart();
 }
 
 const char* FirmwareUpdater::version()

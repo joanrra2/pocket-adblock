@@ -359,6 +359,12 @@ esp_err_t WebServer::sendError(httpd_req_t* req, const char* status, const char*
     return j.finish();
 }
 
+// Nothing was changed: Config puts RAM back to the stored settings.
+esp_err_t WebServer::sendNotSaved(httpd_req_t* req)
+{
+    return sendError(req, "500 Internal Server Error", "could not save: the settings storage is full or failing");
+}
+
 // ------------------------------------------------------------------ pages
 
 esp_err_t WebServer::getIndex(httpd_req_t* req)
@@ -1021,8 +1027,8 @@ esp_err_t WebServer::postBlocking(httpd_req_t* req)
         d_.filter.pauseFor(m * 60);
     } else {
         const bool on = strcmp(mode, "on") == 0;
+        if (d_.cfg.modify([on](Settings& s) { s.blocking = on; }) != ESP_OK) return sendNotSaved(req);
         d_.filter.setEnabled(on);
-        d_.cfg.modify([on](Settings& s) { s.blocking = on; });
     }
     return sendOk(req);
 }
@@ -1119,11 +1125,11 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         field(form, "pass", b, 65);
         field(form, "always", c, 4);
         if (b[0] && strlen(b) < 8) return sendError(req, "400 Bad Request", "AP password needs 8+ characters");
-        d_.cfg.modify([&](Settings& s) {
+        if (d_.cfg.modify([&](Settings& s) {
             copyStr(s.apSsid, a);
             if (b[0]) copyStr(s.apPass, b);
             s.apAlways = c[0] != '0';
-        });
+        }) != ESP_OK) return sendNotSaved(req);
         d_.wifi.applyAccessPoint();
         return sendOk(req, "access point updated; reconnect to it if you were using it");
     }
@@ -1158,13 +1164,13 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
                 okHost = isalnum(static_cast<unsigned char>(*h)) || *h == '.' || *h == '-';
             if (!okHost) return sendError(req, "400 Bad Request", "DNS over TLS needs a server name, e.g. dns.quad9.net");
         }
-        d_.cfg.modify([&](Settings& s) {
+        if (d_.cfg.modify([&](Settings& s) {
             s.upstreamMode = mode;
             if (ip) s.upstreamIp = ip;
             s.upstreamIp2 = backup;  // empty field = no backup
             s.dot = dotOn;
             if (dotHost[0]) copyStr(s.dotHost, dotHost);
-        });
+        }) != ESP_OK) return sendNotSaved(req);
         if (d_.applyUpstream) d_.applyUpstream(d_.appCtx);
         return sendOk(req);
     }
@@ -1184,12 +1190,12 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         const uint8_t level = static_cast<uint8_t>(br < 1 ? 24 : br > 255 ? 255 : br);
         if (d_.led.configure(k, gpio, low[0] == '1', level) != ESP_OK)
             return sendError(req, "400 Bad Request", "this pin can't drive an LED (used by flash/PSRAM or not an output)");
-        d_.cfg.modify([&](Settings& s) {
+        if (d_.cfg.modify([&](Settings& s) {
             s.ledKind = static_cast<uint8_t>(k);
             s.ledPin = static_cast<int8_t>(gpio);
             s.ledActiveLow = low[0] == '1';
             s.ledBrightness = level;
-        });
+        }) != ESP_OK) return sendNotSaved(req);
         if (test[0] == '1' && k != StatusLed::Kind::Off) d_.led.test();
         return sendOk(req);
     }
@@ -1199,10 +1205,10 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         field(form, "cname", c, 4);
         const uint8_t flags = static_cast<uint8_t>((a[0] == '1' ? 1 : 0) | (b[0] == '1' ? 2 : 0));
         const bool cname = c[0] == '1';
-        d_.cfg.modify([&](Settings& s) {
+        if (d_.cfg.modify([&](Settings& s) {
             s.bypassGuard = flags;
             s.cnameCheck = cname;
-        });
+        }) != ESP_OK) return sendNotSaved(req);
         d_.dns.setGuard(flags);
         d_.dns.setCnameCheck(cname);
         // SafeSearch: google=1, bing=1, youtube=off|moderate|strict
@@ -1218,11 +1224,11 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         const unsigned long rl = strtoul(rate, nullptr, 10);
         const uint16_t perMin = static_cast<uint16_t>(rl > 60000 ? 60000 : rl);
         const uint8_t privacy = static_cast<uint8_t>(pv[0] == '2' ? 2 : pv[0] == '1' ? 1 : 0);
-        d_.cfg.modify([&](Settings& s) {
+        if (d_.cfg.modify([&](Settings& s) {
             s.safeSearch = ss;
             s.privacy = privacy;
             if (hasRate) s.rateLimit = perMin;
-        });
+        }) != ESP_OK) return sendNotSaved(req);
         if (hasRate) d_.dns.setRateLimit(perMin);
         d_.dns.setSafeSearch(ss);
         d_.log.setPrivacy(privacy);
@@ -1234,10 +1240,10 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         if (a[0] && strncmp(a, "https://", 8) != 0 && strncmp(a, "http://", 7) != 0)  // NOSONAR http:// allowed for LAN mirrors; lists are SHA-256/signature checked, firmware auto-install needs a signed build
             return sendError(req, "400 Bad Request", "URL must start with https://");
         const unsigned long hours = strtoul(b, nullptr, 10);
-        d_.cfg.modify([&](Settings& s) {
+        if (d_.cfg.modify([&](Settings& s) {
             copyStr(s.blocklistUrl, a);
             s.updateHours = static_cast<uint16_t>(hours > 720 ? 720 : hours);
-        });
+        }) != ESP_OK) return sendNotSaved(req);
         return sendOk(req);
     }
     if (strcmp(section, "mqtt") == 0) {
@@ -1247,13 +1253,13 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         field(form, "prefix", e, 48);
         char ha[4] = "";
         field(form, "ha", ha, sizeof(ha));
-        d_.cfg.modify([&](Settings& s) {
+        if (d_.cfg.modify([&](Settings& s) {
             s.haDiscovery = ha[0] == '1';
             copyStr(s.mqttUri, a);
             copyStr(s.mqttUser, b);
             if (c[0]) copyStr(s.mqttPass, c);
             copyStr(s.mqttPrefix, e[0] ? e : "sinkhole");
-        });
+        }) != ESP_OK) return sendNotSaved(req);
         return sendOk(req, "saved; reboot to apply");
     }
     if (strcmp(section, "fw") == 0) {
@@ -1264,16 +1270,16 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         const bool autoOn = b[0] == '1';
         if (autoOn && !Updater::autoInstallAllowed())
             return sendError(req, "400 Bad Request", "automatic install needs a signed firmware build");
-        d_.cfg.modify([&](Settings& s) {
+        if (d_.cfg.modify([&](Settings& s) {
             copyStr(s.fwManifestUrl, a);
             s.fwAuto = autoOn;
-        });
+        }) != ESP_OK) return sendNotSaved(req);
         return sendOk(req);
     }
     if (strcmp(section, "radio") == 0) {
         field(form, "tx", a, 16);
         const uint8_t mode = strcmp(a, "full") == 0 ? TxFull : strcmp(a, "reduced") == 0 ? TxReduced : TxAuto;
-        d_.cfg.modify([mode](Settings& s) { s.txPower = mode; });
+        if (d_.cfg.modify([mode](Settings& s) { s.txPower = mode; }) != ESP_OK) return sendNotSaved(req);
         d_.wifi.applyTxPower();
         return sendOk(req);
     }
@@ -1296,19 +1302,19 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
             if (const char* why = LanDhcp::checkPool({net.ip, net.mask, net.gw, first, last, 0}))
                 return sendError(req, "400 Bad Request", why);
         }
-        d_.cfg.modify([&](Settings& s) {
+        if (d_.cfg.modify([&](Settings& s) {
             s.dhcpServer = on;
             if (first) s.dhcpFirst = first;
             if (last) s.dhcpLast = last;
             if (lease) s.dhcpLeaseMinutes = static_cast<uint16_t>(lease < 5 ? 5 : lease > 10080 ? 10080 : lease);
-        });
+        }) != ESP_OK) return sendNotSaved(req);
         if (d_.applyUpstream) d_.applyUpstream(d_.appCtx);  // applies the DHCP server too
         return sendOk(req);
     }
     if (strcmp(section, "ip") == 0) {
         field(form, "mode", a, 16);
         if (strcmp(a, "static") != 0) {
-            d_.cfg.modify([](Settings& s) { s.staticIp = false; });
+            if (d_.cfg.modify([](Settings& s) { s.staticIp = false; }) != ESP_OK) return sendNotSaved(req);
             d_.wifi.reconfigureStation();
             return sendOk(req, "switched to DHCP; the address may change");
         }
@@ -1327,13 +1333,13 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
         if ((ip & mask) != (gw & mask)) return sendError(req, "400 Bad Request", "gateway is not in the same subnet");
         if (dnsS[0] && !parseIp4(dnsS, dns)) return sendError(req, "400 Bad Request", "invalid DNS server");
         if (!dns) dns = gw;  // the device itself still needs a resolver (blocklist downloads)
-        d_.cfg.modify([&](Settings& s) {
+        if (d_.cfg.modify([&](Settings& s) {
             s.staticIp = true;
             s.ipAddr = ip;
             s.ipMask = mask;
             s.ipGw = gw;
             s.ipDns = dns;
-        });
+        }) != ESP_OK) return sendNotSaved(req);
         d_.wifi.reconfigureStation();
         char msg[64];
         snprintf(msg, sizeof(msg), "static IP set; reconnecting at http://%s/", ipS);
@@ -1341,7 +1347,7 @@ esp_err_t WebServer::postSettings(httpd_req_t* req)
     }
     if (strcmp(section, "hostname") == 0) {
         if (!field(form, "hostname", a, 32) || !a[0]) return sendError(req, "400 Bad Request", "hostname is required");
-        d_.cfg.modify([&](Settings& s) { copyStr(s.hostname, a); });
+        if (d_.cfg.modify([&](Settings& s) { copyStr(s.hostname, a); }) != ESP_OK) return sendNotSaved(req);
         return sendOk(req, "saved; reboot to apply");
     }
     return sendError(req, "400 Bad Request", "unknown section");
@@ -1663,10 +1669,18 @@ esp_err_t WebServer::postNotify(httpd_req_t* req)
     field(form.data(), "commands", cmds.data(), cmds.size());
     field(form.data(), "clearNtfyToken", clearN.data(), clearN.size());
     field(form.data(), "clearTgToken", clearT.data(), clearT.size());
-    if (const char* bad = notifyFormError(server.data(), topic.data(), token.data(), tgToken.data(), tgChat.data()))
+    // Tokens are wiped from these stack buffers on every way out.
+    const auto wipe = [&token, &tgToken] {  // form is static: used directly
+        secureWipe(token.data(), token.size());
+        secureWipe(tgToken.data(), tgToken.size());
+        secureWipe(form.data(), form.size());
+    };
+    if (const char* bad = notifyFormError(server.data(), topic.data(), token.data(), tgToken.data(), tgChat.data())) {
+        wipe();
         return sendError(req, "400 Bad Request", bad);
+    }
     const auto evMask = static_cast<uint16_t>(strtoul(ev.data(), nullptr, 10) & events::kAllKinds);
-    d_.cfg.modifyNotify([&](NotifySettings& s) {
+    const esp_err_t saved = d_.cfg.modifyNotify([&](NotifySettings& s) {
         copyStr(s.ntfyServer, server[0] ? server.data() : "https://ntfy.sh");
         copyStr(s.ntfyTopic, topic.data());
         if (token[0]) copyStr(s.ntfyToken, token.data());
@@ -1677,9 +1691,8 @@ esp_err_t WebServer::postNotify(httpd_req_t* req)
         s.notifyEvents = evMask;
         s.notifyCommands = cmds[0] == '1';
     });
-    secureWipe(token.data(), token.size());
-    secureWipe(tgToken.data(), tgToken.size());
-    secureWipe(form.data(), form.size());
+    wipe();
+    if (saved != ESP_OK) return sendNotSaved(req);
     d_.notifier->reload();
     return sendOk(req);
 }

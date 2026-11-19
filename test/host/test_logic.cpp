@@ -59,6 +59,21 @@ static void testHashTable()
     });
     CHECK(seen.size() == 4);
     CHECK(seen.back() == "example.com");  // never the bare TLD
+
+    // More suffixes than fit: the registrable domain must still be checked.
+    std::string deep;
+    for (int i = 0; i < 20; i++) {
+        deep += 'l';
+        deep += std::to_string(i);
+        deep += '.';
+    }
+    deep += "tracker.com";
+    std::array<uint64_t, kMaxSuffixes> hs{};
+    CHECK(suffixHashes(deep.c_str(), deep.size(), hs) == kMaxSuffixes);
+    bool sawTracker = false;
+    for (uint64_t x : hs) sawTracker = sawTracker || x == h("tracker.com");
+    CHECK(sawTracker);
+    CHECK(suffixHashes(d, std::strlen(d), hs) == 4);
 }
 
 // Same layout as tools/build_blocklist.py payload_v2().
