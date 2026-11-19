@@ -602,9 +602,9 @@ void WifiManager::onEthernet(bool up, const esp_netif_ip_info_t* info)
         staMask_ = info->netmask.addr;
         gateway_ = info->gw.addr;
         connected_ = true;
-        char ip[16];
-        formatIp4(staIp_, ip);
-        ESP_LOGI(TAG, "uplink up on the cable, ip %s", ip);
+        std::array<char, 16> ip{};
+        formatIp4(staIp_, ip.data());
+        ESP_LOGI(TAG, "uplink up on the cable, ip %s", ip.data());
         updateAp();
         if (listener_) listener_(listenerCtx_, true);
         return;
@@ -632,10 +632,12 @@ void WifiManager::onEthernet(bool up, const esp_netif_ip_info_t* info)
 WifiStatus WifiManager::status() const
 {
     WifiStatus s{};
-    s.state = ethUp_ || connected_ ? LinkState::Connected
-              : !configured_ ? LinkState::NotConfigured
-              : attempts_  ? LinkState::Failed
-                           : LinkState::Connecting;
+    if (ethUp_ || connected_)
+        s.state = LinkState::Connected;
+    else if (!configured_)
+        s.state = LinkState::NotConfigured;
+    else
+        s.state = attempts_ ? LinkState::Failed : LinkState::Connecting;
     s.lastReason = lastReason_;
     s.attempts = attempts_;
     const uint32_t now = uptimeSeconds(), at = retryAt_;

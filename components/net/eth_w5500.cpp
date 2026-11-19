@@ -5,6 +5,8 @@
 
 #if CONFIG_SINKHOLE_ETH_W5500
 
+#include <array>
+
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_eth.h"
@@ -66,9 +68,9 @@ esp_netif_t* startW5500()
         return nullptr;
     }
     // The W5500 has no address of its own: use the chip's Ethernet MAC.
-    uint8_t addr[6];
-    esp_read_mac(addr, ESP_MAC_ETH);
-    esp_eth_ioctl(eth, ETH_CMD_S_MAC_ADDR, addr);
+    std::array<uint8_t, 6> addr{};
+    esp_read_mac(addr.data(), ESP_MAC_ETH);
+    esp_eth_ioctl(eth, ETH_CMD_S_MAC_ADDR, addr.data());
 
     const esp_netif_config_t netifCfg = ESP_NETIF_DEFAULT_ETH();
     esp_netif_t* netif = esp_netif_new(&netifCfg);
