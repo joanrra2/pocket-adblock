@@ -733,6 +733,14 @@ constexpr const char* kBackupKeys[] = {"settings", "custom_block", "custom_allow
                                        "notify"};
 constexpr size_t kBackupMax = 64 * 1024;
 
+// The kBackupKeys entry named `name` (the same pointer each time), or nullptr.
+const char* backupKey(const char* name)
+{
+    for (const char* k : kBackupKeys)
+        if (strcmp(name, k) == 0) return k;
+    return nullptr;
+}
+
 void clearSecrets(Settings& s)
 {
     memset(s.staPass, 0, sizeof(s.staPass));
@@ -900,8 +908,7 @@ esp_err_t WebServer::postRestore(httpd_req_t* req)
         const char* key = nullptr;
         if (eq && line[0] != '#') {
             *eq = '\0';
-            for (const char* k : kBackupKeys)
-                if (strcmp(line, k) == 0) key = k;
+            key = backupKey(line);
         }
         // One slot per known key: a repeated section must not run past items[].
         bool seen = false;
