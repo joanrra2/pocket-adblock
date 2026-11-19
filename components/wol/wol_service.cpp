@@ -95,9 +95,12 @@ esp_err_t WolService::saveLocked()
 esp_err_t WolService::add(const WolHost& h)
 {
     if (!h.name[0]) return ESP_ERR_INVALID_ARG;
-    // Names end up in MQTT topics: keep them simple.
+    // Names end up in MQTT topics and Home Assistant JSON: keep them simple.
     for (const char* p = h.name; *p; p++)
-        if (*p == '/' || *p == '+' || *p == '#' || *p == ' ') return ESP_ERR_INVALID_ARG;
+        if (*p == '/' || *p == '+' || *p == '#' || *p == ' ' || *p == '"' || *p == '\\' || static_cast<uint8_t>(*p) < 0x20)
+            return ESP_ERR_INVALID_ARG;
+
+    if (watchOnly(h) && !h.ip) return ESP_ERR_INVALID_SIZE;  // nothing to wake or watch
 
     LockGuard g(mu_);
     int i = findLocked(h.name);
@@ -105,8 +108,14 @@ esp_err_t WolService::add(const WolHost& h)
         if (count_ >= kCapacity) return ESP_ERR_NO_MEM;
         i = static_cast<int>(count_++);
         hosts_[i] = WolHostState{};
+    } else if (hosts_[i].host.ip != h.ip || hosts_[i].host.port != h.port) {
+        // Another address or check: its state starts over (no stale alert).
+        hosts_[i].known = false;
+        hosts_[i].online = false;
+        hosts_[i].misses = 0;
     }
     hosts_[i].host = h;
+    hosts_[i].host.reserved = 0;
     return saveLocked();
 }
 
@@ -135,6 +144,7 @@ esp_err_t WolService::wake(const char* name)
         LockGuard g(mu_);
         int i = findLocked(name);
         if (i < 0) return ESP_ERR_NOT_FOUND;
+        if (watchOnly(hosts_[i].host)) return ESP_ERR_NOT_SUPPORTED;
         memcpy(mac, hosts_[i].host.mac, 6);
         hosts_[i].lastWake = uptimeSeconds();
     }
@@ -192,6 +202,7 @@ esp_err_t WolService::wakeAndVerify(const char* name, bool* verifying)
         LockGuard g(mu_);
         const int i = findLocked(name);
         if (i < 0) return ESP_ERR_NOT_FOUND;
+        if (watchOnly(hosts_[i].host)) return ESP_ERR_NOT_SUPPORTED;
         if (hosts_[i].waking) {  // already on it
             if (verifying) *verifying = true;
             return ESP_OK;
@@ -205,7 +216,7 @@ esp_err_t WolService::wakeAndVerify(const char* name, bool* verifying)
         if (i >= 0 && err == ESP_OK) setResultLocked(i, "magic packet sent");
         return err;
     }
-    if (check(h) || check(h)) {  // one lost packet must not trigger a wake
+    if (check(h) == Probe::Up || check(h) == Probe::Up) {  // one lost packet must not trigger a wake
         LockGuard g(mu_);
         const int i = findLocked(name);
         if (i >= 0) {
@@ -226,18 +237,23 @@ esp_err_t WolService::wakeAndVerify(const char* name, bool* verifying)
     return err;
 }
 
-// Non-blocking connect with a 1 s limit: true when the port accepts.
-bool WolService::tcpOpen(uint32_t ip, uint16_t port)
+// Non-blocking connect with a 1 s limit: Up when the port accepts.
+WolService::Probe WolService::tcpOpen(uint32_t ip, uint16_t port)
 {
     int s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (s < 0) return false;
+    if (s < 0) return Probe::Unknown;  // out of sockets: not the host's fault
     fcntl(s, F_SETFL, fcntl(s, F_GETFL, 0) | O_NONBLOCK);
     sockaddr_in to{};
     to.sin_family = AF_INET;
     to.sin_port = htons(port);
     to.sin_addr.s_addr = ip;
     bool open = connect(s, reinterpret_cast<sockaddr*>(&to), sizeof(to)) == 0;
-    if (!open && errno == EINPROGRESS) {
+    const int connectErr = open ? 0 : errno;
+    if (connectErr == ENOMEM || connectErr == ENOBUFS) {
+        close(s);
+        return Probe::Unknown;
+    }
+    if (connectErr == EINPROGRESS) {
         fd_set wr;
         FD_ZERO(&wr);
         FD_SET(s, &wr);
@@ -249,7 +265,7 @@ bool WolService::tcpOpen(uint32_t ip, uint16_t port)
         }
     }
     close(s);
-    return open;
+    return open ? Probe::Up : Probe::Down;
 }
 
 esp_err_t WolService::wakeMac(const uint8_t mac[6])
@@ -283,10 +299,10 @@ esp_err_t WolService::wakeMac(const uint8_t mac[6])
     return sent ? ESP_OK : ESP_FAIL;
 }
 
-bool WolService::ping(uint32_t ip)
+WolService::Probe WolService::ping(uint32_t ip)
 {
     int s = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-    if (s < 0) return false;
+    if (s < 0) return Probe::Unknown;  // out of sockets: not the host's fault
     timeval tv{1, 0};
     setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
@@ -301,7 +317,8 @@ bool WolService::ping(uint32_t ip)
     to.sin_family = AF_INET;
     to.sin_addr.s_addr = ip;
     bool ok = false;
-    if (sendto(s, &req, sizeof(req), 0, reinterpret_cast<sockaddr*>(&to), sizeof(to)) > 0) {
+    const bool sent = sendto(s, &req, sizeof(req), 0, reinterpret_cast<sockaddr*>(&to), sizeof(to)) > 0;
+    if (sent) {
         uint8_t rx[64];
         for (int tries = 0; tries < 4 && !ok; tries++) {
             sockaddr_in from{};
@@ -316,7 +333,8 @@ bool WolService::ping(uint32_t ip)
         }
     }
     close(s);
-    return ok;
+    if (!sent) return Probe::Unknown;  // no buffer or no route: nothing was asked
+    return ok ? Probe::Up : Probe::Down;
 }
 
 void WolService::taskEntry(void* arg)
@@ -356,20 +374,32 @@ void WolService::run()
                 memcpy(mac, h.mac, 6);
                 wakeMac(mac);  // some network cards miss the first packets
             }
-            const bool up = check(h);
+            const Probe probe = check(h);
+            const bool up = probe == Probe::Up;
             bool changed = false;
-            bool state = up;
+            WolHostChange change{h.name, up, false, (h.flags & kWolAlert) != 0, 0};
             {
                 LockGuard g(mu_);
                 int j = findLocked(h.name);
-                if (j >= 0) {
+                if (j >= 0 && probe != Probe::Unknown) {
                     // Offline only after two failed checks in a row (a lost
                     // packet or a busy service must not flip the state).
                     hosts_[j].misses = up ? 0 : static_cast<uint8_t>(hosts_[j].misses < 255 ? hosts_[j].misses + 1 : 255);
                     const bool now_online = up || (hosts_[j].online && hosts_[j].misses < 2);
-                    changed = hosts_[j].online != now_online;
+                    // Known once it answers or misses twice; that first state
+                    // is reported too (MQTT wants it) but is not a change.
+                    const bool first = !hosts_[j].known && (up || hosts_[j].misses >= 2);
+                    changed = first || (hosts_[j].known && hosts_[j].online != now_online);
+                    if (changed) {
+                        change.first = first;
+                        change.prevFor = first ? 0 : now - hosts_[j].stateSince;
+                        hosts_[j].stateSince = now;
+                        hosts_[j].known = true;
+                    }
                     hosts_[j].online = now_online;
-                    state = now_online;
+                    change.online = now_online;
+                }
+                if (j >= 0) {
                     if (hosts_[j].waking && up) {
                         char text[48];
                         snprintf(text, sizeof(text), "online after %u s", static_cast<unsigned>(now - since));
@@ -387,7 +417,7 @@ void WolService::run()
                     }
                 }
             }
-            if (changed && listener_) listener_(listenerCtx_, h.name, state);
+            if (changed && listener_) listener_(listenerCtx_, change);
         }
     }
 }

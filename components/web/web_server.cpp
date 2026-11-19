@@ -1718,6 +1718,10 @@ esp_err_t WebServer::getWol(httpd_req_t* req)
             .boolean("online", snap[i].online)
             .num("port", snap[i].host.port)
             .num("timeout", WolService::timeoutOf(snap[i].host))
+            .boolean("watch", watchOnly(snap[i].host))
+            .boolean("alert", (snap[i].host.flags & kWolAlert) != 0)
+            .boolean("known", snap[i].known)
+            .num("stateAgo", snap[i].known ? static_cast<int64_t>(now - snap[i].stateSince) : -1)
             .boolean("waking", snap[i].waking)
             .num("wakeLeft", snap[i].waking && snap[i].wakeDeadline > now ? snap[i].wakeDeadline - now : 0)
             .str("result", snap[i].result)
@@ -1729,7 +1733,8 @@ esp_err_t WebServer::getWol(httpd_req_t* req)
     return j.finish();
 }
 
-// action=add: name, mac, ip, port, timeout (seconds) from the form.
+// action=add: name, mac (empty = watch only), ip, port, timeout (seconds),
+// alert (1 = tell the owner when it goes offline / comes back) from the form.
 esp_err_t WebServer::addWolHost(httpd_req_t* req, const char* form)
 {
     std::array<char, 32> name{};
@@ -1737,15 +1742,20 @@ esp_err_t WebServer::addWolHost(httpd_req_t* req, const char* form)
     std::array<char, 20> ip{};
     std::array<char, 8> port{};
     std::array<char, 8> wait{};
+    std::array<char, 4> alert{};
     field(form, "name", name.data(), name.size());
+    field(form, "alert", alert.data(), alert.size());
     field(form, "mac", mac.data(), mac.size());
     field(form, "ip", ip.data(), ip.size());
     field(form, "port", port.data(), port.size());
     field(form, "timeout", wait.data(), wait.size());
     WolHost h{};
     copyStr(h.name, name.data());
-    if (!parseMac(mac.data(), h.mac)) return sendError(req, "400 Bad Request", "valid MAC required");
+    if (mac[0] && !parseMac(mac.data(), h.mac)) return sendError(req, "400 Bad Request", "invalid MAC");
     if (ip[0] && !parseIp4(ip.data(), h.ip)) return sendError(req, "400 Bad Request", "invalid IP");
+    if (!h.ip && watchOnly(h)) return sendError(req, "400 Bad Request", "a MAC to wake it, or an IP to watch it");
+    if (alert[0] == '1' && !h.ip) return sendError(req, "400 Bad Request", "alerts need the IP");
+    if (alert[0] == '1') h.flags |= kWolAlert;
     const unsigned long p = strtoul(port.data(), nullptr, 10);
     if (p > 65535) return sendError(req, "400 Bad Request", "invalid port");
     if (p && !h.ip) return sendError(req, "400 Bad Request", "a port check needs the IP");
@@ -1754,7 +1764,7 @@ esp_err_t WebServer::addWolHost(httpd_req_t* req, const char* form)
     if (w && (w < 30 || w > 3600)) return sendError(req, "400 Bad Request", "wait: 30 s to 60 min");
     h.timeout = static_cast<uint16_t>(w);
     const esp_err_t err = d_.wol.add(h);
-    if (err == ESP_ERR_INVALID_ARG) return sendError(req, "400 Bad Request", "name: no spaces, '/', '+' or '#'");
+    if (err == ESP_ERR_INVALID_ARG) return sendError(req, "400 Bad Request", "name: no spaces, quotes, '/', '+', '#' or '\\'");
     if (err == ESP_ERR_NO_MEM) return sendError(req, "409 Conflict", "host list is full");
     return sendOk(req);
 }
@@ -1775,6 +1785,7 @@ esp_err_t WebServer::postWol(httpd_req_t* req)
             const esp_err_t err = d_.wol.wakeAndVerify(name.data(), &verifying);
             if (err == ESP_ERR_INVALID_STATE) return sendOk(req, "already online");
             if (err == ESP_ERR_NOT_FOUND) return sendError(req, "404 Not Found", "unknown host");
+            if (err == ESP_ERR_NOT_SUPPORTED) return sendError(req, "409 Conflict", "watch-only: no MAC to wake");
             if (err != ESP_OK) return sendError(req, "500 Internal Server Error", "send failed");
             return sendOk(req, verifying ? "waking; checking until it answers" : "magic packet sent");
         }

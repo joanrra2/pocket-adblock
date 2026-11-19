@@ -81,10 +81,11 @@ void MqttBridge::onHostState(void* ctx, const char* name, bool online)  // NOSON
 {
     auto* self = static_cast<MqttBridge*>(ctx);
     if (!self->connected_) return;
-    char topic[128];
-    snprintf(topic, sizeof(topic), "%s/wol/%s/state", self->prefix_, name);
-    esp_mqtt_client_publish(static_cast<esp_mqtt_client_handle_t>(self->client_), topic,
-                            online ? "online" : "offline", 0, 1, 1);
+    std::array<char, 128> topic{};
+    snprintf(topic.data(), topic.size(), "%s/wol/%s/state", self->prefix_, name);
+    // Queued, not published here: this runs on the probe task's small stack,
+    // and a publish would write to TLS and wait for a reconnect.
+    self->enqueue(topic.data(), online ? "online" : "offline", true);
 }
 
 void MqttBridge::onHostResult(void* ctx, const char* name, const char* result)  // NOSONAR C-style listener signature
@@ -190,11 +191,15 @@ void MqttBridge::announce()
         const char* name = h.name;
         objectId(name, current[i], sizeof(current[i]));
         snprintf(topic, sizeof(topic), "%s/button/%s/wol_%s/config", kHaPrefix, nodeId_, current[i]);
-        snprintf(buf_, sizeof(buf_),
-                 "{\"name\":\"Wake %s\",\"uniq_id\":\"%s_wol_%s\",\"cmd_t\":\"%s/wol/%s/set\","
-                 "\"pl_prs\":\"wake\",\"icon\":\"mdi:power\",%s}",
-                 name, nodeId_, current[i], prefix_, name, dev);
-        enqueue(topic, buf_, true);
+        if (watchOnly(h)) {
+            enqueue(topic, "", true);  // nothing to wake: no button
+        } else {
+            snprintf(buf_, sizeof(buf_),
+                     "{\"name\":\"Wake %s\",\"uniq_id\":\"%s_wol_%s\",\"cmd_t\":\"%s/wol/%s/set\","
+                     "\"pl_prs\":\"wake\",\"icon\":\"mdi:power\",%s}",
+                     name, nodeId_, current[i], prefix_, name, dev);
+            enqueue(topic, buf_, true);
+        }
         snprintf(topic, sizeof(topic), "%s/binary_sensor/%s/wol_%s/config", kHaPrefix, nodeId_, current[i]);
         if (h.ip) {
             snprintf(buf_, sizeof(buf_),
