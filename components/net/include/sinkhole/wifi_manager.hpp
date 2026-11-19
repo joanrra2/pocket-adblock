@@ -94,6 +94,7 @@ private:
     static void onApTimer(void* arg);
     static void onIpTimer(void* arg);
     void handleEvent(esp_event_base_t base, int32_t id, void* data);
+    void applyStation();  // the deferred part of reconfigureStation()
     void configureAp();
     void applyStaConfig(const char* ssid, const char* pass);
     void applyIpConfig();

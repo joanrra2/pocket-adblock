@@ -10,6 +10,7 @@
 #include "mdns.h"
 #include "sdkconfig.h"
 #include "sinkhole/rtos.hpp"
+#include "sinkhole/secret.hpp"
 #include "sinkhole/text.hpp"
 
 namespace sinkhole {
@@ -24,6 +25,11 @@ constexpr int8_t kFullTxQdbm = 80;      // 20 dBm (the driver clamps to the chip
 constexpr int8_t kReducedTxQdbm = 34;   // 8.5 dBm
 constexpr uint32_t kTxToggleAfter = 3;  // failed attempts before switching level
 constexpr const char* kLowTxKey = "lowtx";
+// Timer work that reconfigures the radio runs on the event task (4 KB stack,
+// where the Wi-Fi events are handled too), not on the shared esp_timer task.
+ESP_EVENT_DEFINE_BASE(kWifiWork);
+enum : int32_t { kWorkApplyIp = 1, kWorkApPolicy = 2 };
+constexpr uint64_t kPostRetryUs = 100 * 1000;  // event queue full: try again
 }  // namespace
 
 // ------------------------------------------------------------------ setup
@@ -41,6 +47,7 @@ esp_err_t WifiManager::begin()
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &WifiManager::onEvent, this);
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &WifiManager::onEvent, this);
     esp_event_handler_register(IP_EVENT, IP_EVENT_GOT_IP6, &WifiManager::onEvent, this);
+    esp_event_handler_register(kWifiWork, ESP_EVENT_ANY_ID, &WifiManager::onEvent, this);
 
     esp_timer_create_args_t retry{};
     retry.callback = &WifiManager::onRetryTimer;
@@ -203,17 +210,25 @@ void WifiManager::reconfigureStation()
 void WifiManager::onIpTimer(void* arg)
 {
     auto* self = static_cast<WifiManager*>(arg);
+    if (esp_event_post(kWifiWork, kWorkApplyIp, nullptr, 0, 0) != ESP_OK)
+        esp_timer_start_once(self->ipTimer_, kPostRetryUs);
+}
+
+// On the event task (see kWifiWork).
+void WifiManager::applyStation()
+{
     char ssid[33], pass[65];
-    self->cfg_.read([&](const Settings& s) {
+    cfg_.read([&](const Settings& s) {
         copyStr(ssid, s.staSsid);
         copyStr(pass, s.staPass);
         return 0;
     });
-    self->selfDisconnect_ = self->connected_.load();
+    selfDisconnect_ = connected_.load();
     esp_wifi_disconnect();
-    self->applyStaConfig(ssid, pass);
-    self->applyIpConfig();
-    if (self->configured_) self->connectSoon();
+    applyStaConfig(ssid, pass);
+    applyIpConfig();
+    secureWipe(pass, sizeof(pass));
+    if (configured_) connectSoon();
 }
 
 // ------------------------------------------------------------------ AP policy
@@ -242,10 +257,8 @@ void WifiManager::updateAp()
 void WifiManager::onApTimer(void* arg)
 {
     auto* self = static_cast<WifiManager*>(arg);
-    if (!self->apWanted())
-        self->setApEnabled(false);
-    else
-        self->updateAp();
+    if (esp_event_post(kWifiWork, kWorkApPolicy, nullptr, 0, 0) != ESP_OK)
+        esp_timer_start_once(self->apTimer_, kPostRetryUs);
 }
 
 void WifiManager::setApEnabled(bool on)
@@ -435,6 +448,15 @@ void WifiManager::onEvent(void* arg, esp_event_base_t base, int32_t id, void* da
 
 void WifiManager::handleEvent(esp_event_base_t base, int32_t id, void* data)
 {
+    if (base == kWifiWork) {
+        if (id == kWorkApplyIp)
+            applyStation();
+        else if (!apWanted())
+            setApEnabled(false);
+        else
+            updateAp();
+        return;
+    }
     if (base == WIFI_EVENT) {
         switch (id) {
             case WIFI_EVENT_STA_START:

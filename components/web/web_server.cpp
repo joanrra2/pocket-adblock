@@ -466,8 +466,9 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
 
     // Least stack each task has had free since boot (bytes): shows how close a
     // task came to overflowing, so stack sizes are set from measurements.
-    static constexpr std::array<const char*, 10> kTasks{"dns",   "dot",     "notify",    "updater",  "wol_probe",
-                                                        "httpd", "mqtt_task", "esp_timer", "sys_evt", "button"};
+    static constexpr std::array<const char*, 11> kTasks{"dns",       "dot",      "notify",    "updater",
+                                                        "wol_probe", "httpd",    "mqtt_task", "mqtt_pub",
+                                                        "esp_timer", "sys_evt",  "button"};
     j.beginObject("stackFree");
     for (const char* name : kTasks)
         if (TaskHandle_t t = xTaskGetHandle(name)) j.num(name, static_cast<int64_t>(uxTaskGetStackHighWaterMark(t)));
