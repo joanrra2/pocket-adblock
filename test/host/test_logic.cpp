@@ -528,7 +528,7 @@ static void testNotifyParse()
     // ntfy: one object per line; ids and messages, escapes decoded.
     char ntfy[] =
         "{\"id\":\"KWjLikMx0VpA\",\"time\":1795045386,\"event\":\"message\",\"topic\":\"t-cmd\",\"message\":\"wake office-pc\"}\n"
-        "{\"id\":\"b2\",\"time\":1795045387,\"event\":\"message\",\"topic\":\"t-cmd\",\"message\":\"say \\\"hi\\\"\nnow\"}\n"
+        "{\"id\":\"b2\",\"time\":1795045387,\"event\":\"message\",\"topic\":\"t-cmd\",\"message\":\"say \\\"hi\\\"\\nnow\"}\n"
         "{\"id\":\"b3\",\"time\":1795045388,\"event\":\"keepalive\",\"topic\":\"t-cmd\"}\n";
     std::vector<std::string> ids, events, texts;
     ntfyLines(ntfy, [&](const char* id, const char* ev, const char* text) {
@@ -549,7 +549,7 @@ static void testNotifyParse()
         "\"chat\":{\"id\":111222333,\"first_name\":\"Ana\",\"type\":\"private\"},\"date\":1700000000,\"text\":\"/wake@pocket_bot office-pc\","
         "\"entities\":[{\"offset\":0,\"length\":16,\"type\":\"bot_command\"}]}},"
         "{\"update_id\":512345002,\"message\":{\"message_id\":6,\"from\":{\"id\":888,\"is_bot\":false,\"first_name\":\"Bo\"},"
-        "\"chat\":{\"id\":-1001234567890,\"title\":\"Home\",\"type\":\"supergroup\"},\"date\":1700000001,\"text\":\"caf\u00e9 \u0041\"}},"
+        "\"chat\":{\"id\":-1001234567890,\"title\":\"Home\",\"type\":\"supergroup\"},\"date\":1700000001,\"text\":\"caf\\u00e9 \\u0041\"}},"
         "{\"update_id\":512345003,\"edited_message\":{\"message_id\":6,\"chat\":{\"id\":5,\"type\":\"private\"},\"date\":1}}"
         "]}";
     std::vector<int64_t> chats;
