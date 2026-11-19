@@ -347,6 +347,11 @@ name replaces it.
   one for that host (1 to 60 minutes: a PC that installs updates on boot may need
   longer). **Cancel** stops waiting. The PC needs wired Ethernet with WoL enabled in
   BIOS/UEFI and on its network adapter.
+- **Watch-only hosts:** leave the MAC empty and give the IP (and a port if you like)
+  to only watch a device: a NAS, a printer, a camera, a server. It gets no Wake
+  button. Tick **Alert me** on any host with an IP to hear when it goes offline or
+  comes back ("nas is back online (offline for 12 min)"), through Notifications (Pro)
+  or the MQTT `state` topic. The first check after a restart is not an alert.
 
 **From anywhere:** set an MQTT broker in Settings (TLS recommended, e.g. a free
 EMQX Cloud Serverless or HiveMQ Cloud deployment, or your Home Assistant's Mosquitto). Then:
@@ -398,9 +403,10 @@ few commands back. Outgoing HTTPS only, nothing to open on the router.
   save, send `/start` to the bot, then press **Find** to fill in your chat ID. Only that
   chat can send commands.
 - **Alerts** (each one can be switched off): a crash, watchdog reset or power dip, and
-  firmware updates; wake results ("office-pc: online after 41 s"); computers going
-  online or offline (off by default); failed blocklist updates; Wi-Fi back after an
-  outage of 2 minutes or more.
+  firmware updates; wake results ("office-pc: online after 41 s"); hosts with
+  **Alert me** going offline or coming back; other computers going online or offline
+  (off by default); failed blocklist updates; Wi-Fi back after an outage of 2 minutes
+  or more.
 - **Commands** (off until you tick *Accept commands*): `help`, `status`, `hosts`,
   `wake NAME`, `cancel NAME`, `pause [minutes]` (15 by default), `resume`. Telegram's
   `/wake NAME` form works too. Only saved Wake-on-LAN hosts can be woken, and nothing

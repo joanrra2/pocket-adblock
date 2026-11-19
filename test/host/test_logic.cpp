@@ -527,10 +527,10 @@ static void testNotifyParse()
 {
     using namespace sinkhole::notify;
     // ntfy: one object per line; ids and messages, escapes decoded.
-    std::string ntfy =
-        R"({"id":"KWjLikMx0VpA","time":1795045386,"event":"message","topic":"t-cmd","message":"wake office-pc"})" "\n"
-        R"({"id":"b2","time":1795045387,"event":"message","topic":"t-cmd","message":"say \"hi\"\nnow"})" "\n"
-        R"({"id":"b3","time":1795045388,"event":"keepalive","topic":"t-cmd"})" "\n";
+    std::string ntfy = R"({"id":"KWjLikMx0VpA","time":1795045386,"event":"message","topic":"t-cmd","message":"wake office-pc"}
+{"id":"b2","time":1795045387,"event":"message","topic":"t-cmd","message":"say \"hi\"\nnow"}
+{"id":"b3","time":1795045388,"event":"keepalive","topic":"t-cmd"}
+)";
     std::vector<std::string> ids;
     std::vector<std::string> events;
     std::vector<std::string> texts;

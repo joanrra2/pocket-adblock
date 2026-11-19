@@ -3,6 +3,7 @@
 // that shows which hosts are awake, and an optional MQTT bridge so hosts can be
 // woken from outside the LAN without opening any port (outbound connection).
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -17,7 +18,11 @@ namespace sinkhole {
 
 struct WolHost {
     char name[32];
-    uint8_t mac[6];
+    uint8_t mac[6];  // NOSONAR stored in NVS as raw bytes; all zero: watch-only (never woken, needs the IP)
+    // kWolAlert...; sits in what used to be padding, so older firmware keeps
+    // the size and ignores it (it would show an alerting host as a plain one).
+    uint8_t flags;
+    uint8_t reserved;
     uint32_t ip;    // optional, network order; enables the online check
     uint16_t port;  // optional TCP port (3389 RDP, 22 SSH...): online = it accepts; 0 = ping
     // Seconds to wait for it to answer after a wake (30..3600, 0 = 180). Sits in
@@ -26,6 +31,22 @@ struct WolHost {
     uint16_t timeout;
 };
 static_assert(sizeof(WolHost) == 48, "WolHost is stored in NVS: keep its size");
+static_assert(offsetof(WolHost, ip) == 40, "WolHost is stored in NVS: keep its layout");
+constexpr uint8_t kWolAlert = 1;  // tell the owner when it goes offline / comes back
+
+inline bool watchOnly(const WolHost& h)
+{
+    return std::ranges::all_of(h.mac, [](uint8_t b) { return b == 0; });
+}
+
+// A host's state as the probe saw it change (passed to the listener).
+struct WolHostChange {
+    const char* name;
+    bool online;
+    bool first;        // first state since boot or since it was added: not a change
+    bool alert;        // the host has kWolAlert
+    uint32_t prevFor;  // seconds it spent in the previous state (0 when first)
+};
 
 struct WolHostState {
     WolHost host;
@@ -37,6 +58,8 @@ struct WolHostState {
     uint32_t resultAt;      // uptime seconds, 0 = none
     uint8_t misses;         // failed checks in a row (offline after 2)
     bool resultNew;         // result changed, not yet reported to the listener
+    bool known;             // `online` reflects a real check (not just booted)
+    uint32_t stateSince;    // uptime seconds of the last state change
 };
 
 class WolService {
@@ -64,6 +87,7 @@ public:
         forEachHost([&h](const WolHost& w) {
             for (const char* c = w.name; *c; c++) h = (h ^ static_cast<uint8_t>(*c)) * 16777619u;
             h = (h ^ w.ip) * 16777619u;
+            h = (h ^ (watchOnly(w) ? 1u : 0u)) * 16777619u;  // Wake button or not
         });
         return h;
     }
@@ -74,6 +98,7 @@ public:
     // The outcome is in WolHostState::result. Hosts without an IP just wake
     // (*verifying = false: there is nothing to check against).
     // ESP_ERR_INVALID_STATE: already online, nothing sent.
+    // ESP_ERR_NOT_SUPPORTED: a watch-only host (no MAC).
     esp_err_t wakeAndVerify(const char* name, bool* verifying = nullptr);
     static constexpr uint32_t kVerifySeconds = 180;
     static uint32_t timeoutOf(const WolHost& h);  // effective wait in seconds
@@ -81,8 +106,8 @@ public:
     esp_err_t cancel(const char* name);
     esp_err_t wakeMac(const uint8_t mac[6]);
 
-    // Notified after each probe round (used by the MQTT bridge).
-    using Listener = void (*)(void* ctx, const char* name, bool online);
+    // Notified when a host's state is first known and whenever it changes.
+    using Listener = void (*)(void* ctx, const WolHostChange& change);  // NOSONAR C-style callback, no heap
     void setListener(Listener fn, void* ctx) { listener_ = fn; listenerCtx_ = ctx; }
     // Notified (from the probe task, about a second later) whenever a host's
     // wake result changes: "waking", "online after 41 s", "cancelled"...
@@ -92,10 +117,15 @@ public:
 private:
     static void taskEntry(void* arg);
     void run();
-    bool ping(uint32_t ip);
-    static bool tcpOpen(uint32_t ip, uint16_t port);
-    bool check(const WolHost& h) { return h.port ? tcpOpen(h.ip, h.port) : ping(h.ip); }
+    // Unknown: the check itself could not run (no free socket, no buffer), so
+    // it says nothing about the host and must not count as a miss.
+    enum class Probe : uint8_t { Down, Up, Unknown };
+    Probe ping(uint32_t ip);
+    static Probe tcpOpen(uint32_t ip, uint16_t port);
+    Probe check(const WolHost& h) { return h.port ? tcpOpen(h.ip, h.port) : ping(h.ip); }
     void setResultLocked(int i, const char* text);
+    bool updateStateLocked(int j, bool up, uint32_t now, WolHostChange& change);
+    void updateWakeLocked(int j, bool up, uint32_t now, uint32_t since);
     void reportResults();  // outside the lock
     esp_err_t saveLocked();
     int findLocked(const char* name);

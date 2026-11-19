@@ -208,6 +208,8 @@ bool Config::upgradeNotify(const uint8_t* raw, size_t len, NotifySettings& out)
     if (version == 0 || version >= 1000) return false;
     // Version 1 is the first layout; a newer one only appended fields.
     memcpy(&out, raw, len < sizeof(out) ? len : sizeof(out));
+    // Alerts for watched hosts came with version 2: on unless turned off since.
+    if (version < 2) out.notifyEvents |= events::Watch;
     out.version = kNotifyVersion;
     out.ntfyServer[sizeof(out.ntfyServer) - 1] = '\0';
     out.ntfyTopic[sizeof(out.ntfyTopic) - 1] = '\0';

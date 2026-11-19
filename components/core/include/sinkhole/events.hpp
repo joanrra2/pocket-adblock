@@ -15,9 +15,10 @@ enum Kind : uint16_t {  // NOSONAR bit flags, combined with |
     HostState = 4,   // a host with an IP went online / offline
     Update = 8,      // blocklist download failed, firmware update installed
     Uplink = 16,     // Wi-Fi back after an outage
+    Watch = 32,      // a host with alerts on went offline / came back
     Reply = 0x8000,  // answer to a remote command (always sent)
 };
-constexpr uint16_t kAllKinds = Restart | Wake | HostState | Update | Uplink;
+constexpr uint16_t kAllKinds = Restart | Wake | HostState | Update | Uplink | Watch;
 
 using Sink = void (*)(Kind kind, const char* text);
 void setSink(Sink sink);

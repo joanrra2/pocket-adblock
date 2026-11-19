@@ -55,6 +55,7 @@ const char* ntfyTags(uint16_t kind)
         case events::HostState: return "electric_plug";
         case events::Update: return "arrows_counterclockwise";
         case events::Uplink: return "signal_strength";
+        case events::Watch: return "rotating_light";
         default: return "speech_balloon";
     }
 }

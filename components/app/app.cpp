@@ -88,12 +88,33 @@ void App::start()
     ESP_LOGI(TAG, "ready");
 }
 
-// Wake-on-LAN host events go to MQTT and, when set up, to the phone.
-void App::onHostState(void* ctx, const char* name, bool online)  // NOSONAR C-style listener signature
+namespace {
+// "45 s", "12 min", "5 h", "3 days": how long a host was up or down.
+void spanText(uint32_t s, char* out, size_t cap)
+{
+    if (s < 120) snprintf(out, cap, "%u s", static_cast<unsigned>(s));
+    else if (s < 120 * 60) snprintf(out, cap, "%u min", static_cast<unsigned>(s / 60));
+    else if (s < 48 * 3600) snprintf(out, cap, "%u h", static_cast<unsigned>(s / 3600));
+    else snprintf(out, cap, "%u days", static_cast<unsigned>(s / 86400));
+}
+}  // namespace
+
+// Host states go to MQTT and, when set up, to the phone. The first state after
+// boot (or after adding a host) is published but is not news. Hosts with
+// alerts on get their own event kind, on by default.
+void App::onHostState(void* ctx, const WolHostChange& c)  // NOSONAR C-style listener signature
 {
     auto* self = static_cast<App*>(ctx);
-    MqttBridge::onHostState(&self->mqtt_, name, online);
-    events::emit(events::HostState, "%s is %s", name, online ? "online" : "offline");
+    MqttBridge::onHostState(&self->mqtt_, c.name, c.online);
+    if (c.first) return;
+    if (!c.alert) {
+        events::emit(events::HostState, "%s is %s", c.name, c.online ? "online" : "offline");
+        return;
+    }
+    std::array<char, 16> span{};
+    spanText(c.prevFor, span.data(), span.size());
+    if (c.online) events::emit(events::Watch, "%s is back online (offline for %s)", c.name, span.data());
+    else events::emit(events::Watch, "%s is offline (it was up for %s)", c.name, span.data());
 }
 
 void App::onHostResult(void* ctx, const char* name, const char* result)  // NOSONAR C-style listener signature
@@ -134,7 +155,7 @@ void splitCommand(const char* in, char* verb, size_t verbCap, char* arg, size_t 
 namespace {
 const char* hostWord(const WolHostState& h)
 {
-    if (!h.host.ip) return "?";  // no IP: its state is unknown
+    if (!h.host.ip || !h.known) return "?";  // no IP or not checked yet
     return h.online ? "online" : "offline";
 }
 }  // namespace
@@ -174,6 +195,7 @@ void App::onCommand(void* ctx, const char* command, char* reply, size_t cap)  //
         bool verifying = false;
         const esp_err_t err = self->wol_.wakeAndVerify(arg.data(), &verifying);
         if (err == ESP_ERR_NOT_FOUND) snprintf(reply, cap, "No host called '%s'. Try: hosts", arg.data());
+        else if (err == ESP_ERR_NOT_SUPPORTED) snprintf(reply, cap, "%s is only watched (no MAC to wake).", arg.data());
         else if (err == ESP_ERR_INVALID_STATE) snprintf(reply, cap, "%s is already online.", arg.data());
         else if (err != ESP_OK) snprintf(reply, cap, "Could not send the wake packet.");
         else snprintf(reply, cap, verifying ? "Waking %s; I'll tell you when it answers." : "Magic packet sent to %s.", arg.data());

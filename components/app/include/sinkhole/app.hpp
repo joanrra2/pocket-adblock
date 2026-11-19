@@ -26,7 +26,7 @@ public:
 
 private:
     static void onUplinkChange(void* ctx, bool connected);
-    static void onHostState(void* ctx, const char* name, bool online);  // NOSONAR C-style listener signature
+    static void onHostState(void* ctx, const WolHostChange& c);  // NOSONAR C-style listener signature
     static void onHostResult(void* ctx, const char* name, const char* result);  // NOSONAR C-style listener signature
     static void onCommand(void* ctx, const char* command, char* reply, size_t cap);  // NOSONAR C-style listener signature
     void bootEvents();

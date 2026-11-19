@@ -176,7 +176,7 @@ public:
     // Hash pass into s (new random salt).
     static esp_err_t hashAdmin(Settings& s, const char* pass);
 
-    static constexpr uint16_t kNotifyVersion = 1;
+    static constexpr uint16_t kNotifyVersion = 2;  // 2: events::Watch exists (turned on when upgrading)
     static void applyNotifyDefaults(NotifySettings& n);
     // Stored / backed-up notification blob -> current layout. False if unusable.
     static bool upgradeNotify(const uint8_t* raw, size_t len, NotifySettings& out);
