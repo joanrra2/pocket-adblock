@@ -552,7 +552,7 @@ static void testNotifyParse()
         R"("chat":{"id":111222333,"first_name":"Ana","type":"private"},"date":1700000000,"text":"/wake@pocket_bot office-pc",)"
         R"("entities":[{"offset":0,"length":16,"type":"bot_command"}]}},)"
         R"({"update_id":512345002,"message":{"message_id":6,"from":{"id":888,"is_bot":false,"first_name":"Bo"},)"
-        R"("chat":{"id":-1001234567890,"title":"Home","type":"supergroup"},"date":1700000001,"text":"café A"}},)"
+        R"("chat":{"id":-1001234567890,"title":"Home","type":"supergroup"},"date":1700000001,"text":"caf\u00e9 \u0041"}},)"
         R"({"update_id":512345003,"edited_message":{"message_id":6,"chat":{"id":5,"type":"private"},"date":1}})"
         R"(]})";
     std::vector<int64_t> chats;
