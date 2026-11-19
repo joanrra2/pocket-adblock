@@ -133,12 +133,16 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --generate-notes --latest \
             --notes "Flash *-full.bin at 0x0 for a first install (or use the browser installer); upload *-ota.bin from the web UI afterwards."
 
-  # Browser installer (ESP Web Tools) on GitHub Pages, refreshed on every release.
+  # Project site on GitHub Pages (docs + browser installer), refreshed on every
+  # release; pages.yml republishes docs changes in between.
   # One-time setup: repo Settings -> Pages -> Source: GitHub Actions.
   installer:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [firmware]
     runs-on: ubuntu-latest
+    concurrency:  # shared with pages.yml: one site deploy at a time
+      group: pages
+      cancel-in-progress: false
     permissions:
       contents: read
       pages: write

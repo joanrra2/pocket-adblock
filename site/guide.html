@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Setup guide · Pocket AdBlock</title>
+<meta name="description" content="Install Pocket AdBlock, point your devices at it, and use Wake-on-LAN, Home Assistant, notifications and updates.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top"><div class="in">
+ <a class="brand" href="./"><svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="var(--ac)" opacity=".18"/><circle cx="16" cy="16" r="10" fill="var(--ac)" opacity=".4"/><circle cx="16" cy="16" r="5" fill="var(--ac)"/></svg>Pocket AdBlock</a>
+ <nav aria-label="Site">
+  <a href="./">Home</a>
+  <a href="guide.html" aria-current="page">Guide</a>
+  <a href="install/">Install</a>
+  <a href="{{REPO}}">GitHub</a>
+ </nav>
+ <a class="btn kofi sm" href="https://ko-fi.com/joanramon">Ko-fi</a>
+</div></header>
+
+<div class="wrap doc">
+ <aside class="toc">
+  <b>On this page</b>
+  <nav aria-label="Contents">
+   <a href="#install">Install</a>
+   <a href="#setup">First setup</a>
+   <a href="#devices">Point devices at it</a>
+   <a href="#bypass">IPv6 and bypass</a>
+   <a href="#lists">Blocklists</a>
+   <a href="#names">Names</a>
+   <a href="#wol">Wake-on-LAN</a>
+   <a href="#ha">Home Assistant</a>
+   <a href="#notify">Notifications</a>
+   <a href="#away">Away from home</a>
+   <a href="#updates">Updates and backups</a>
+   <a href="#recovery">Recovery and LED</a>
+   <a href="#security">Security</a>
+  </nav>
+ </aside>
+
+ <article>
+  <section id="install">
+   <h1>Setup guide</h1>
+   <p class="lead">From a bare board to a network without ads in about ten minutes.</p>
+   <h2>Install</h2>
+   <ol>
+    <li>Open the <a href="install/">web installer</a> in Chrome or Edge on a computer.</li>
+    <li>Pick your board and the edition (Lite for every board, Pro for boards with PSRAM).</li>
+    <li>Plug the board in with a data USB cable and press <b>Connect and install</b>. If no serial port shows up, hold BOOT while plugging it in.</li>
+   </ol>
+   <p class="mu">Building it yourself instead? The <a href="{{REPO}}#build--flash">README</a> has the ESP-IDF commands and the build-time options.</p>
+  </section>
+
+  <section id="setup">
+   <h2>First setup</h2>
+   <ol>
+    <li>Join the Wi-Fi <b>Sinkhole-XXXX</b> (password <code>sinkhole-setup</code>). Phones open the setup page by themselves; otherwise go to <b>http://192.168.4.1</b> and log in as <code>admin</code> / <code>sinkhole</code>.</li>
+    <li><b>Settings → Your Wi-Fi:</b> enter your network. Once it connects, the page shows the device's new address, and its setup network switches off 30 s later.</li>
+    <li>Change the admin password and the setup network's password (Settings). A banner reminds you while the default admin password is set.</li>
+    <li>Point your devices at it (next section). It is also reachable as <b>http://sinkhole.local</b>.</li>
+   </ol>
+  </section>
+
+  <section id="devices">
+   <h2>Point devices at it</h2>
+   <p>The router is the best place: every device is covered at once. In its <i>LAN / DHCP server</i> settings, set the DNS server to the device's address and leave the second DNS empty.</p>
+   <p>One device at a time:</p>
+   <div class="tw"><table>
+    <thead><tr><th>Device</th><th>Where</th></tr></thead>
+    <tbody>
+     <tr><td>Windows 11</td><td>Settings → Network &amp; internet → Wi-Fi → Hardware properties → DNS server assignment → Edit → Manual, IPv4 on, Preferred DNS</td></tr>
+     <tr><td>Android</td><td>Wi-Fi network → Edit → Advanced options → IP settings: Static, DNS 1. Also set <i>Private DNS</i> to Off or Automatic. Menu names vary by brand.</td></tr>
+     <tr><td>iPhone / iPad</td><td>Settings → Wi-Fi → ⓘ → Configure DNS → Manual, remove the others, Add Server</td></tr>
+     <tr><td>Linux</td><td><code>nmcli con mod "&lt;connection&gt;" ipv4.dns &lt;address&gt; ipv4.ignore-auto-dns yes</code>, then <code>nmcli con up "&lt;connection&gt;"</code></td></tr>
+    </tbody>
+   </table></div>
+   <p class="mu" style="margin-top:12px">If your router can't change its DNS setting, the device can hand out addresses itself: <i>Settings → DHCP server</i> (give the device a static IP and turn off the router's DHCP first).</p>
+  </section>
+
+  <section id="bypass">
+   <h2>IPv6 and bypass protection</h2>
+   <p>Networks hand out two kinds of DNS: IPv4 and IPv6. If your router advertises its own or your ISP's IPv6 DNS, phones and PCs quietly use that one and ads come back. Either set the router's advertised IPv6 DNS to this device (it answers over IPv6 too, at the addresses shown on the overview), or turn off IPv6 DNS advertisement. The overview reminds you when your network routes IPv6.</p>
+   <p><i>Settings → Extra protection</i> covers browsers and phones with their own encrypted DNS:</p>
+   <ul>
+    <li><b>Tell browsers and phones to use this DNS</b> (on by default): Firefox turns off its automatic DNS-over-HTTPS, and Apple devices turn off iCloud Private Relay.</li>
+    <li><b>Block known encrypted-DNS servers</b> (off by default): blocks the names of well-known DNS-over-HTTPS servers. A phone with <i>Private DNS</i> set to one of them loses Internet until it is set back to Automatic or Off.</li>
+   </ul>
+  </section>
+
+  <section id="lists">
+   <h2>Blocklists</h2>
+   <p><i>Settings → Updates → Blocklist</i> picks one of the lists this project rebuilds every day. The device checks for a new version every 6 hours.</p>
+   <div class="tw"><table>
+    <thead><tr><th>List</th><th>Domains</th><th>For</th></tr></thead>
+    <tbody>
+     <tr><td>Light</td><td>~40k</td><td>Ads and malware, fewest false positives</td></tr>
+     <tr><td>Normal (default)</td><td>~120k</td><td>Recommended</td></tr>
+     <tr><td>Aggressive</td><td>~255k</td><td>More trackers; boards with 8 MB or more</td></tr>
+     <tr><td>Strict</td><td>~600k</td><td>Aggressive plus active malware and phishing; 8 MB or more</td></tr>
+     <tr><td>Extended</td><td>~2.1M</td><td>Aggressive plus 1.9M malware and phishing domains; 16 MB boards</td></tr>
+    </tbody>
+   </table></div>
+   <p style="margin-top:12px">A new list goes to a second slot and is checked before it replaces the working one, so a bad download never breaks blocking. The <b>Always allow</b> list wins over every blocklist, and <i>Devices</i> can turn blocking off for one device (<b>No blocking</b>).</p>
+  </section>
+
+  <section id="names">
+   <h2>Names</h2>
+   <ul>
+    <li><b>Local names</b> (<i>Settings → Local names</i>): <code>nas.home → 192.168.1.10</code>, or send a whole suffix such as <code>lan</code> to your router so its device names and reverse lookups work.</li>
+    <li><b>Device names</b>: press <b>Name</b> next to a device under <i>Devices</i>. The name follows its MAC address, so it survives a new IP, and shows in the query log and the top clients.</li>
+   </ul>
+  </section>
+
+  <section id="wol">
+   <h2>Wake-on-LAN</h2>
+   <p>Add a computer under <b>Wake-on-LAN</b> (name, MAC, and optionally its IP and a port) and press <b>Wake</b>. The device checks first, sends the magic packets, then keeps checking until it answers: "online after 41 s" or "no answer after 3 min". The PC needs wired Ethernet with Wake-on-LAN on in its BIOS and network adapter.</p>
+   <ul>
+    <li><b>Online check:</b> with an IP, the device checks every 30 s by ping, or by connecting to a port you give (3389 Remote Desktop, 22 SSH, 445 file sharing), which also means the service is ready.</li>
+    <li><b>Watch only:</b> leave the MAC empty to only watch a NAS, a printer or a camera. Tick <b>Alert me</b> to hear when it goes offline or comes back.</li>
+    <li><b>From anywhere:</b> set an MQTT broker in Settings (TLS, for example a free EMQX Cloud or HiveMQ Cloud deployment). The device only connects out, so there's no port to open on the router.</li>
+   </ul>
+   <p><a href="https://github.com/joanrra2/pocket-wake">Pocket Wake</a> wakes them from your phone: under <i>Wake-on-LAN → Phone app</i> the device shows a QR code with the broker details (never a password) to scan. Its <a href="https://github.com/joanrra2/pocket-wake/blob/main/docs/SETUP.md">setup guide</a> goes from a free broker to the first wake.</p>
+   <pre><code>mosquitto_pub -h broker -p 8883 -u user -P pass -t sinkhole/wol/office-pc/set -m wake</code></pre>
+  </section>
+
+  <section id="ha">
+   <h2>Home Assistant</h2>
+   <p>With <b>Show in Home Assistant</b> ticked and the broker your Home Assistant uses, a <i>Pocket AdBlock</i> device appears by itself: a <b>Blocking</b> switch; sensors for blocked and allowed queries, blocked share, list size, active clients, uptime and the last restart reason; and a <b>Wake</b> button plus an <b>online</b> sensor for each computer. MQTT changes apply after a restart.</p>
+  </section>
+
+  <section id="notify">
+   <h2>Notifications <span class="tag">Pro</span></h2>
+   <p><i>Settings → Notifications</i> sends alerts to your phone through <a href="https://ntfy.sh">ntfy</a> (free app, no account) and/or a Telegram bot, and can take a few commands back. Outgoing connections only.</p>
+   <ul>
+    <li><b>ntfy:</b> press <b>Generate</b> for a random topic (it works like a password), save, and subscribe to it in the ntfy app. Commands go to <code>&lt;topic&gt;-cmd</code>.</li>
+    <li><b>Telegram:</b> create a bot with @BotFather, paste its token, save, send <code>/start</code> to the bot, then press <b>Find</b> to fill in your chat ID.</li>
+    <li><b>Alerts:</b> crashes and firmware updates, wake results, watched devices going offline or coming back, failed list updates, Wi-Fi back after an outage.</li>
+    <li><b>Commands</b> (off until you tick <i>Accept commands</i>): <code>status</code>, <code>hosts</code>, <code>wake NAME</code>, <code>cancel NAME</code>, <code>pause [minutes]</code>, <code>resume</code>.</li>
+   </ul>
+  </section>
+
+  <section id="away">
+   <h2>Away from home</h2>
+   <p>The board can't run a VPN itself, but your phone and laptop can still use it while away through <a href="https://tailscale.com">Tailscale</a> and one always-on machine at home:</p>
+   <ol>
+    <li>On that machine, share your home network as a <a href="https://tailscale.com/kb/1019/subnets">subnet router</a>: <code>sudo tailscale set --advertise-routes=192.168.1.0/24</code>, then approve the route in the admin console.</li>
+    <li>In the admin console's <i>DNS</i> page, under <i>Global nameservers</i>, add this device's LAN address and turn on <i>Override DNS servers</i>.</li>
+    <li>Linux only: <code>sudo tailscale set --accept-routes</code>.</li>
+   </ol>
+   <p class="note">All tailnet devices show up as one client (the subnet router), and while the override is on, DNS away from home stops whenever your home Internet or the board is down.</p>
+  </section>
+
+  <section id="updates">
+   <h2>Updates and backups</h2>
+   <ul>
+    <li><b>Firmware</b> checks for a new release 2 minutes after starting and then once a day (<i>Updates → Online updates</i>), and offers <b>Install</b>. With <i>Install updates automatically</i> on, new releases install themselves. A new firmware has 60 s to prove it starts up healthy, or the board goes back to the previous one.</li>
+    <li><b>Restarts</b> (<i>Updates → Firmware</i>) lists the last 10 restarts with the reason, and <i>Device log</i> shows the board's log live.</li>
+    <li><b>Backup and restore</b> (Settings): one file with your settings, custom lists, local names, Wake-on-LAN computers and device rules. Passwords are left out unless you tick <i>Include passwords</i>.</li>
+   </ul>
+  </section>
+
+  <section id="recovery">
+   <h2>Recovery and the status LED</h2>
+   <div class="tw"><table>
+    <thead><tr><th>Situation</th><th>What happens</th></tr></thead>
+    <tbody>
+     <tr><td>No Wi-Fi set up</td><td>The setup network is on, with its setup page</td></tr>
+     <tr><td>Wi-Fi not found, wrong password or lost</td><td>The setup network comes back on, and the Wi-Fi is retried forever; the reason shows in the web UI</td></tr>
+     <tr><td>Hold BOOT 3 s</td><td>Setup network on for 15 minutes, for example if you forgot the device's address</td></tr>
+     <tr><td>Hold BOOT 10 s</td><td>Factory reset: settings erased, the blocklist kept</td></tr>
+    </tbody>
+   </table></div>
+   <p style="margin-top:12px"><i>Settings → Status LED</i> shows the state on the board's LED once you pick your board (or <i>Custom</i>): yellow while in setup, teal without Wi-Fi, blue while downloading, fast red on a failure, an orange flash while paused, and dim green (or off) when all is well.</p>
+  </section>
+
+  <section id="security">
+   <h2>Security</h2>
+   <ul>
+    <li>The web UI is plain HTTP on your home network, behind an admin login. <b>Change the default passwords</b>; the setup network uses WPA2.</li>
+    <li>The admin password is stored as a hash, and repeated wrong passwords slow down, up to 10 minutes between tries.</li>
+    <li>While the default password is still set, the device only answers pages opened by its IP or a local name, so a website can't reach it with the published password.</li>
+   </ul>
+   <p class="mu">The <a href="{{REPO}}">README</a> has the details: list formats, signing, build options and measurements.</p>
+  </section>
+ </article>
+</div>
+
+<footer><div class="wrap">
+ <span>Pocket AdBlock · MIT license · <a href="https://ko-fi.com/joanramon">Support on Ko-fi</a></span>
+ <span><a href="./">Home</a> · <a href="install/">Install</a> · <a href="{{REPO}}">Source</a></span>
+</div></footer>
+</body>
+</html>

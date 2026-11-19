@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Assemble the browser installer site (ESP Web Tools) from release images.
+"""Assemble the GitHub Pages site: the docs (site/) at the root, the browser
+installer (ESP Web Tools) at install/, and the release images it flashes.
 
   python tools/make_installer.py --bins dist --version 0.2.0 --out _site
 
@@ -40,9 +41,26 @@ def main():
 
     os.makedirs(os.path.join(a.out, 'manifests'), exist_ok=True)  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
     os.makedirs(os.path.join(a.out, 'firmware'), exist_ok=True)  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
+    # Docs pages and their files at the root; {{REPO}} -> the source repository.
+    site = os.path.join(ROOT, 'site')
+    for name in sorted(os.listdir(site)):
+        src = os.path.join(site, name)
+        if name.endswith('.html'):
+            with open(src, encoding='utf-8') as f:
+                page = f.read().replace('{{REPO}}', a.repo)
+            with open(os.path.join(a.out, name), 'w', encoding='utf-8') as f:  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
+                f.write(page)
+        elif os.path.isfile(src):
+            shutil.copy(src, os.path.join(a.out, name))
+    # The setup walkthrough videos shown on the home page.
+    os.makedirs(os.path.join(a.out, 'media'), exist_ok=True)  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
+    for name in ('setup-en.mp4', 'setup-es.mp4'):
+        shutil.copy(os.path.join(ROOT, 'docs', 'media', name), os.path.join(a.out, 'media', name))
+    # The installer at install/ (its manifests, firmware and vendor/ stay at the root).
+    os.makedirs(os.path.join(a.out, 'install'), exist_ok=True)  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
     with open(os.path.join(ROOT, 'installer', 'index.html'), encoding='utf-8') as f:
         page = f.read().replace('{{REPO}}', a.repo)
-    with open(os.path.join(a.out, 'index.html'), 'w', encoding='utf-8') as f:  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
+    with open(os.path.join(a.out, 'install', 'index.html'), 'w', encoding='utf-8') as f:  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
         f.write(page)
 
     if a.web_tools:
