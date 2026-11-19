@@ -138,7 +138,13 @@ private:
     void* listenerCtx_ = nullptr;
     ResultListener resultListener_ = nullptr;
     void* resultCtx_ = nullptr;  // NOSONAR context for the C-style callback
+#if CONFIG_SINKHOLE_NOTIFY
+    // A state change also formats a notification on this task: measured 896
+    // bytes left of 3072 on an S3 Pro. Lite builds don't, and keep the RAM.
+    StaticTask<4096> task_;
+#else
     StaticTask<3072> task_;
+#endif
 };
 
 // Remote control over MQTT (TLS recommended: mqtts://...). Topics, with

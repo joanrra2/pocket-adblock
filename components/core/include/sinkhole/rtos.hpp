@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -59,9 +60,13 @@ private:
     Mutex& m_;
 };
 
+// From the 64-bit microsecond timer, not the tick count: a 32-bit tick count
+// at 1000 Hz wraps after 49.7 days, and every deadline stored as "uptime + n"
+// (pause, wake wait, setup AP) would then never be reached. This one wraps
+// after 136 years.
 inline uint32_t uptimeSeconds()
 {
-    return static_cast<uint32_t>(xTaskGetTickCount() / configTICK_RATE_HZ);
+    return static_cast<uint32_t>(esp_timer_get_time() / 1000000);
 }
 
 }  // namespace sinkhole

@@ -151,9 +151,14 @@ inline uint32_t capacityFor(uint8_t version, size_t slotBytes)
     return static_cast<uint32_t>(usable / kHashBytes);
 }
 
+// No board holds anywhere near this many domains (16 MB of flash, 5 bytes each
+// at most), and below it count * 5 can't wrap a 32-bit size_t: a header with a
+// huge count must be refused before any size is worked out from it.
+constexpr uint32_t kMaxListDomains = 1u << 26;
+
 inline bool headerLooksValid(const BlocklistHeader& h)
 {
-    return memcmp(h.magic, kBlocklistMagic, 4) == 0 &&
+    return memcmp(h.magic, kBlocklistMagic, 4) == 0 && h.count <= kMaxListDomains &&
            (h.version == kBlocklistV1 || h.version == kBlocklistV2 || h.version == kBlocklistV4) &&
            h.hashBytes == kHashBytes && h.headerSize == sizeof(BlocklistHeader);
 }
@@ -257,6 +262,8 @@ private:
         uint32_t total = 0;
         for (uint32_t b = 0; b < kV2Buckets; b++) {
             if ((b & 0xFF) == 0 && rd32le(data_ + (b >> 8) * 4) != total) return false;
+            // Bucket counts come from the file: never walk past count_ entries.
+            if (cnt[b] > count_ - total) return false;
             uint32_t prev = 0;
             for (uint32_t i = 0; i < cnt[b]; i++, s += 3) {
                 const uint32_t v = static_cast<uint32_t>(s[0]) | static_cast<uint32_t>(s[1]) << 8 |
@@ -309,8 +316,12 @@ private:
         const uint32_t segLen = rd32le(data_ + 8), segCountLen = rd32le(data_ + 12), len = rd32le(data_ + 16);
         const uint8_t f = data_[20];
         if (f < 8 || f > 24 || segLen < 4 || segLen > (1u << 18) || (segLen & (segLen - 1))) return false;
-        if (segCountLen == 0 || segCountLen % segLen || len != segCountLen + 2 * segLen) return false;
-        return bytes_ == kV4HeadBytes + (static_cast<size_t>(len) * f + 7) / 8 + kV4Pad && count_ > 0;
+        // 64-bit: these come from the file, and a 32-bit sum or product could
+        // wrap into a size that matches while the lookups index far past it.
+        if (segCountLen == 0 || segCountLen % segLen ||
+            len != static_cast<uint64_t>(segCountLen) + 2ULL * segLen)
+            return false;
+        return bytes_ == kV4HeadBytes + (static_cast<uint64_t>(len) * f + 7) / 8 + kV4Pad && count_ > 0;
     }
 
     const uint8_t* data_ = nullptr;

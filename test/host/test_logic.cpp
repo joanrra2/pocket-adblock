@@ -322,6 +322,21 @@ static void testFuseFormat()
     CHECK(payloadSize(hd) == 0x1234);
     hd.version = 3;
     CHECK(!headerLooksValid(hd));
+    // A count no board could hold is refused before any size is worked out
+    // from it (0x33333334 * 5 wraps a 32-bit size_t to 4 bytes).
+    hd.version = kBlocklistV1;
+    hd.count = 0x33333334u;
+    CHECK(!headerLooksValid(hd));
+    hd.count = kMaxListDomains;
+    CHECK(headerLooksValid(hd));
+
+    // v2: bucket counts that add up to more than the header's count are
+    // refused without walking past the payload.
+    {
+        std::vector<uint8_t> p(kV2IndexBytes + 3, 0);
+        p[kV2CoarseBytes] = 200;  // bucket 0 claims 200 entries, the list has 1
+        CHECK(!HashTable(p.data(), 1, kBlocklistV2, p.size()).isValid());
+    }
 }
 
 // A list made by tools/build_blocklist.py (any format) against its source domains.

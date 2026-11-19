@@ -12,6 +12,8 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "psa/crypto.h"
@@ -306,13 +308,28 @@ bool WebServer::authorized(httpd_req_t* req, bool isPost)
     return true;
 }
 
+// httpd_req_recv, waiting through up to a minute of silence (4 receive
+// timeouts of 15 s) but not forever: a client that vanished mid-upload (phone
+// left the Wi-Fi) leaves a half-open connection, and retrying for good would
+// hold the one httpd task, and the blocklist slot or OTA handle being
+// written, until a restart.
+namespace {
+int recvBody(httpd_req_t* req, char* buf, size_t len)
+{
+    constexpr int kMaxTimeouts = 4;
+    for (int timeouts = 0;; timeouts++) {
+        const int n = httpd_req_recv(req, buf, len);
+        if (n != HTTPD_SOCK_ERR_TIMEOUT || timeouts + 1 >= kMaxTimeouts) return n;
+    }
+}
+}  // namespace
+
 int WebServer::readForm(httpd_req_t* req, char* buf, size_t len)
 {
     if (req->content_len >= len) return -1;
     size_t got = 0;
     while (got < req->content_len) {
-        int n = httpd_req_recv(req, buf + got, req->content_len - got);
-        if (n == HTTPD_SOCK_ERR_TIMEOUT) continue;
+        const int n = recvBody(req, buf + got, req->content_len - got);
         if (n <= 0) return -1;
         got += static_cast<size_t>(n);
     }
@@ -440,6 +457,15 @@ esp_err_t WebServer::getStatus(httpd_req_t* req)
         .num("psramFree", static_cast<int64_t>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)))
         .num("internalFree", static_cast<int64_t>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)))
         .endObject();
+
+    // Least stack each task has had free since boot (bytes): shows how close a
+    // task came to overflowing, so stack sizes are set from measurements.
+    static constexpr std::array<const char*, 10> kTasks{"dns",   "dot",     "notify",    "updater",  "wol_probe",
+                                                        "httpd", "mqtt_task", "esp_timer", "sys_evt", "button"};
+    j.beginObject("stackFree");
+    for (const char* name : kTasks)
+        if (TaskHandle_t t = xTaskGetHandle(name)) j.num(name, static_cast<int64_t>(uxTaskGetStackHighWaterMark(t)));
+    j.endObject();
 
     char slot[2] = {bl.slot, '\0'};
     j.beginObject("blocklist")
@@ -707,6 +733,14 @@ constexpr const char* kBackupKeys[] = {"settings", "custom_block", "custom_allow
                                        "notify"};
 constexpr size_t kBackupMax = 64 * 1024;
 
+// The kBackupKeys entry named `name` (the same pointer each time), or nullptr.
+const char* backupKey(const char* name)
+{
+    for (const char* k : kBackupKeys)
+        if (strcmp(name, k) == 0) return k;
+    return nullptr;
+}
+
 void clearSecrets(Settings& s)
 {
     memset(s.staPass, 0, sizeof(s.staPass));
@@ -868,24 +902,32 @@ esp_err_t WebServer::postRestore(httpd_req_t* req)
     size_t count = 0;
     const char* why = nullptr;
     char* save = nullptr;
-    for (char* line = strtok_r(body, "\n", &save); line && !why; line = strtok_r(nullptr, "\n", &save)) {
+    char* line = strtok_r(body, "\n", &save);
+    while (line && !why) {
         char* eq = strchr(line, '=');
-        if (!eq || line[0] == '#') continue;
-        *eq = '\0';
-        const char* val = eq + 1;
-        size_t vlen = strlen(val);
-        while (vlen && (val[vlen - 1] == '\r' || val[vlen - 1] == ' ')) vlen--;
-        for (const char* key : kBackupKeys) {
-            if (strcmp(line, key) != 0) continue;
+        const char* key = nullptr;
+        if (eq && line[0] != '#') {
+            *eq = '\0';
+            key = backupKey(line);
+        }
+        // One slot per known key: a repeated section must not run past items[].
+        bool seen = false;
+        for (size_t k = 0; key && k < count; k++) seen = seen || items[k].key == key;
+        if (key && (seen || count >= std::size(items))) why = "a section appears twice";
+        if (key && !why) {
+            const char* val = eq + 1;
+            size_t vlen = strlen(val);
+            while (vlen && (val[vlen - 1] == '\r' || val[vlen - 1] == ' ')) vlen--;
             auto* data = static_cast<uint8_t*>(malloc(vlen / 4 * 3 + 4));
             const int n = data ? base64Decode(val, vlen, data, vlen / 4 * 3 + 4) : -1;
-            if (n <= 0) {
+            if (n > 0) {
+                items[count++] = {key, data, n};
+            } else {
                 free(data);
                 why = "a section of the file is damaged";
-                break;
             }
-            items[count++] = {key, data, n};
         }
+        line = strtok_r(nullptr, "\n", &save);
     }
     free(body);
 
@@ -1360,8 +1402,7 @@ esp_err_t WebServer::postBlocklistUpload(httpd_req_t* req)
 
     size_t left = req->content_len;
     while (left) {
-        int n = httpd_req_recv(req, reinterpret_cast<char*>(chunk_), left < sizeof(chunk_) ? left : sizeof(chunk_));
-        if (n == HTTPD_SOCK_ERR_TIMEOUT) continue;
+        const int n = recvBody(req, reinterpret_cast<char*>(chunk_), left < sizeof(chunk_) ? left : sizeof(chunk_));
         if (n <= 0) {
             d_.store.abortWrite();
             return ESP_FAIL;  // connection gone
@@ -1393,8 +1434,7 @@ esp_err_t WebServer::postFirmwareUpload(httpd_req_t* req)
 
     size_t left = req->content_len;
     while (left) {
-        int n = httpd_req_recv(req, reinterpret_cast<char*>(chunk_), left < sizeof(chunk_) ? left : sizeof(chunk_));
-        if (n == HTTPD_SOCK_ERR_TIMEOUT) continue;
+        const int n = recvBody(req, reinterpret_cast<char*>(chunk_), left < sizeof(chunk_) ? left : sizeof(chunk_));
         if (n <= 0) {
             d_.firmware.abort();
             return ESP_FAIL;
