@@ -15,6 +15,7 @@
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "psa/crypto.h"
+#include "sinkhole/events.hpp"
 #include "sinkhole/json_writer.hpp"
 #include "sinkhole/log_buffer.hpp"
 #include "sinkhole/memory.hpp"
@@ -121,6 +122,10 @@ const WebServer::Route WebServer::kRoutes[] = {
     {"/api/restarts", HTTP_GET, &WebServer::getRestarts, true},
     {"/api/logs", HTTP_GET, &WebServer::getLogs, true},
     {"/api/names", HTTP_POST, &WebServer::postNames, true},
+#if CONFIG_SINKHOLE_NOTIFY
+    {"/api/notify", HTTP_GET, &WebServer::getNotify, true},
+    {"/api/notify", HTTP_POST, &WebServer::postNotify, true},
+#endif
 #if CONFIG_SINKHOLE_PERF
     {"/api/perf", HTTP_GET, &WebServer::getPerf, true},
 #endif
@@ -698,7 +703,8 @@ esp_err_t WebServer::getHistory(httpd_req_t* req)
 
 namespace {
 constexpr const char* kBackupKeys[] = {"settings", "custom_block", "custom_allow", "local_dns",
-                                       "wol_hosts2", "wol_hosts", "banned", "nofilter", "dev_names"};
+                                       "wol_hosts2", "wol_hosts", "banned", "nofilter", "dev_names",
+                                       "notify"};
 constexpr size_t kBackupMax = 64 * 1024;
 
 void clearSecrets(Settings& s)
@@ -710,6 +716,12 @@ void clearSecrets(Settings& s)
     memset(s.adminHash, 0, sizeof(s.adminHash));
     memset(s.adminSalt, 0, sizeof(s.adminSalt));
     s.adminIter = 0;
+}
+
+void clearSecrets(NotifySettings& n)
+{
+    memset(n.ntfyToken, 0, sizeof(n.ntfyToken));
+    memset(n.tgToken, 0, sizeof(n.tgToken));
 }
 }  // namespace
 
@@ -728,7 +740,10 @@ esp_err_t WebServer::getBackup(httpd_req_t* req)
     httpd_resp_sendstr_chunk(req, head);
 
     for (const char* key : kBackupKeys) {
-        size_t len = strcmp(key, "settings") == 0 ? sizeof(Settings) : nvs::blobSize(key);
+        const bool isSettings = strcmp(key, "settings") == 0;
+        const bool isNotify = strcmp(key, "notify") == 0;
+        size_t len = isSettings ? sizeof(Settings) : nvs::blobSize(key);
+        if (isNotify && len) len = sizeof(NotifySettings);  // only once something was set
         if (!len) continue;
         auto* raw = static_cast<uint8_t*>(malloc(len));
         auto* b64 = static_cast<char*>(malloc(len / 3 * 4 + 8));
@@ -739,10 +754,16 @@ esp_err_t WebServer::getBackup(httpd_req_t* req)
             break;
         }
         bool ok = true;
-        if (strcmp(key, "settings") == 0) {
+        if (isSettings) {
             Settings s = d_.cfg.get();
             if (secrets[0] != '1') clearSecrets(s);
             memcpy(raw, &s, len);
+            secureWipe(&s, sizeof(s));
+        } else if (isNotify) {
+            NotifySettings n = d_.cfg.readNotify([](const NotifySettings& c) { return c; });
+            if (secrets[0] != '1') clearSecrets(n);
+            memcpy(raw, &n, len);
+            secureWipe(&n, sizeof(n));
         } else {
             ok = nvs::loadBlob(key, raw, len, &len) == ESP_OK;
         }
@@ -784,6 +805,30 @@ const char* upgradeBackupSettings(uint8_t*& data, int& len, Config& cfg)
     free(data);
     data = full;
     len = sizeof(Settings);
+    return nullptr;
+}
+}  // namespace
+
+namespace {
+// Same for the notification settings: tokens missing from the file keep the
+// device's current ones.
+const char* upgradeBackupNotify(uint8_t*& data, int& len, Config& cfg)
+{
+    static NotifySettings in;  // httpd task only
+    if (len < 2 || !Config::upgradeNotify(data, static_cast<size_t>(len), in)) return "the notifications section is not valid";
+    cfg.readNotify([](const NotifySettings& cur) {
+        if (!in.ntfyToken[0]) memcpy(in.ntfyToken, cur.ntfyToken, sizeof(in.ntfyToken));
+        if (!in.tgToken[0]) memcpy(in.tgToken, cur.tgToken, sizeof(in.tgToken));
+        return 0;
+    });
+    auto* full = static_cast<uint8_t*>(malloc(sizeof(NotifySettings)));
+    if (!full) return "out of memory";
+    memcpy(full, &in, sizeof(NotifySettings));
+    secureWipe(&in, sizeof(in));
+    secureWipe(data, static_cast<size_t>(len));
+    free(data);
+    data = full;
+    len = sizeof(NotifySettings);
     return nullptr;
 }
 }  // namespace
@@ -844,8 +889,10 @@ esp_err_t WebServer::postRestore(httpd_req_t* req)
     }
     free(body);
 
-    for (size_t i = 0; i < count && !why; i++)
+    for (size_t i = 0; i < count && !why; i++) {
         if (strcmp(items[i].key, "settings") == 0) why = upgradeBackupSettings(items[i].data, items[i].len, d_.cfg);
+        if (strcmp(items[i].key, "notify") == 0) why = upgradeBackupNotify(items[i].data, items[i].len, d_.cfg);
+    }
     if (!why && count == 0) why = "the file contains nothing to restore";
     for (size_t i = 0; i < count && !why; i++)
         if (nvs::saveBlob(items[i].key, items[i].data, static_cast<size_t>(items[i].len)) != ESP_OK)
@@ -972,6 +1019,7 @@ esp_err_t WebServer::getSettings(httpd_req_t* req)
         .ip("upstreamIp", s.upstreamIp)
         .ip("backupIp", s.upstreamIp2)
         .boolean("dotAvailable", DotProxy::available())
+        .boolean("notifyAvailable", d_.notifier != nullptr)
         .str("chip", CONFIG_IDF_TARGET)
         .str("ledKind", s.ledKind == 2 ? "rgb" : s.ledKind == 1 ? "plain" : "off")
         .num("ledPin", s.ledPin)
@@ -1457,6 +1505,133 @@ esp_err_t WebServer::postNames(httpd_req_t* req)
         default: return sendError(req, "500 Internal Server Error", "could not save");
     }
 }
+
+#if CONFIG_SINKHOLE_NOTIFY
+namespace {
+bool safeToken(const char* s, size_t maxLen, bool allowEmpty)
+{
+    const size_t n = strnlen(s, maxLen + 1);
+    if (n == 0) return allowEmpty;
+    if (n > maxLen) return false;
+    for (size_t i = 0; i < n; i++) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        if (c <= ' ' || c >= 0x7f || c == '/' || c == '?' || c == '#' || c == '&') return false;
+    }
+    return true;
+}
+
+void channelJson(JsonWriter& j, const char* key, const Notifier::ChannelStatus& c, uint32_t now)
+{
+    j.beginObject(key)
+        .boolean("configured", c.configured)
+        .boolean("ok", c.lastOk)
+        .num("ago", c.lastAt ? static_cast<int64_t>(now - c.lastAt) : -1)
+        .str("error", c.error.data())
+        .endObject();
+}
+}  // namespace
+
+// Notification settings (tokens are never sent back) and how sending went.
+esp_err_t WebServer::getNotify(httpd_req_t* req)
+{
+    static NotifySettings s;  // httpd task only
+    d_.cfg.readNotify([](const NotifySettings& c) {
+        s = c;
+        return 0;
+    });
+    const Notifier::Status st = d_.notifier->status();
+    const uint32_t now = uptimeSeconds();
+    JsonWriter j(req);
+    j.beginObject()
+        .str("ntfyServer", s.ntfyServer)
+        .str("ntfyTopic", s.ntfyTopic)
+        .boolean("ntfyTokenSet", s.ntfyToken[0] != '\0')
+        .boolean("tgTokenSet", s.tgToken[0] != '\0')
+        .str("tgChat", s.tgChat)
+        .num("events", s.notifyEvents)
+        .boolean("commands", s.notifyCommands);
+    channelJson(j, "ntfy", st.ntfy, now);
+    channelJson(j, "telegram", st.telegram, now);
+    j.str("lastCommand", st.lastCommand.data())
+        .num("lastCommandAgo", st.lastCommandAt ? static_cast<int64_t>(now - st.lastCommandAt) : -1)
+        .num("dropped", st.dropped)
+        .endObject();
+    return j.finish();
+}
+
+// action=save (server, topic, token, tgToken, tgChat, events, commands;
+// empty token = keep, clearNtfyToken=1 / clearTgToken=1 remove), action=test,
+// action=findchat (Telegram chat that last wrote to the bot).
+esp_err_t WebServer::postNotify(httpd_req_t* req)
+{
+    static std::array<char, kFormMax> form;  // httpd task only
+    std::array<char, 16> action{};
+    if (readForm(req, form.data(), form.size()) < 0 || !field(form.data(), "action", action.data(), action.size()))
+        return sendError(req, "400 Bad Request", "action is required");
+    if (strcmp(action.data(), "test") == 0) {
+        d_.notifier->test();
+        return sendOk(req, "test sent");
+    }
+    if (strcmp(action.data(), "findchat") == 0) {
+        std::array<char, 24> chat{};
+        std::array<char, 40> name{};
+        const esp_err_t err = d_.notifier->findTelegramChat(chat.data(), chat.size(), name.data(), name.size());
+        if (err == ESP_ERR_INVALID_STATE) return sendError(req, "409 Conflict", "save the bot token first");
+        if (err == ESP_ERR_INVALID_ARG) return sendError(req, "400 Bad Request", "bot token not accepted");
+        if (err == ESP_ERR_NOT_FOUND) return sendError(req, "404 Not Found", "no message yet: send /start to your bot, then try again");
+        if (err != ESP_OK) return sendError(req, "502 Bad Gateway", "could not reach Telegram");
+        JsonWriter j(req);
+        j.beginObject().boolean("ok", true).str("chat", chat.data()).str("name", name.data()).endObject();
+        return j.finish();
+    }
+    if (strcmp(action.data(), "save") != 0) return sendError(req, "400 Bad Request", "unknown action");
+    std::array<char, 64> server{};
+    std::array<char, 48> topic{};
+    std::array<char, 72> token{};
+    std::array<char, 72> tgToken{};
+    std::array<char, 32> tgChat{};
+    std::array<char, 8> ev{};
+    std::array<char, 4> cmds{};
+    std::array<char, 4> clearN{};
+    std::array<char, 4> clearT{};
+    field(form.data(), "server", server.data(), server.size());
+    field(form.data(), "topic", topic.data(), topic.size());
+    field(form.data(), "token", token.data(), token.size());
+    field(form.data(), "tgToken", tgToken.data(), tgToken.size());
+    field(form.data(), "tgChat", tgChat.data(), tgChat.size());
+    field(form.data(), "events", ev.data(), ev.size());
+    field(form.data(), "commands", cmds.data(), cmds.size());
+    field(form.data(), "clearNtfyToken", clearN.data(), clearN.size());
+    field(form.data(), "clearTgToken", clearT.data(), clearT.size());
+    if (server[0] && strncmp(server.data(), "https://", 8) != 0 && strncmp(server.data(), "http://", 7) != 0)  // NOSONAR http:// for a self-hosted ntfy on the LAN
+        return sendError(req, "400 Bad Request", "ntfy server must start with https://");
+    if (!safeToken(topic.data(), sizeof(NotifySettings::ntfyTopic) - 5, true))  // room for "-cmd"
+        return sendError(req, "400 Bad Request", "topic: letters, digits, - and _ only (up to 34)");
+    if (!safeToken(token.data(), sizeof(NotifySettings::ntfyToken) - 1, true) || !safeToken(tgToken.data(), sizeof(NotifySettings::tgToken) - 1, true))
+        return sendError(req, "400 Bad Request", "token has characters that can't be right");
+    bool chatOk = true;
+    for (size_t i = 0; tgChat[i]; i++) chatOk &= isdigit(static_cast<unsigned char>(tgChat[i])) || (i == 0 && tgChat[i] == '-');
+    if (!chatOk || strnlen(tgChat.data(), tgChat.size()) >= sizeof(NotifySettings::tgChat))
+        return sendError(req, "400 Bad Request", "chat ID: digits only (use Find)");
+    const auto evMask = static_cast<uint16_t>(strtoul(ev.data(), nullptr, 10) & events::kAllKinds);
+    d_.cfg.modifyNotify([&](NotifySettings& s) {
+        copyStr(s.ntfyServer, server[0] ? server.data() : "https://ntfy.sh");
+        copyStr(s.ntfyTopic, topic.data());
+        if (token[0]) copyStr(s.ntfyToken, token.data());
+        if (clearN[0] == '1') memset(s.ntfyToken, 0, sizeof(s.ntfyToken));
+        if (tgToken[0]) copyStr(s.tgToken, tgToken.data());
+        if (clearT[0] == '1') memset(s.tgToken, 0, sizeof(s.tgToken));
+        copyStr(s.tgChat, tgChat.data());
+        s.notifyEvents = evMask;
+        s.notifyCommands = cmds[0] == '1';
+    });
+    secureWipe(token.data(), token.size());
+    secureWipe(tgToken.data(), tgToken.size());
+    secureWipe(form.data(), form.size());
+    d_.notifier->reload();
+    return sendOk(req);
+}
+#endif
 
 // GET /api/logs?from=N: the device log since position N (0 = all that is kept),
 // as plain text. X-Log-Next is the position to ask from next time; X-Log-Start

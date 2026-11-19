@@ -1,10 +1,15 @@
 #include "sinkhole/app.hpp"
 
+#include <array>
+#include <cctype>
+#include <cstdlib>
+#include <cstring>
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
 #include "sdkconfig.h"
+#include "sinkhole/events.hpp"
 #include "sinkhole/log_buffer.hpp"
 #include "sinkhole/memory.hpp"
 #include "sinkhole/text.hpp"
@@ -18,7 +23,13 @@ constexpr uint64_t kHealthyAfterUs = 60ULL * 1000 * 1000;
 
 App::App()
     : web_(WebDeps{config_, wifi_, store_, custom_, allow_, filter_, clients_, queryLog_, counters_,
-                   dns_, updater_, firmware_, wol_, mqtt_, led_, history_, dhcp_, names_, &App::applyUpstream, this})
+                   dns_, updater_, firmware_, wol_, mqtt_, led_, history_, dhcp_, names_,
+#if CONFIG_SINKHOLE_NOTIFY
+                   &notifier_,
+#else
+                   nullptr,
+#endif
+                   &App::applyUpstream, this})
 {
 }
 
@@ -60,6 +71,11 @@ void App::start()
     updater_.start();
     wol_.begin();
     mqtt_.start();
+    wol_.setListener(&App::onHostState, this);
+    wol_.setResultListener(&App::onHostResult, this);
+#if CONFIG_SINKHOLE_NOTIFY
+    if (notifier_.begin(&App::onCommand, this) == ESP_OK) bootEvents();
+#endif
     button_.start();
 
     // Status LED: off unless a board preset / pin was chosen in Settings.
@@ -72,10 +88,115 @@ void App::start()
     ESP_LOGI(TAG, "ready");
 }
 
+// Wake-on-LAN host events go to MQTT and, when set up, to the phone.
+void App::onHostState(void* ctx, const char* name, bool online)  // NOSONAR C-style listener signature
+{
+    auto* self = static_cast<App*>(ctx);
+    MqttBridge::onHostState(&self->mqtt_, name, online);
+    events::emit(events::HostState, "%s is %s", name, online ? "online" : "offline");
+}
+
+void App::onHostResult(void* ctx, const char* name, const char* result)  // NOSONAR C-style listener signature
+{
+    auto* self = static_cast<App*>(ctx);
+    MqttBridge::onHostResult(&self->mqtt_, name, result);
+    if (strcmp(result, "waking") != 0 && strcmp(result, "cancelled") != 0)
+        events::emit(events::Wake, "%s: %s", name, result);
+}
+
+#if CONFIG_SINKHOLE_NOTIFY
+// After a crash or a firmware change, say so once the phone can be reached.
+void App::bootEvents()
+{
+    std::array<BootLog::Record, 2> r{};
+    const size_t n = BootLog::list(r.data(), r.size());
+    if (n && BootLog::unexpected(r[0]))
+        events::emit(events::Restart, "Restarted after a %s (firmware %s)", BootLog::why(r[0]), r[0].version);
+    if (n == 2 && strcmp(r[0].version, r[1].version) != 0)
+        events::emit(events::Restart, "Firmware updated: %s -> %s", r[1].version, r[0].version);
+}
+
+namespace {
+// "/Wake@my_bot office-pc" -> verb "wake", arg "office-pc".
+void splitCommand(const char* in, char* verb, size_t verbCap, char* arg, size_t argCap)
+{
+    while (*in == ' ' || *in == '/') in++;
+    size_t n = 0;
+    while (*in && *in != ' ' && *in != '@' && n + 1 < verbCap) verb[n++] = static_cast<char>(tolower(static_cast<unsigned char>(*in++)));
+    verb[n] = '\0';
+    while (*in && *in != ' ') in++;  // rest of "@botname"
+    while (*in == ' ') in++;
+    copyStr(arg, argCap, in);
+    for (size_t k = strnlen(arg, argCap); k && arg[k - 1] == ' '; k--) arg[k - 1] = '\0';
+}
+}  // namespace
+
+void App::onCommand(void* ctx, const char* command, char* reply, size_t cap)  // NOSONAR C-style listener signature
+{
+    auto* self = static_cast<App*>(ctx);
+    std::array<char, 16> verb{};
+    std::array<char, 40> arg{};
+    splitCommand(command, verb.data(), verb.size(), arg.data(), arg.size());
+    const char* v = verb.data();
+    if (strcmp(v, "help") == 0 || strcmp(v, "start") == 0) {
+        snprintf(reply, cap, "Commands: status, hosts, wake NAME, cancel NAME, pause [minutes], resume");
+    } else if (strcmp(v, "status") == 0) {
+        const uint32_t now = uptimeSeconds();
+        const uint32_t resume = self->filter_.resumeAt();
+        std::array<char, 40> state{};
+        if (!self->filter_.enabled() && resume > now)
+            snprintf(state.data(), state.size(), "paused (%u min left)", static_cast<unsigned>((resume - now + 59) / 60));
+        else
+            copyStr(state.data(), state.size(), self->filter_.enabled() ? "on" : "off");
+        const uint32_t b = self->counters_.blocked, a = self->counters_.allowed;
+        snprintf(reply, cap, "Blocking %s. %u of %u queries blocked, %u domains on the list, up %u h. Firmware %s.",
+                 state.data(), static_cast<unsigned>(b), static_cast<unsigned>(a + b),
+                 static_cast<unsigned>(self->store_.info().count), static_cast<unsigned>(now / 3600),
+                 FirmwareUpdater::version());
+    } else if (strcmp(v, "hosts") == 0) {
+        static std::array<WolHostState, WolService::kCapacity> hosts;  // notifier task only
+        const size_t n = self->wol_.list(hosts.data(), hosts.size());
+        size_t used = static_cast<size_t>(snprintf(reply, cap, n ? "Hosts:" : "No Wake-on-LAN hosts yet."));
+        for (size_t i = 0; i < n && used < cap; i++) {
+            const char* st = !hosts[i].host.ip ? "?" : hosts[i].online ? "online" : "offline";
+            used += static_cast<size_t>(snprintf(reply + used, cap - used, " %s (%s)%s", hosts[i].host.name, st, i + 1 < n ? "," : ""));
+        }
+    } else if (strcmp(v, "wake") == 0) {
+        bool verifying = false;
+        const esp_err_t err = self->wol_.wakeAndVerify(arg.data(), &verifying);
+        if (err == ESP_ERR_NOT_FOUND) snprintf(reply, cap, "No host called '%s'. Try: hosts", arg.data());
+        else if (err == ESP_ERR_INVALID_STATE) snprintf(reply, cap, "%s is already online.", arg.data());
+        else if (err != ESP_OK) snprintf(reply, cap, "Could not send the wake packet.");
+        else snprintf(reply, cap, verifying ? "Waking %s; I'll tell you when it answers." : "Magic packet sent to %s.", arg.data());
+    } else if (strcmp(v, "cancel") == 0) {
+        const esp_err_t err = self->wol_.cancel(arg.data());
+        snprintf(reply, cap, err == ESP_OK ? "Stopped waiting for %s." : err == ESP_ERR_NOT_FOUND ? "No host called '%s'." : "%s is not being woken.", arg.data());
+    } else if (strcmp(v, "pause") == 0) {
+        unsigned long m = arg[0] ? strtoul(arg.data(), nullptr, 10) : 15;
+        if (m < 1 || m > 1440) m = 15;
+        self->filter_.pauseFor(static_cast<uint32_t>(m * 60));
+        snprintf(reply, cap, "Blocking paused for %lu min.", m);
+    } else if (strcmp(v, "resume") == 0) {
+        self->filter_.setEnabled(true);
+        self->config_.modify([](Settings& s) { s.blocking = true; });
+        snprintf(reply, cap, "Blocking is on again.");
+    } else {
+        snprintf(reply, cap, "Unknown command. Try: help");
+    }
+}
+#endif
+
 // Router mode needs the DHCP-provided DNS, which only exists after got-IP.
 void App::onUplinkChange(void* ctx, bool connected)
 {
     auto* self = static_cast<App*>(ctx);
+    const uint32_t now = uptimeSeconds();
+    if (!connected && !self->uplinkDownAt_) self->uplinkDownAt_ = now ? now : 1;
+    if (connected && self->uplinkDownAt_) {
+        const uint32_t down = now - self->uplinkDownAt_;
+        self->uplinkDownAt_ = 0;
+        if (down >= 120) events::emit(events::Uplink, "Wi-Fi back after %u min without it", static_cast<unsigned>(down / 60));
+    }
     // Also starts the LAN DHCP server. It stays up while the link is down: a
     // Wi-Fi blip must not wipe its lease table.
     if (connected) {

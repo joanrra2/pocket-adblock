@@ -9,6 +9,7 @@
 #include "sinkhole/domain_filter.hpp"
 #include "sinkhole/domain_list.hpp"
 #include "sinkhole/lan_dhcp.hpp"
+#include "sinkhole/notifier.hpp"
 #include "sinkhole/stats.hpp"
 #include "sinkhole/status_led.hpp"
 #include "sinkhole/updaters.hpp"
@@ -25,6 +26,10 @@ public:
 
 private:
     static void onUplinkChange(void* ctx, bool connected);
+    static void onHostState(void* ctx, const char* name, bool online);  // NOSONAR C-style listener signature
+    static void onHostResult(void* ctx, const char* name, const char* result);  // NOSONAR C-style listener signature
+    static void onCommand(void* ctx, const char* command, char* reply, size_t cap);  // NOSONAR C-style listener signature
+    void bootEvents();
     static void applyUpstream(void* ctx);
     void applyDhcp();
     MqttHooks mqttHooks();
@@ -51,6 +56,10 @@ private:
     Updater updater_{config_, store_, wifi_, firmware_};
     WolService wol_{wifi_};
     MqttBridge mqtt_{config_, wol_, mqttHooks()};
+#if CONFIG_SINKHOLE_NOTIFY
+    Notifier notifier_{config_, wifi_};
+#endif
+    uint32_t uplinkDownAt_ = 0;  // uptime s when the uplink went down, 0 = up
     BootButton button_{wifi_};
     StatusLed led_;
     History history_;
