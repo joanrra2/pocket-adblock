@@ -360,7 +360,7 @@ EMQX Cloud Serverless or HiveMQ Cloud deployment, or your Home Assistant's Mosqu
 |---|---|---|
 | `sinkhole/wol/<name>/set` | you → device | anything: wakes `<name>`; `cancel` stops waiting |
 | `sinkhole/wol/<name>/state` | device → you | `online` / `offline` (retained) |
-| `sinkhole/wol/<name>/result` | device → you | `waking`, `online after 41 s`, `no answer after 3 min`, `cancelled`, `already online`... (retained) |
+| `sinkhole/wol/<name>/result` | device → you | `waking`, `online after 41 s`, `no answer after 3 min`, `cancelled`, `already online`...; `watch only` for a host without a MAC, cleared (empty) when it gets one (retained) |
 | `sinkhole/status` | device → you | `online` / `offline` (LWT, retained) |
 | `sinkhole/blocking/set` | you → device | `ON` / `OFF` |
 | `sinkhole/blocking` | device → you | `ON` / `OFF` (retained, on every change) |
