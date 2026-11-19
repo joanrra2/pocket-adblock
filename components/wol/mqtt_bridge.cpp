@@ -97,6 +97,18 @@ void MqttBridge::onHostResult(void* ctx, const char* name, const char* result)  
     self->enqueue(topic.data(), result, true);
 }
 
+// Retained "watch only" results for hosts without a MAC, on every connect:
+// a result set while offline (or before boot) must still reach the broker.
+void MqttBridge::publishWatchOnly()
+{
+    std::array<char, 128> topic{};
+    wol_.forEachHost([this, &topic](const WolHost& h) {
+        if (!watchOnly(h)) return;
+        snprintf(topic.data(), topic.size(), "%s/wol/%s/result", prefix_, h.name);
+        enqueue(topic.data(), kWatchOnlyResult, true);
+    });
+}
+
 void MqttBridge::enqueue(const char* topic, const char* payload, bool retain)
 {
     esp_mqtt_client_enqueue(static_cast<esp_mqtt_client_handle_t>(client_), topic, payload,
@@ -267,6 +279,7 @@ void MqttBridge::handleEvent(int32_t id, void* data)
             esp_mqtt_client_subscribe_single(client, topic, 1);
         }
         esp_mqtt_client_publish(client, statusTopic_, "online", 0, 1, 1);
+        publishWatchOnly();
         announceNow_ = ha_;
         ticks_ = kStatsEveryTicks;  // publish states on the next tick
         ESP_LOGI(TAG, "connected%s", ha_ ? ", Home Assistant discovery on" : "");
@@ -308,6 +321,11 @@ void MqttBridge::handleEvent(int32_t id, void* data)
         }
         esp_err_t err = wol_.wakeAndVerify(name);
         ESP_LOGI(TAG, "remote wake '%s': %s", name, esp_err_to_name(err));
+        if (err == ESP_ERR_NOT_SUPPORTED) {  // watch-only: say so instead of staying silent
+            std::array<char, 128> result{};
+            snprintf(result.data(), result.size(), "%s/wol/%s/result", prefix_, name);
+            enqueue(result.data(), kWatchOnlyResult, true);
+        }
     }
 }
 

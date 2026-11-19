@@ -104,6 +104,7 @@ esp_err_t WolService::add(const WolHost& h)
 
     LockGuard g(mu_);
     int i = findLocked(h.name);
+    const bool wasWatchOnly = i >= 0 && watchOnly(hosts_[i].host);
     if (i < 0) {
         if (count_ >= kCapacity) return ESP_ERR_NO_MEM;
         i = static_cast<int>(count_++);
@@ -116,6 +117,10 @@ esp_err_t WolService::add(const WolHost& h)
     }
     hosts_[i].host = h;
     hosts_[i].host.reserved = 0;
+    // The result topic tells MQTT apps a host can't be woken; an empty result
+    // clears that once it has a MAC (see kWatchOnlyResult).
+    if (watchOnly(h) && !wasWatchOnly) setResultLocked(i, kWatchOnlyResult);
+    if (!watchOnly(h) && wasWatchOnly) setResultLocked(i, "");
     return saveLocked();
 }
 

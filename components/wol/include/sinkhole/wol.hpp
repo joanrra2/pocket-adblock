@@ -33,6 +33,9 @@ struct WolHost {
 static_assert(sizeof(WolHost) == 48, "WolHost is stored in NVS: keep its size");
 static_assert(offsetof(WolHost, ip) == 40, "WolHost is stored in NVS: keep its layout");
 constexpr uint8_t kWolAlert = 1;  // tell the owner when it goes offline / comes back
+// Wake result of a watch-only host, published retained on <prefix>/wol/<name>/result
+// (Pocket Wake hides its Wake button). Part of the MQTT contract: keep the text.
+constexpr const char* kWatchOnlyResult = "watch only";
 
 inline bool watchOnly(const WolHost& h)
 {
@@ -150,7 +153,8 @@ private:
 // Remote control over MQTT (TLS recommended: mqtts://...). Topics, with
 // <p> = Settings::mqttPrefix:
 //   <p>/wol/<name>/set    any payload  -> wake that host ("cancel": stop waiting)
-//   <p>/wol/<name>/result last wake result, e.g. "online after 41 s" (retained)
+//   <p>/wol/<name>/result last wake result, e.g. "online after 41 s"; "watch only"
+//                         for a host without a MAC, empty once it gets one (retained)
 //   <p>/wol/<name>/state  "online" / "offline" (retained, published by us)
 //   <p>/status            "online" / LWT "offline" (retained)
 // What the bridge may read and control besides Wake-on-LAN (provided by the
@@ -185,6 +189,7 @@ private:
     void tick();
     void announce();
     void publishBlocking();
+    void publishWatchOnly();
     void enqueue(const char* topic, const char* payload, bool retain);
     void deviceJson(char* out, size_t cap);
     static void objectId(const char* name, char* out, size_t cap);

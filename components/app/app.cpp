@@ -121,7 +121,9 @@ void App::onHostResult(void* ctx, const char* name, const char* result)  // NOSO
 {
     auto* self = static_cast<App*>(ctx);
     MqttBridge::onHostResult(&self->mqtt_, name, result);
-    if (strcmp(result, "waking") != 0 && strcmp(result, "cancelled") != 0)
+    // Only outcomes are news: not the start, a cancel, or the watch-only marker.
+    if (result[0] && strcmp(result, "waking") != 0 && strcmp(result, "cancelled") != 0 &&
+        strcmp(result, kWatchOnlyResult) != 0)
         events::emit(events::Wake, "%s: %s", name, result);
 }
 
