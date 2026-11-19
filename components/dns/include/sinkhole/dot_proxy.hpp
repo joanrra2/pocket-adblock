@@ -31,7 +31,9 @@ public:
     }
 
     esp_err_t start();
-    void setHost(const char* host);  // e.g. "dns.quad9.net"; empty = idle
+    // host e.g. "dns.quad9.net" (empty = idle). bootstrap: the plain upstream
+    // (network order) that looks the host up; never this device itself.
+    void setHost(const char* host, uint32_t bootstrap);
     bool connected() const { return connected_; }
     uint32_t queries() const { return queries_; }
     uint32_t connects() const { return connects_; }
@@ -42,12 +44,15 @@ private:
 
     Mutex mu_;
     char host_[64]{};
+    uint32_t bootstrap_ = 0;
     std::atomic<bool> hostChanged_{false};
     std::atomic<bool> connected_{false};
     std::atomic<uint32_t> queries_{0};
     std::atomic<uint32_t> connects_{0};
 #ifdef CONFIG_SINKHOLE_DNS_OVER_TLS
-    StaticTask<6144> task_;
+    // A TLS handshake to dns.quad9.net left 1856 bytes of 6144 (S3): 1 KB
+    // more, as certificate chains and curves differ between providers.
+    StaticTask<7168> task_;
 #endif
 };
 

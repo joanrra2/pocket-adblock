@@ -253,7 +253,28 @@ void App::updateCaptive()
 void App::applyUpstream(void* ctx)
 {
     auto* self = static_cast<App*>(ctx);
-    const Settings s = self->config_.get();
+    // The event task (uplink up) and the web server (settings saved) both
+    // call this: one at a time, so the older settings can't land last.
+    LockGuard g(self->upstreamMu_);
+    // The few fields needed, not a 1.3 KB Settings copy on the event task.
+    struct Upstream {
+        UpstreamMode upstreamMode;
+        uint32_t upstreamIp;
+        uint32_t upstreamIp2;
+        bool dot;
+        bool cnameCheck;
+        uint8_t bypassGuard;
+        uint8_t safeSearch;
+        uint8_t privacy;
+        uint16_t rateLimit;
+        std::array<char, sizeof(Settings::dotHost)> dotHost;
+    };
+    const Upstream s = self->config_.read([](const Settings& c) {
+        Upstream u{c.upstreamMode, c.upstreamIp, c.upstreamIp2, c.dot, c.cnameCheck,
+                   c.bypassGuard, c.safeSearch, c.privacy, c.rateLimit, {}};
+        copyStr(u.dotHost.data(), u.dotHost.size(), c.dotHost);
+        return u;
+    });
     const uint32_t self4 = self->wifi_.staIp();
 
     uint32_t up = 0;
@@ -271,9 +292,9 @@ void App::applyUpstream(void* ctx)
     // DNS over TLS: everything allowed goes through the local TLS proxy, with no
     // plain-UDP backup (it would leak the queries the user wants encrypted).
     const bool dot = DotProxy::available() && s.dot && s.dotHost[0];
-    self->dns_.dot().setHost(dot ? s.dotHost : "");
+    self->dns_.dot().setHost(dot ? s.dotHost.data() : "", up);
     if (dot)
-        self->dns_.setUpstream(htonl(INADDR_LOOPBACK), 0, DotProxy::kPort);
+        self->dns_.setUpstream(htonl(INADDR_LOOPBACK), 0);
     else
         self->dns_.setUpstream(up, s.upstreamIp2);
     self->dns_.setGuard(s.bypassGuard);
@@ -287,7 +308,7 @@ void App::applyUpstream(void* ctx)
     formatIp4(up, ip);
     if (self->dns_.backupUpstream()) formatIp4(self->dns_.backupUpstream(), ip2);
     if (dot)
-        ESP_LOGI(TAG, "upstream DNS over TLS: %s:853", s.dotHost);
+        ESP_LOGI(TAG, "upstream DNS over TLS: %s:853", s.dotHost.data());
     else
         ESP_LOGI(TAG, "upstream DNS %s, backup %s", ip, ip2);
 }

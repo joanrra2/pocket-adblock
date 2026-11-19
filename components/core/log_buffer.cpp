@@ -1,5 +1,6 @@
 #include "sinkhole/log_buffer.hpp"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdarg>
@@ -80,25 +81,50 @@ void LogBuffer::begin()
     r.serial = esp_log_set_vprintf(&hook);
 }
 
+namespace {
+// Copied in short slices: a critical section turns interrupts off on this
+// core, and a 2 KB copy (from PSRAM on Pro) is too long for that.
+constexpr size_t kSlice = 256;
+
+// The first whole line at or after `oldest` (the oldest byte still kept).
+uint32_t nextLineLocked(const Ring& r, uint32_t oldest)
+{
+    if (oldest == 0) return 0;  // nothing overwritten yet: the very start
+    uint32_t pos = oldest;
+    const uint32_t stop = r.total - pos > kSlice ? pos + kSlice : r.total;
+    while (pos < stop && r.buf[pos % r.cap] != '\n') pos++;
+    return pos < r.total ? pos + 1 : pos;
+}
+
+// One slice, under r.lock. False when there is nothing more to copy now.
+bool copySliceLocked(const Ring& r, bool first, uint32_t& pos, LogBuffer::Chunk& c, char* out, size_t cap)
+{
+    const uint32_t oldest = r.total > r.cap ? r.total - static_cast<uint32_t>(r.cap) : 0;
+    if (pos < oldest || pos > r.total) {
+        if (!first) return false;  // the writer lapped this read: the next one resyncs
+        pos = nextLineLocked(r, oldest);  // overwritten, or a position from before a restart
+        c.start = pos;
+    }
+    const size_t before = c.len;
+    const size_t limit = std::min(cap, c.len + kSlice);
+    while (pos < r.total && c.len < limit) out[c.len++] = r.buf[pos++ % r.cap];
+    return c.len != before;
+}
+}  // namespace
+
 LogBuffer::Chunk LogBuffer::read(uint32_t from, char* out, size_t cap)
 {
     Ring& r = ring();
     Chunk c{from, from, 0};
     if (!r.buf || !cap) return c;
-    taskENTER_CRITICAL(&r.lock);
-    const uint32_t oldest = r.total > r.cap ? r.total - static_cast<uint32_t>(r.cap) : 0;
     uint32_t pos = from;
-    if (pos < oldest || pos > r.total) {  // overwritten (or a position from before a restart)
-        pos = oldest;
-        if (oldest > 0) {  // start at the next whole line
-            while (pos < r.total && r.buf[pos % r.cap] != '\n') pos++;
-            if (pos < r.total) pos++;
-        }
+    bool more = true;
+    for (bool first = true; more && c.len < cap; first = false) {
+        taskENTER_CRITICAL(&r.lock);
+        more = copySliceLocked(r, first, pos, c, out, cap);
+        taskEXIT_CRITICAL(&r.lock);
     }
-    c.start = pos;
-    while (pos < r.total && c.len < cap) out[c.len++] = r.buf[pos++ % r.cap];
     c.next = pos;
-    taskEXIT_CRITICAL(&r.lock);
     return c;
 }
 

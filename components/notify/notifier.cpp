@@ -194,6 +194,38 @@ void Notifier::sink(events::Kind kind, const char* text)
     }
 }
 
+void Notifier::startFindChat()
+{
+    {
+        LockGuard g(mu_);
+        find_.err = ESP_ERR_NOT_FINISHED;
+    }
+    find_.wanted = true;
+    Msg wake{};  // kind 0: wakes the task, delivers nothing
+    if (queue_) xQueueSend(queue_, &wake, 0);
+}
+
+esp_err_t Notifier::findChatResult(char* chatId, size_t idCap, char* name, size_t nameCap)
+{
+    LockGuard g(mu_);
+    if (find_.err == ESP_OK) {
+        copyStr(chatId, idCap, find_.chat.data());
+        copyStr(name, nameCap, find_.name.data());
+    }
+    return find_.err;
+}
+
+void Notifier::runFindChat()
+{
+    std::array<char, 24> chat{};
+    std::array<char, 40> name{};
+    const esp_err_t err = findTelegramChat(chat.data(), chat.size(), name.data(), name.size());
+    LockGuard g(mu_);
+    find_.chat = chat;
+    find_.name = name;
+    find_.err = err;
+}
+
 void Notifier::test()
 {
     Msg m{};
@@ -249,12 +281,7 @@ void Notifier::run()
 {
     uint32_t lastPoll = 0;
     for (;;) {
-        if (reload_.exchange(false)) {
-            LockGuard net(netMu_);
-            loadSettings();
-            ntfyHttp_->close();
-            tgHttp_->close();
-        }
+        reloadIfAsked();
         const bool any = status_.ntfy.configured || status_.telegram.configured;
         const bool polling = any && c_.commands;
         Msg m{};
@@ -265,13 +292,28 @@ void Notifier::run()
             vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
         }
-        const uint32_t now = uptimeSeconds();
-        if (polling && now - lastPoll >= kPollMs / 1000) {
-            lastPoll = now;
-            if (status_.ntfy.configured) pollNtfy();
-            if (status_.telegram.configured) pollTelegram();
-        }
+        if (find_.wanted.exchange(false)) runFindChat();
+        if (polling) pollCommands(lastPoll);
     }
+}
+
+void Notifier::reloadIfAsked()
+{
+    if (!reload_.exchange(false)) return;
+    LockGuard net(netMu_);
+    loadSettings();
+    ntfyHttp_->close();
+    tgHttp_->close();
+}
+
+// Commands from the phone, every kPollMs.
+void Notifier::pollCommands(uint32_t& lastPoll)
+{
+    const uint32_t now = uptimeSeconds();
+    if (now - lastPoll < kPollMs / 1000) return;
+    lastPoll = now;
+    if (status_.ntfy.configured) pollNtfy();
+    if (status_.telegram.configured) pollTelegram();
 }
 
 void Notifier::deliver(const Msg& m)

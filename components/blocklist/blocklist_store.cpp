@@ -146,9 +146,22 @@ void BlocklistStore::unmap(Mapped& m)
     m = Mapped{};
 }
 
+// The filter's "definitely not listed", trusted only if no rebuild started
+// during the lookup: a rebuild zeroes the bits before adding the new list.
+bool BlocklistStore::bloomExcludes(uint64_t hash) const
+{
+#if CONFIG_SINKHOLE_BLOOM_FILTER
+    const uint32_t gen = bloomGen_;
+    return bloomReady_ && !bloom_.mayContain(hash) && bloomGen_ == gen;
+#else
+    (void)hash;
+    return false;
+#endif
+}
+
 bool BlocklistStore::contains(uint64_t hash)
 {
-    if (bloomReady_ && !bloom_.mayContain(hash)) {  // definitely not listed: no flash read
+    if (bloomExcludes(hash)) {  // definitely not listed: no flash read
         bloomSkips_++;
         return false;
     }
@@ -161,7 +174,7 @@ bool BlocklistStore::containsAny(const uint64_t* hashes, size_t n)
     uint64_t candidates[16];
     size_t m = 0;
     for (size_t i = 0; i < n && m < 16; i++) {
-        if (bloomReady_ && !bloom_.mayContain(hashes[i])) {  // definitely not listed
+        if (bloomExcludes(hashes[i])) {  // definitely not listed
             bloomSkips_++;
             continue;
         }
@@ -390,7 +403,7 @@ esp_err_t BlocklistStore::finishWrite(char* why, size_t whyLen)
     }
 
     Mapped old;
-    bloomReady_ = false;  // the old filter must not answer for the new list
+    invalidateBloom();  // the old filter must not answer for the new list
     {
         LockGuard g(mu_);
         old = active_;
@@ -456,7 +469,7 @@ void BlocklistStore::finishStartup()
 // Lookups bypass the filter (bloomReady_ = false) while it is rebuilt.
 void BlocklistStore::rebuildBloom(const HashTable& table)
 {
-    bloomReady_ = false;
+    invalidateBloom();
     if (!table.canList()) return;  // a filter list (v4) answers in 3 reads: no bloom filter needed
     if (!allocateBloom()) return;
     const int64_t t0 = esp_timer_get_time();

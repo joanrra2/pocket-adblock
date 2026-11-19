@@ -37,11 +37,12 @@ public:
     esp_err_t start();
     // With a backup set, every forwarded query is sent to both and the first
     // matching answer wins: a dead or slow resolver costs no latency.
-    // port: 53, or the local DNS-over-TLS proxy's loopback port.
-    void setUpstream(uint32_t primary, uint32_t backup = 0, uint16_t port = 53)
+    // 127.0.0.1 is the local DNS-over-TLS proxy (DotProxy::kPort); every other
+    // server gets port 53. The port follows from the address, so a reader can
+    // never pair a new address with an old port.
+    void setUpstream(uint32_t primary, uint32_t backup = 0)
     {
-        if (primary != upstream_ || port != upstreamPort_) safeRefreshAt_ = 0;  // re-learn SafeSearch endpoints
-        upstreamPort_ = port;
+        if (primary != upstream_) safeRefreshAt_ = 0;  // re-learn SafeSearch endpoints
         upstream_ = primary;
         upstream2_ = backup != primary ? backup : 0;
     }
@@ -122,7 +123,6 @@ private:
     int upstreamSock_ = -1;
     std::atomic<uint32_t> upstream_{0};
     std::atomic<uint32_t> upstream2_{0};
-    std::atomic<uint16_t> upstreamPort_{53};
     std::atomic<uint32_t> wins_[2] = {0, 0};  // first answers: primary / backup
     std::atomic<uint32_t> filterAvgUs10_{0};
     uint32_t filterSumUs_ = 0;
