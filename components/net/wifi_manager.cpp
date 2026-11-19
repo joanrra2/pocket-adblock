@@ -28,7 +28,8 @@ constexpr const char* kLowTxKey = "lowtx";
 // Timer work that reconfigures the radio runs on the event task (4 KB stack,
 // where the Wi-Fi events are handled too), not on the shared esp_timer task.
 ESP_EVENT_DEFINE_BASE(kWifiWork);
-enum : int32_t { kWorkApplyIp = 1, kWorkApPolicy = 2 };
+constexpr int32_t kWorkApplyIp = 1;
+constexpr int32_t kWorkApPolicy = 2;
 constexpr uint64_t kPostRetryUs = 100 * 1000;  // event queue full: try again
 }  // namespace
 
@@ -218,7 +219,7 @@ void WifiManager::onIpTimer(void* arg)
 void WifiManager::applyStation()
 {
     char ssid[33], pass[65];
-    cfg_.read([&](const Settings& s) {
+    cfg_.read([&ssid, &pass](const Settings& s) {
         copyStr(ssid, s.staSsid);
         copyStr(pass, s.staPass);
         return 0;

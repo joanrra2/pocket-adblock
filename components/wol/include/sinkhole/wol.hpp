@@ -211,7 +211,7 @@ private:
     WolService& wol_;
     MqttHooks hooks_;
     void* client_ = nullptr;  // esp_mqtt_client_handle_t
-    void* task_ = nullptr;    // TaskHandle_t of the publisher task
+    TaskHandle_t task_ = nullptr;  // the publisher task
     std::atomic<bool> connected_{false};
     // Set by the MQTT task on connect, done by the publisher task.
     std::atomic<bool> announceNow_{false};
@@ -228,13 +228,15 @@ private:
     char nodeId_[24]{};
     char hostname_[32]{};
     // Publisher task only: members rather than its stack.
-    uint32_t hostsHash_ = 0;
-    uint32_t ticks_ = 0;
-    int8_t lastBlocking_ = -1;  // last published switch state, -1 = none
-    char buf_[768]{};
-    char dev_[256]{};
-    char topic_[160]{};
-    char announced_[WolService::kCapacity][24]{};  // object ids of announced hosts
+    struct Publisher {
+        uint32_t hostsHash = 0;
+        uint32_t ticks = 0;
+        int8_t lastBlocking = -1;  // last published switch state, -1 = none
+        std::array<char, 768> buf{};
+        std::array<char, 256> dev{};
+        std::array<char, 160> topic{};
+        std::array<std::array<char, 24>, WolService::kCapacity> announced{};  // object ids of announced hosts
+    } pub_;
 };
 
 }  // namespace sinkhole

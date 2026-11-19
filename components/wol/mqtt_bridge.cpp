@@ -123,8 +123,8 @@ bool MqttBridge::publishWatchOnly()
     WolHost h{};
     for (size_t i = 0; wol_.hostAt(i, h); i++) {
         if (!watchOnly(h)) continue;
-        snprintf(topic_, sizeof(topic_), "%s/wol/%s/result", prefix_, h.name);
-        if (!paced(topic_, kWatchOnlyResult)) return false;
+        snprintf(pub_.topic.data(), pub_.topic.size(), "%s/wol/%s/result", prefix_, h.name);
+        if (!paced(pub_.topic.data(), kWatchOnlyResult)) return false;
     }
     return true;
 }
@@ -155,7 +155,7 @@ void MqttBridge::publishBlocking()
 {
     if (!hooks_.blocking) return;
     const bool on = hooks_.blocking(hooks_.ctx);
-    lastBlocking_ = on;
+    pub_.lastBlocking = on;
     char topic[80];
     snprintf(topic, sizeof(topic), "%s/blocking", prefix_);
     enqueue(topic, on ? "ON" : "OFF", true);
@@ -185,15 +185,15 @@ void MqttBridge::deviceJson(char* out, size_t cap)
 // Paced: false when the broker went away part way (retried as a whole).
 bool MqttBridge::announce()
 {
-    deviceJson(dev_, sizeof(dev_));
+    deviceJson(pub_.dev.data(), pub_.dev.size());
 
     if (hooks_.setBlocking) {
-        snprintf(topic_, sizeof(topic_), "%s/switch/%s/blocking/config", kHaPrefix, nodeId_);
-        snprintf(buf_, sizeof(buf_),
+        snprintf(pub_.topic.data(), pub_.topic.size(), "%s/switch/%s/blocking/config", kHaPrefix, nodeId_);
+        snprintf(pub_.buf.data(), pub_.buf.size(),
                  "{\"name\":\"Blocking\",\"uniq_id\":\"%s_blocking\",\"stat_t\":\"%s/blocking\","
                  "\"cmd_t\":\"%s/blocking/set\",\"icon\":\"mdi:shield-check\",%s}",
-                 nodeId_, prefix_, prefix_, dev_);
-        if (!paced(topic_, buf_)) return false;
+                 nodeId_, prefix_, prefix_, pub_.dev.data());
+        if (!paced(pub_.topic.data(), pub_.buf.data())) return false;
     }
     if (hooks_.stats) {
         struct Sensor {
@@ -212,70 +212,70 @@ bool MqttBridge::announce()
             {"uptime", "Uptime", "s", "measurement", "mdi:timer-outline"},
         };
         for (const Sensor& s : kSensors) {
-            snprintf(topic_, sizeof(topic_), "%s/sensor/%s/%s/config", kHaPrefix, nodeId_, s.id);
-            snprintf(buf_, sizeof(buf_),
+            snprintf(pub_.topic.data(), pub_.topic.size(), "%s/sensor/%s/%s/config", kHaPrefix, nodeId_, s.id);
+            snprintf(pub_.buf.data(), pub_.buf.size(),
                      "{\"name\":\"%s\",\"uniq_id\":\"%s_%s\",\"stat_t\":\"%s/stats\","
                      "\"val_tpl\":\"{{ value_json.%s }}\",\"unit_of_meas\":\"%s\",\"stat_cla\":\"%s\","
                      "\"icon\":\"%s\",%s}",
-                     s.name, nodeId_, s.id, prefix_, s.id, s.unit, s.stateClass, s.icon, dev_);
-            if (!paced(topic_, buf_)) return false;
+                     s.name, nodeId_, s.id, prefix_, s.id, s.unit, s.stateClass, s.icon, pub_.dev.data());
+            if (!paced(pub_.topic.data(), pub_.buf.data())) return false;
         }
         // Text sensor: why the device last restarted (crash, watchdog, update...).
-        snprintf(topic_, sizeof(topic_), "%s/sensor/%s/restart/config", kHaPrefix, nodeId_);
-        snprintf(buf_, sizeof(buf_),
+        snprintf(pub_.topic.data(), pub_.topic.size(), "%s/sensor/%s/restart/config", kHaPrefix, nodeId_);
+        snprintf(pub_.buf.data(), pub_.buf.size(),
                  "{\"name\":\"Last restart\",\"uniq_id\":\"%s_restart\",\"stat_t\":\"%s/stats\","
                  "\"val_tpl\":\"{{ value_json.restart }}\",\"ent_cat\":\"diagnostic\",\"icon\":\"mdi:restart\",%s}",
-                 nodeId_, prefix_, dev_);
-        if (!paced(topic_, buf_)) return false;
+                 nodeId_, prefix_, pub_.dev.data());
+        if (!paced(pub_.topic.data(), pub_.buf.data())) return false;
     }
 
     // Hosts are copied one at a time (hostAt): pacing waits, and must not
     // hold the WoL lock (the probe and the web UI need it) while it does.
-    char id[24];
+    std::array<char, 24> id{};
     WolHost h{};
     // Hosts that were removed get an empty retained config, which deletes
-    // the entity. Done first: the loop below overwrites announced_.
-    for (const auto& old : announced_) {
+    // the entity. Done first: the loop below overwrites pub_.announced.
+    for (const auto& old : pub_.announced) {
         if (!old[0]) continue;
         bool still = false;
         for (size_t i = 0; !still && wol_.hostAt(i, h); i++) {
-            objectId(h.name, id, sizeof(id));
-            still = strcmp(old, id) == 0;
+            objectId(h.name, id.data(), id.size());
+            still = strcmp(old.data(), id.data()) == 0;
         }
         if (still) continue;
-        snprintf(topic_, sizeof(topic_), "%s/button/%s/wol_%s/config", kHaPrefix, nodeId_, old);
-        if (!paced(topic_, "")) return false;
-        snprintf(topic_, sizeof(topic_), "%s/binary_sensor/%s/wol_%s/config", kHaPrefix, nodeId_, old);
-        if (!paced(topic_, "")) return false;
+        snprintf(pub_.topic.data(), pub_.topic.size(), "%s/button/%s/wol_%.23s/config", kHaPrefix, nodeId_, old.data());
+        if (!paced(pub_.topic.data(), "")) return false;
+        snprintf(pub_.topic.data(), pub_.topic.size(), "%s/binary_sensor/%s/wol_%.23s/config", kHaPrefix, nodeId_, old.data());
+        if (!paced(pub_.topic.data(), "")) return false;
     }
 
     // One Wake button per host (+ online sensor when it has an IP).
     size_t n = 0;
     for (; n < WolService::kCapacity && wol_.hostAt(n, h); n++) {
-        objectId(h.name, announced_[n], sizeof(announced_[n]));
-        const char* oid = announced_[n];
-        snprintf(topic_, sizeof(topic_), "%s/button/%s/wol_%s/config", kHaPrefix, nodeId_, oid);
+        objectId(h.name, pub_.announced[n].data(), pub_.announced[n].size());
+        const char* oid = pub_.announced[n].data();
+        snprintf(pub_.topic.data(), pub_.topic.size(), "%s/button/%s/wol_%s/config", kHaPrefix, nodeId_, oid);
         if (watchOnly(h)) {
-            buf_[0] = '\0';  // nothing to wake: no button
+            pub_.buf[0] = '\0';  // nothing to wake: no button
         } else {
-            snprintf(buf_, sizeof(buf_),
+            snprintf(pub_.buf.data(), pub_.buf.size(),
                      "{\"name\":\"Wake %s\",\"uniq_id\":\"%s_wol_%s\",\"cmd_t\":\"%s/wol/%s/set\","
                      "\"pl_prs\":\"wake\",\"icon\":\"mdi:power\",%s}",
-                     h.name, nodeId_, oid, prefix_, h.name, dev_);
+                     h.name, nodeId_, oid, prefix_, h.name, pub_.dev.data());
         }
-        if (!paced(topic_, buf_)) return false;
-        snprintf(topic_, sizeof(topic_), "%s/binary_sensor/%s/wol_%s/config", kHaPrefix, nodeId_, oid);
+        if (!paced(pub_.topic.data(), pub_.buf.data())) return false;
+        snprintf(pub_.topic.data(), pub_.topic.size(), "%s/binary_sensor/%s/wol_%s/config", kHaPrefix, nodeId_, oid);
         if (h.ip) {
-            snprintf(buf_, sizeof(buf_),
+            snprintf(pub_.buf.data(), pub_.buf.size(),
                      "{\"name\":\"%s online\",\"uniq_id\":\"%s_wol_%s_online\",\"stat_t\":\"%s/wol/%s/state\","
                      "\"pl_on\":\"online\",\"pl_off\":\"offline\",\"dev_cla\":\"connectivity\",%s}",
-                     h.name, nodeId_, oid, prefix_, h.name, dev_);
+                     h.name, nodeId_, oid, prefix_, h.name, pub_.dev.data());
         } else {
-            buf_[0] = '\0';
+            pub_.buf[0] = '\0';
         }
-        if (!paced(topic_, buf_)) return false;
+        if (!paced(pub_.topic.data(), pub_.buf.data())) return false;
     }
-    for (size_t i = n; i < WolService::kCapacity; i++) announced_[i][0] = '\0';
+    for (size_t i = n; i < WolService::kCapacity; i++) pub_.announced[i][0] = '\0';
     ESP_LOGI(TAG, "Home Assistant discovery sent (%u WoL hosts)", static_cast<unsigned>(n));
     return true;
 }
@@ -287,9 +287,9 @@ void MqttBridge::tick()
     if (ha_) {
         // Re-announce when the WoL host list changed (names and IPs).
         const uint32_t h = wol_.fingerprint();
-        if (announceNow_.exchange(false) || h != hostsHash_) {
+        if (announceNow_.exchange(false) || h != pub_.hostsHash) {
             if (announce()) {
-                hostsHash_ = h;
+                pub_.hostsHash = h;
                 statsNow_ = true;  // fresh states right after announcing
             } else {
                 announceNow_ = true;  // broker gone or slow: again on the next tick
@@ -297,15 +297,16 @@ void MqttBridge::tick()
         }
     }
     // Switch changed elsewhere (web UI, pause ending): tell Home Assistant now.
-    if (hooks_.blocking && lastBlocking_ >= 0 && hooks_.blocking(hooks_.ctx) != (lastBlocking_ == 1))
+    if (hooks_.blocking && pub_.lastBlocking >= 0 && hooks_.blocking(hooks_.ctx) != (pub_.lastBlocking == 1))
         publishBlocking();
-    if (statsNow_.exchange(false) || ++ticks_ >= kStatsEveryTicks) {
-        ticks_ = 0;
+    ++pub_.ticks;
+    if (statsNow_.exchange(false) || pub_.ticks >= kStatsEveryTicks) {
+        pub_.ticks = 0;
         publishBlocking();
         if (hooks_.stats) {
-            hooks_.stats(hooks_.ctx, buf_, sizeof(buf_));
-            snprintf(topic_, sizeof(topic_), "%s/stats", prefix_);
-            enqueue(topic_, buf_, false);
+            hooks_.stats(hooks_.ctx, pub_.buf.data(), pub_.buf.size());
+            snprintf(pub_.topic.data(), pub_.topic.size(), "%s/stats", prefix_);
+            enqueue(pub_.topic.data(), pub_.buf.data(), false);
         }
     }
 }
@@ -329,7 +330,7 @@ void MqttBridge::handleEvent(int32_t id, void* data)
         watchOnlyNow_ = true;
         announceNow_ = ha_;
         statsNow_ = true;
-        if (task_) xTaskNotifyGive(static_cast<TaskHandle_t>(task_));
+        if (task_) xTaskNotifyGive(task_);
         ESP_LOGI(TAG, "connected%s", ha_ ? ", Home Assistant discovery on" : "");
     } else if (id == MQTT_EVENT_DISCONNECTED) {
         connected_ = false;
