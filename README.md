@@ -323,7 +323,9 @@ colours so you can confirm. Pins used by flash or PSRAM are refused. Off by defa
 
 ## Wake-on-LAN
 
-Add a host under **Wake-on-LAN** (name, MAC, optional IP and port) and press **Wake**.
+Add a host under **Wake-on-LAN** (name, MAC, optional IP, port and how long to wait)
+and press **Wake**. **Edit** fills the form with a host's details; saving under the same
+name replaces it.
 
 - **Online check:** with an IP the device checks the host every 30 s, by ping, or by
   TCP connect when you give a port (e.g. 3389 Remote Desktop, 22 SSH, 445 file
@@ -331,21 +333,24 @@ Add a host under **Wake-on-LAN** (name, MAC, optional IP and port) and press **W
   means the service is ready. A host goes offline only after two failed checks.
 - **Wake and verify:** *Wake* (also from MQTT / Home Assistant) checks first and does
   nothing if the host is already up; otherwise it sends the magic packets, checks
-  every 3 s (resending at 20 s and 60 s) and reports "online after N s" or "no answer
-  after 3 min". The PC needs wired Ethernet with WoL enabled in BIOS/UEFI and on
-its network adapter.
+  every 3 s (resending at 20 s, 60 s and then every 2 minutes) and reports "online
+  after N s" or "no answer after 3 min". The wait is 3 minutes unless you set another
+  one for that host (1 to 60 minutes: a PC that installs updates on boot may need
+  longer). **Cancel** stops waiting. The PC needs wired Ethernet with WoL enabled in
+  BIOS/UEFI and on its network adapter.
 
 **From anywhere:** set an MQTT broker in Settings (TLS recommended, e.g. a free
 EMQX Cloud Serverless or HiveMQ Cloud deployment, or your Home Assistant's Mosquitto). Then:
 
 | Topic | Direction | Payload |
 |---|---|---|
-| `sinkhole/wol/<name>/set` | you → device | anything: wakes `<name>` |
+| `sinkhole/wol/<name>/set` | you → device | anything: wakes `<name>`; `cancel` stops waiting |
 | `sinkhole/wol/<name>/state` | device → you | `online` / `offline` (retained) |
+| `sinkhole/wol/<name>/result` | device → you | `waking`, `online after 41 s`, `no answer after 3 min`, `cancelled`, `already online`... (retained) |
 | `sinkhole/status` | device → you | `online` / `offline` (LWT, retained) |
 | `sinkhole/blocking/set` | you → device | `ON` / `OFF` |
 | `sinkhole/blocking` | device → you | `ON` / `OFF` (retained, on every change) |
-| `sinkhole/stats` | device → you | `{"blocked","allowed","percent","domains","clients"}` every 60 s |
+| `sinkhole/stats` | device → you | `{"blocked","allowed","percent","domains","clients","uptime","restart"}` every 60 s |
 
 ```bash
 mosquitto_pub -h broker -p 8883 -u user -P pass -t sinkhole/wol/office-pc/set -m wake

@@ -1455,7 +1455,9 @@ esp_err_t WebServer::getWol(httpd_req_t* req)
             .ip("ip", snap[i].host.ip)
             .boolean("online", snap[i].online)
             .num("port", snap[i].host.port)
+            .num("timeout", WolService::timeoutOf(snap[i].host))
             .boolean("waking", snap[i].waking)
+            .num("wakeLeft", snap[i].waking && snap[i].wakeDeadline > now ? snap[i].wakeDeadline - now : 0)
             .str("result", snap[i].result)
             .num("resultAgo", snap[i].resultAt ? static_cast<int64_t>(now - snap[i].resultAt) : -1)
             .num("wokeAgo", snap[i].lastWake ? static_cast<int64_t>(now - snap[i].lastWake) : -1)
@@ -1465,46 +1467,67 @@ esp_err_t WebServer::getWol(httpd_req_t* req)
     return j.finish();
 }
 
+// action=add: name, mac, ip, port, timeout (seconds) from the form.
+esp_err_t WebServer::addWolHost(httpd_req_t* req, const char* form)
+{
+    std::array<char, 32> name{};
+    std::array<char, 48> mac{};  // "aa%3Abb%3A..." as browsers send it: 27+ before decoding
+    std::array<char, 20> ip{};
+    std::array<char, 8> port{};
+    std::array<char, 8> wait{};
+    field(form, "name", name.data(), name.size());
+    field(form, "mac", mac.data(), mac.size());
+    field(form, "ip", ip.data(), ip.size());
+    field(form, "port", port.data(), port.size());
+    field(form, "timeout", wait.data(), wait.size());
+    WolHost h{};
+    copyStr(h.name, name.data());
+    if (!parseMac(mac.data(), h.mac)) return sendError(req, "400 Bad Request", "valid MAC required");
+    if (ip[0] && !parseIp4(ip.data(), h.ip)) return sendError(req, "400 Bad Request", "invalid IP");
+    const unsigned long p = strtoul(port.data(), nullptr, 10);
+    if (p > 65535) return sendError(req, "400 Bad Request", "invalid port");
+    if (p && !h.ip) return sendError(req, "400 Bad Request", "a port check needs the IP");
+    h.port = static_cast<uint16_t>(p);
+    const unsigned long w = strtoul(wait.data(), nullptr, 10);  // seconds, empty = default
+    if (w && (w < 30 || w > 3600)) return sendError(req, "400 Bad Request", "wait: 30 s to 60 min");
+    h.timeout = static_cast<uint16_t>(w);
+    const esp_err_t err = d_.wol.add(h);
+    if (err == ESP_ERR_INVALID_ARG) return sendError(req, "400 Bad Request", "name: no spaces, '/', '+' or '#'");
+    if (err == ESP_ERR_NO_MEM) return sendError(req, "409 Conflict", "host list is full");
+    return sendOk(req);
+}
+
 esp_err_t WebServer::postWol(httpd_req_t* req)
 {
-    char form[kFormMax], action[16], name[32] = "", macStr[24] = "", ipStr[20] = "", portStr[8] = "";
-    if (readForm(req, form, sizeof(form)) < 0 || !field(form, "action", action, sizeof(action)))
+    static std::array<char, kFormMax> form;  // httpd task only
+    std::array<char, 16> action{};
+    std::array<char, 32> name{};
+    std::array<char, 48> mac{};
+    if (readForm(req, form.data(), form.size()) < 0 || !field(form.data(), "action", action.data(), action.size()))
         return sendError(req, "400 Bad Request", "action is required");
-    field(form, "name", name, sizeof(name));
-    field(form, "mac", macStr, sizeof(macStr));
-    field(form, "ip", ipStr, sizeof(ipStr));
-    field(form, "port", portStr, sizeof(portStr));
-
-    if (strcmp(action, "wake") == 0) {
+    field(form.data(), "name", name.data(), name.size());
+    if (strcmp(action.data(), "add") == 0) return addWolHost(req, form.data());
+    if (strcmp(action.data(), "wake") == 0) {
         if (name[0]) {
             bool verifying = false;
-            esp_err_t err = d_.wol.wakeAndVerify(name, &verifying);
+            const esp_err_t err = d_.wol.wakeAndVerify(name.data(), &verifying);
             if (err == ESP_ERR_INVALID_STATE) return sendOk(req, "already online");
             if (err == ESP_ERR_NOT_FOUND) return sendError(req, "404 Not Found", "unknown host");
             if (err != ESP_OK) return sendError(req, "500 Internal Server Error", "send failed");
             return sendOk(req, verifying ? "waking; checking until it answers" : "magic packet sent");
         }
-        uint8_t mac[6];
-        if (!parseMac(macStr, mac)) return sendError(req, "400 Bad Request", "name or mac required");
-        return d_.wol.wakeMac(mac) == ESP_OK ? sendOk(req, "magic packet sent")
-                                              : sendError(req, "500 Internal Server Error", "send failed");
+        std::array<uint8_t, 6> raw{};
+        field(form.data(), "mac", mac.data(), mac.size());
+        if (!parseMac(mac.data(), raw.data())) return sendError(req, "400 Bad Request", "name or mac required");
+        return d_.wol.wakeMac(raw.data()) == ESP_OK ? sendOk(req, "magic packet sent")
+                                                     : sendError(req, "500 Internal Server Error", "send failed");
     }
-    if (strcmp(action, "add") == 0) {
-        WolHost h{};
-        copyStr(h.name, name);
-        if (!parseMac(macStr, h.mac)) return sendError(req, "400 Bad Request", "valid MAC required");
-        if (ipStr[0] && !parseIp4(ipStr, h.ip)) return sendError(req, "400 Bad Request", "invalid IP");
-        const unsigned long port = strtoul(portStr, nullptr, 10);
-        if (port > 65535) return sendError(req, "400 Bad Request", "invalid port");
-        if (port && !h.ip) return sendError(req, "400 Bad Request", "a port check needs the IP");
-        h.port = static_cast<uint16_t>(port);
-        esp_err_t err = d_.wol.add(h);
-        if (err == ESP_ERR_INVALID_ARG) return sendError(req, "400 Bad Request", "name: no spaces, '/', '+' or '#'");
-        if (err == ESP_ERR_NO_MEM) return sendError(req, "409 Conflict", "host list is full");
-        return sendOk(req);
-    }
-    if (strcmp(action, "remove") == 0) {
-        return d_.wol.remove(name) == ESP_OK ? sendOk(req) : sendError(req, "404 Not Found", "unknown host");
+    if (strcmp(action.data(), "remove") == 0)
+        return d_.wol.remove(name.data()) == ESP_OK ? sendOk(req) : sendError(req, "404 Not Found", "unknown host");
+    if (strcmp(action.data(), "cancel") == 0) {
+        const esp_err_t err = d_.wol.cancel(name.data());
+        if (err == ESP_ERR_NOT_FOUND) return sendError(req, "404 Not Found", "unknown host");
+        return sendOk(req, err == ESP_OK ? "cancelled" : "not waking");
     }
     return sendError(req, "400 Bad Request", "unknown action");
 }

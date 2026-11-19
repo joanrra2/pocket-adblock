@@ -1,3 +1,4 @@
+#include <array>
 #include <cstring>
 
 #include <cerrno>
@@ -145,6 +146,42 @@ void WolService::setResultLocked(int i, const char* text)
 {
     copyStr(hosts_[i].result, text);
     hosts_[i].resultAt = uptimeSeconds();
+    hosts_[i].resultNew = true;
+}
+
+uint32_t WolService::timeoutOf(const WolHost& h)
+{
+    return h.timeout >= 30 && h.timeout <= 3600 ? h.timeout : kVerifySeconds;
+}
+
+esp_err_t WolService::cancel(const char* name)
+{
+    LockGuard g(mu_);
+    const int i = findLocked(name);
+    if (i < 0) return ESP_ERR_NOT_FOUND;
+    if (!hosts_[i].waking) return ESP_ERR_INVALID_STATE;
+    hosts_[i].waking = false;
+    setResultLocked(i, "cancelled");
+    ESP_LOGI(TAG, "wake of %s cancelled", name);
+    return ESP_OK;
+}
+
+void WolService::reportResults()
+{
+    if (!resultListener_) return;
+    for (size_t i = 0; i < kCapacity; i++) {
+        WolHost h;
+        std::array<char, sizeof(WolHostState::result)> text{};
+        {
+            LockGuard g(mu_);
+            if (i >= count_) break;
+            if (!hosts_[i].resultNew) continue;
+            hosts_[i].resultNew = false;
+            h = hosts_[i].host;
+            copyStr(text.data(), text.size(), hosts_[i].result);
+        }
+        resultListener_(resultCtx_, h.name, text.data());
+    }
 }
 
 esp_err_t WolService::wakeAndVerify(const char* name, bool* verifying)
@@ -183,7 +220,7 @@ esp_err_t WolService::wakeAndVerify(const char* name, bool* verifying)
     if (i >= 0 && err == ESP_OK) {
         if (verifying) *verifying = true;
         hosts_[i].waking = true;
-        hosts_[i].wakeDeadline = uptimeSeconds() + kVerifySeconds;
+        hosts_[i].wakeDeadline = uptimeSeconds() + timeoutOf(hosts_[i].host);
         setResultLocked(i, "waking");
     }
     return err;
@@ -295,6 +332,7 @@ void WolService::run()
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(1000));
         tick++;
+        reportResults();
         if (!wifi_.connected()) continue;
         const bool routine = tick % (kProbeIntervalMs / 1000) == 0;
         for (size_t i = 0; i < kCapacity; i++) {
@@ -311,7 +349,9 @@ void WolService::run()
             if (!h.ip || !(routine || (waking && tick % 3 == 0))) continue;
             const uint32_t now = uptimeSeconds();
             const uint32_t age = now - since;
-            if (waking && ((age >= 20 && age < 23) || (age >= 60 && age < 63))) {
+            // Resend at 20 s and 60 s, then every 2 minutes for long waits.
+            const bool resend = (age >= 20 && age < 23) || (age >= 60 && age < 63) || (age >= 180 && (age - 60) % 120 < 3);
+            if (waking && resend) {
                 uint8_t mac[6];
                 memcpy(mac, h.mac, 6);
                 wakeMac(mac);  // some network cards miss the first packets
@@ -336,8 +376,14 @@ void WolService::run()
                         hosts_[j].waking = false;
                         setResultLocked(j, text);
                     } else if (hosts_[j].waking && now >= hosts_[j].wakeDeadline) {
+                        const uint32_t waited = timeoutOf(hosts_[j].host);
+                        std::array<char, 48> text{};
+                        if (waited % 60 == 0)
+                            snprintf(text.data(), text.size(), "no answer after %u min", static_cast<unsigned>(waited / 60));
+                        else
+                            snprintf(text.data(), text.size(), "no answer after %u s", static_cast<unsigned>(waited));
                         hosts_[j].waking = false;
-                        setResultLocked(j, "no answer after 3 min");
+                        setResultLocked(j, text.data());
                     }
                 }
             }
