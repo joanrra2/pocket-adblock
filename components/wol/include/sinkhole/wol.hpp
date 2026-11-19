@@ -4,6 +4,7 @@
 // woken from outside the LAN without opening any port (outbound connection).
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -137,7 +138,7 @@ private:
     WifiManager& wifi_;
     Mutex mu_;
     WolHostState hosts_[kCapacity]{};
-    static WolHost stored_[kCapacity];  // NVS layout scratch, under mu_ (one service)
+    static std::array<WolHost, kCapacity> stored_;  // NVS layout scratch, under mu_ (one service)
     size_t count_ = 0;
     Listener listener_ = nullptr;
     void* listenerCtx_ = nullptr;

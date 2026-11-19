@@ -62,7 +62,11 @@ static void testHashTable()
 
     // More suffixes than fit: the registrable domain must still be checked.
     std::string deep;
-    for (int i = 0; i < 20; i++) deep += "l" + std::to_string(i) + ".";
+    for (int i = 0; i < 20; i++) {
+        deep += 'l';
+        deep += std::to_string(i);
+        deep += '.';
+    }
     deep += "tracker.com";
     std::array<uint64_t, kMaxSuffixes> hs{};
     CHECK(suffixHashes(deep.c_str(), deep.size(), hs) == kMaxSuffixes);

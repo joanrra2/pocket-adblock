@@ -47,14 +47,14 @@ uint16_t inetChecksum(const void* data, size_t len)
 // Stored-host buffer for begin() and saveLocked(), only used under mu_: keeps
 // up to 3 KB (64 hosts) off the main and httpd task stacks.
 static_assert(sizeof(OldWolHost) <= sizeof(WolHost), "in-place migration needs the new layout to be larger");
-WolHost WolService::stored_[WolService::kCapacity];
+std::array<WolHost, WolService::kCapacity> WolService::stored_;
 
 // Older firmware (or an old backup restored) wrote hosts without a port under
 // the old key: convert them in place and drop the old entry once saved.
 void WolService::migrateOldHostsLocked()
 {
     if (!nvs::blobSize(kOldHostsKey)) return;
-    auto* raw = reinterpret_cast<uint8_t*>(stored_);  // NOSONAR byte view of the buffer for the in-place conversion
+    auto* raw = reinterpret_cast<uint8_t*>(stored_.data());  // NOSONAR byte view of the buffer for the in-place conversion
     size_t n = 0;
     const esp_err_t err = nvs::loadBlob(kOldHostsKey, raw, sizeof(stored_), &n);
     if (err != ESP_OK) {  // keep the old key: a later firmware may still read it
@@ -71,7 +71,7 @@ void WolService::migrateOldHostsLocked()
         memcpy(stored_[i].mac, o.mac, sizeof(o.mac));
         stored_[i].ip = o.ip;
     }
-    if (nvs::saveBlob(kHostsKey, stored_, m * sizeof(WolHost)) != ESP_OK) return;
+    if (nvs::saveBlob(kHostsKey, stored_.data(), m * sizeof(WolHost)) != ESP_OK) return;
     nvs::eraseKey(kOldHostsKey);
     ESP_LOGI(TAG, "migrated %u hosts", static_cast<unsigned>(m));
 }
@@ -82,7 +82,7 @@ esp_err_t WolService::begin()
         LockGuard g(mu_);
         migrateOldHostsLocked();
         size_t n = 0;
-        if (nvs::loadBlob(kHostsKey, stored_, sizeof(stored_), &n) != ESP_OK) n = 0;
+        if (nvs::loadBlob(kHostsKey, stored_.data(), sizeof(stored_), &n) != ESP_OK) n = 0;
         count_ = n / sizeof(WolHost);
         for (size_t i = 0; i < count_; i++) {
             hosts_[i] = WolHostState{};
@@ -103,7 +103,7 @@ int WolService::findLocked(const char* name)
 esp_err_t WolService::saveLocked()
 {
     for (size_t i = 0; i < count_; i++) stored_[i] = hosts_[i].host;
-    return nvs::saveBlob(kHostsKey, stored_, count_ * sizeof(WolHost));
+    return nvs::saveBlob(kHostsKey, stored_.data(), count_ * sizeof(WolHost));
 }
 
 esp_err_t WolService::add(const WolHost& h)

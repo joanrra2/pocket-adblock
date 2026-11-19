@@ -325,7 +325,7 @@ namespace {
 // Stored-settings buffer for load() and revertLocked(), only used under mu_
 // (keeps ~1.5 KB off the stack). Room for fields a newer firmware appended,
 // so a rollback keeps the settings.
-std::array<uint8_t, sizeof(Settings) + 256> gRaw;
+std::array<uint8_t, sizeof(Settings) + 256> gRaw;  // NOSONAR a scratch buffer, written on every load: const is not possible
 }  // namespace
 
 esp_err_t Config::load()
