@@ -145,7 +145,7 @@ struct HostQuery {
     bool found;
 };
 
-esp_err_t hostInLwip(void* ctx)
+esp_err_t hostInLwip(void* ctx)  // NOSONAR signature required by esp_netif_tcpip_exec
 {
     auto* q = static_cast<HostQuery*>(ctx);
     q->found = q->dhcps && dhcps_get_hostname_on_mac(q->dhcps, q->mac, q->out, q->cap);
