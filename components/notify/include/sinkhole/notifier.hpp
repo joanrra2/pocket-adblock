@@ -116,7 +116,10 @@ private:
     std::unique_ptr<Http> sendHttp_;
     char* buf_ = nullptr;  // response buffer (PSRAM when there is some)
     static constexpr size_t kBufSize = 6144;
-    StaticTask<6144> task_;
+    // Measured on an S3 with 6144: 1376 bytes left after ntfy sends (a TLS
+    // handshake each), and a Telegram send has ~1.3 KB more locals. Same
+    // depth as the updater's task, which does the same work.
+    StaticTask<8192> task_;
 };
 
 }  // namespace sinkhole
