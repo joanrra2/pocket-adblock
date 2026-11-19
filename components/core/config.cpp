@@ -290,6 +290,7 @@ bool Config::upgrade(const uint8_t* raw, size_t n, Settings& out)
     out.mqttPass[sizeof(out.mqttPass) - 1] = '\0';
     out.mqttPrefix[sizeof(out.mqttPrefix) - 1] = '\0';
     out.dotHost[sizeof(out.dotHost) - 1] = '\0';
+    out.fwManifestUrl[sizeof(out.fwManifestUrl) - 1] = '\0';
     // Older firmware kept the admin password in plain text: hash it. The plain
     // copy stays until the firmware is confirmed (scrubLegacyAdminPassword), so
     // a rollback to the previous image still accepts it. The default password
@@ -320,17 +321,22 @@ esp_err_t Config::loadOversized(uint8_t* raw, size_t cap, size_t& n)
     return ESP_OK;
 }
 
+namespace {
+// Stored-settings buffer for load() and revertLocked(), only used under mu_
+// (keeps ~1.5 KB off the stack). Room for fields a newer firmware appended,
+// so a rollback keeps the settings.
+std::array<uint8_t, sizeof(Settings) + 256> gRaw;
+}  // namespace
+
 esp_err_t Config::load()
 {
     LockGuard g(mu_);
     loadNotifyLocked();
-    // Only used here, under mu_ (keeps ~1 KB off the stack). Room for fields a
-    // newer firmware appended, so a rollback keeps the settings.
-    static uint8_t raw[sizeof(Settings) + 256];
-    memset(raw, 0, sizeof(raw));
+    uint8_t* raw = gRaw.data();
+    memset(raw, 0, sizeof(gRaw));
     size_t n = 0;
-    esp_err_t err = nvs::loadBlob(kSettingsKey, raw, sizeof(raw), &n);
-    if (err == ESP_ERR_NVS_INVALID_LENGTH) err = loadOversized(raw, sizeof(raw), n);
+    esp_err_t err = nvs::loadBlob(kSettingsKey, raw, sizeof(gRaw), &n);
+    if (err == ESP_ERR_NVS_INVALID_LENGTH) err = loadOversized(raw, sizeof(gRaw), n);
     uint16_t version = 0;
     if (n >= sizeof(version)) memcpy(&version, raw, sizeof(version));
     if (err != ESP_OK || !upgrade(raw, n, s_)) {
@@ -442,6 +448,22 @@ void Config::scrubLegacyAdminPassword()
     if (s_.adminIter == 0 || s_.adminPass[0] == kScrubbed) return;
     scrub(s_.adminPass);
     if (saveLocked() == ESP_OK) ESP_LOGI(TAG, "plain admin password removed");
+}
+
+// A save failed (flash full or worn): put RAM back to the stored settings.
+// If they can't be read either, RAM keeps the change until the restart.
+void Config::revertLocked()
+{
+    size_t n = 0;
+    uint16_t version = 0;
+    if (nvs::loadBlob(kSettingsKey, gRaw.data(), gRaw.size(), &n) == ESP_OK && n >= sizeof(version)) {
+        memcpy(&version, gRaw.data(), sizeof(version));
+        const size_t valid = validBytes(version);
+        // Checked first: upgrade() resets its output to defaults on a bad blob.
+        if (valid && n >= valid && upgrade(gRaw.data(), n, s_))
+            ESP_LOGW(TAG, "change not saved; kept the stored settings");
+    }
+    secureWipe(gRaw.data(), gRaw.size());  // passwords
 }
 
 esp_err_t Config::saveLocked()

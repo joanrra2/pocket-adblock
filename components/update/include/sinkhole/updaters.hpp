@@ -24,6 +24,8 @@ public:
     void abort();
     bool active() const { return handle_ != 0; }
 
+    // At boot, while the heap is whole: restartIn() then needs no allocation.
+    static esp_err_t initRestartTimer();
     static void restartIn(uint32_t ms, BootLog::Cause cause);
     static const char* version();
     // Rollback support: a freshly flashed image boots in PENDING_VERIFY state.

@@ -86,6 +86,7 @@ private:
     static bool field(const char* form, const char* key, char* out, size_t outLen);
     esp_err_t sendOk(httpd_req_t* req, const char* message = "ok");
     esp_err_t sendError(httpd_req_t* req, const char* status, const char* message);
+    esp_err_t sendNotSaved(httpd_req_t* req);  // a settings write to flash failed
 
     esp_err_t getIndex(httpd_req_t* req);
     esp_err_t getStatus(httpd_req_t* req);

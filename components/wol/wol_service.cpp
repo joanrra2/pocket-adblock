@@ -44,34 +44,49 @@ uint16_t inetChecksum(const void* data, size_t len)
 }
 }  // namespace
 
+// Stored-host buffer for begin() and saveLocked(), only used under mu_: keeps
+// up to 3 KB (64 hosts) off the main and httpd task stacks.
+static_assert(sizeof(OldWolHost) <= sizeof(WolHost), "in-place migration needs the new layout to be larger");
+WolHost WolService::stored_[WolService::kCapacity];
+
+// Older firmware (or an old backup restored) wrote hosts without a port under
+// the old key: convert them in place and drop the old entry once saved.
+void WolService::migrateOldHostsLocked()
+{
+    if (!nvs::blobSize(kOldHostsKey)) return;
+    auto* raw = reinterpret_cast<uint8_t*>(stored_);  // NOSONAR byte view of the buffer for the in-place conversion
+    size_t n = 0;
+    const esp_err_t err = nvs::loadBlob(kOldHostsKey, raw, sizeof(stored_), &n);
+    if (err != ESP_OK) {  // keep the old key: a later firmware may still read it
+        ESP_LOGE(TAG, "old hosts not migrated: %s", esp_err_to_name(err));
+        return;
+    }
+    const size_t m = n / sizeof(OldWolHost);
+    // Last to first: each new entry only overwrites old entries already converted.
+    for (size_t i = m; i-- > 0;) {
+        OldWolHost o;
+        memcpy(&o, raw + i * sizeof(OldWolHost), sizeof(o));
+        stored_[i] = WolHost{};
+        memcpy(stored_[i].name, o.name, sizeof(o.name));
+        memcpy(stored_[i].mac, o.mac, sizeof(o.mac));
+        stored_[i].ip = o.ip;
+    }
+    if (nvs::saveBlob(kHostsKey, stored_, m * sizeof(WolHost)) != ESP_OK) return;
+    nvs::eraseKey(kOldHostsKey);
+    ESP_LOGI(TAG, "migrated %u hosts", static_cast<unsigned>(m));
+}
+
 esp_err_t WolService::begin()
 {
     {
         LockGuard g(mu_);
-        WolHost stored[kCapacity];
+        migrateOldHostsLocked();
         size_t n = 0;
-        // Older firmware (or an old backup restored) wrote hosts without a
-        // port under the old key: convert them and drop the old entry.
-        if (nvs::blobSize(kOldHostsKey)) {
-            OldWolHost old[kCapacity];
-            nvs::loadBlob(kOldHostsKey, old, sizeof(old), &n);
-            const size_t m = n / sizeof(OldWolHost);
-            for (size_t i = 0; i < m; i++) {
-                stored[i] = WolHost{};
-                memcpy(stored[i].name, old[i].name, sizeof(old[i].name));
-                memcpy(stored[i].mac, old[i].mac, 6);
-                stored[i].ip = old[i].ip;
-            }
-            nvs::saveBlob(kHostsKey, stored, m * sizeof(WolHost));
-            nvs::eraseKey(kOldHostsKey);
-            ESP_LOGI(TAG, "migrated %u hosts", static_cast<unsigned>(m));
-        }
-        n = 0;
-        nvs::loadBlob(kHostsKey, stored, sizeof(stored), &n);
+        if (nvs::loadBlob(kHostsKey, stored_, sizeof(stored_), &n) != ESP_OK) n = 0;
         count_ = n / sizeof(WolHost);
         for (size_t i = 0; i < count_; i++) {
             hosts_[i] = WolHostState{};
-            hosts_[i].host = stored[i];
+            hosts_[i].host = stored_[i];
             hosts_[i].host.name[sizeof(hosts_[i].host.name) - 1] = '\0';
         }
     }
@@ -87,9 +102,8 @@ int WolService::findLocked(const char* name)
 
 esp_err_t WolService::saveLocked()
 {
-    WolHost stored[kCapacity];
-    for (size_t i = 0; i < count_; i++) stored[i] = hosts_[i].host;
-    return nvs::saveBlob(kHostsKey, stored, count_ * sizeof(WolHost));
+    for (size_t i = 0; i < count_; i++) stored_[i] = hosts_[i].host;
+    return nvs::saveBlob(kHostsKey, stored_, count_ * sizeof(WolHost));
 }
 
 esp_err_t WolService::add(const WolHost& h)

@@ -5,6 +5,7 @@
 //
 // Compatible with esp32-c3-adblock's blocklist.bin (raw, headerless, same hash).
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -397,6 +398,21 @@ inline bool forEachSuffix(const char* domain, size_t len, F&& fn)
         p = next;
     }
     return false;
+}
+
+// Hashes of a domain's suffixes, for the list lookups. A name can have more
+// suffixes than fit: the LAST ones (the registrable domain and its nearest
+// parents) are kept, so extra leading labels can't push them out of the check.
+constexpr size_t kMaxSuffixes = 16;
+inline size_t suffixHashes(const char* domain, size_t len, std::array<uint64_t, kMaxSuffixes>& out)
+{
+    size_t n = 0;
+    forEachSuffix(domain, len, [&out, &n](const char* s, size_t l) {
+        out[n % kMaxSuffixes] = fnv1a40(s, l);
+        n++;
+        return false;
+    });
+    return n < kMaxSuffixes ? n : kMaxSuffixes;
 }
 
 }  // namespace sinkhole

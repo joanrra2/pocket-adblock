@@ -41,6 +41,7 @@ void App::start()
 
     ESP_ERROR_CHECK(nvs::init());
     BootLog::begin(FirmwareUpdater::version());
+    if (FirmwareUpdater::initRestartTimer() != ESP_OK) ESP_LOGE(TAG, "no restart timer: restarts will block the caller");
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
@@ -213,8 +214,8 @@ void App::onCommand(void* ctx, const char* command, char* reply, size_t cap)  //
         snprintf(reply, cap, "Blocking paused for %lu min.", m);
     } else if (strcmp(v, "resume") == 0) {
         self->filter_.setEnabled(true);
-        self->config_.modify([](Settings& s) { s.blocking = true; });
-        snprintf(reply, cap, "Blocking is on again.");
+        const bool saved = self->config_.modify([](Settings& s) { s.blocking = true; }) == ESP_OK;
+        snprintf(reply, cap, saved ? "Blocking is on again." : "Blocking is on again, until a restart (could not save).");
     } else {
         snprintf(reply, cap, "Unknown command. Try: help");
     }
@@ -347,7 +348,9 @@ void App::hookSetBlocking(void* ctx, bool on)
 {
     auto* self = static_cast<App*>(ctx);
     self->filter_.setEnabled(on);
-    self->config_.modify([on](Settings& s) { s.blocking = on; });
+    // Config logs a failed save; the switch still applies until a restart.
+    if (self->config_.modify([on](Settings& s) { s.blocking = on; }) != ESP_OK)
+        ESP_LOGW(TAG, "blocking %s not saved", on ? "on" : "off");
 }
 
 size_t App::hookStats(void* ctx, char* out, size_t cap)
@@ -397,15 +400,18 @@ void App::startRollbackGuard()
     args.callback = [](void* arg) {
         auto* self = static_cast<App*>(arg);
         if (!self->dns_.running()) return;
-        FirmwareUpdater::markValid();
-        // The plain admin password an upgrade kept for a rollback can go now.
-        // An NVS write is too much for the esp_timer task's stack: own task.
-        xTaskCreate(
+        // Flash writes (otadata, and dropping the plain admin password an
+        // upgrade kept for a rollback) are too much for the shared esp_timer
+        // task's stack: a short-lived task of its own.
+        const BaseType_t ok = xTaskCreate(
             [](void* arg) {  // NOSONAR FreeRTOS task entry: the signature takes void*
+                FirmwareUpdater::markValid();
                 static_cast<App*>(arg)->config_.scrubLegacyAdminPassword();
                 vTaskDelete(nullptr);
             },
-            "scrub", 4096, self, 2, nullptr);
+            "confirm", 4096, self, 2, nullptr);
+        // Low memory: still confirm the image (the password goes at the next boot).
+        if (ok != pdPASS) FirmwareUpdater::markValid();
     };
     esp_timer_handle_t t = nullptr;
     if (esp_timer_create(&args, &t) == ESP_OK) esp_timer_start_once(t, kHealthyAfterUs);
