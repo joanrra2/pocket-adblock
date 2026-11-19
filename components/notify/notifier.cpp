@@ -14,12 +14,26 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "sinkhole/memory.hpp"
 #include "sinkhole/notify_parse.hpp"
 #include "sinkhole/text.hpp"
 
 namespace sinkhole {
 
 namespace {
+constexpr int kLowMemory = -1;  // a request not tried: no room for a TLS session (tlsRoom)
+
+// Why a send failed, for the status page and the log.
+void failReason(int status, char* out, size_t cap)
+{
+    if (status == kLowMemory)
+        copyStr(out, cap, "not enough free memory, try later");
+    else if (status == 0)
+        copyStr(out, cap, "no connection");
+    else
+        snprintf(out, cap, "HTTP %d", status);
+}
+
 constexpr const char* TAG = "notify";
 constexpr uint32_t kPollMs = 15000;  // command check interval
 constexpr UBaseType_t kQueueLen = 8;
@@ -72,7 +86,7 @@ struct Notifier::Http {
         h = nullptr;
     }
 
-    // Returns the HTTP status (0 = no answer); the body (cut to cap - 1) in out.
+    // Returns the HTTP status (0 = no answer, kLowMemory); the body (cut to cap - 1) in out.
     // A kept-open connection the server has meanwhile closed fails on the first
     // write: then once more on a new connection.
     int request(const char* url, esp_http_client_method_t method, const char* body, const char* contentType,
@@ -107,7 +121,9 @@ struct Notifier::Http {
                 const char* const* headers, char* out, size_t cap)
     {
         Body b{out, cap, 0};
+        out[0] = 0;
         if (!h) {
+            if (!tlsRoom()) return kLowMemory;
             esp_http_client_config_t cfg = {};
             cfg.url = url;
             cfg.timeout_ms = 10000;
@@ -279,7 +295,7 @@ bool Notifier::sendNtfy(const Msg& m)
     sendHttp_->close();
     const bool ok = st >= 200 && st < 300;
     std::array<char, 48> why{};
-    if (!ok) snprintf(why.data(), why.size(), st ? "HTTP %d" : "no connection", st);
+    if (!ok) failReason(st, why.data(), why.size());
     note(status_.ntfy, ok, why.data());
     if (!ok) ESP_LOGW(TAG, "ntfy: %s", why.data());
     return ok;
@@ -301,7 +317,7 @@ bool Notifier::sendTelegram(const char* text)
     if (!ok) {
         if (st == 401 || st == 404) copyStr(why.data(), why.size(), "bot token not accepted");
         else if (st == 400 || st == 403) copyStr(why.data(), why.size(), "chat not found: send /start to the bot");
-        else snprintf(why.data(), why.size(), st ? "HTTP %d" : "no connection", st);
+        else failReason(st, why.data(), why.size());
         ESP_LOGW(TAG, "telegram: %s", why.data());
     }
     note(status_.telegram, ok, why.data());

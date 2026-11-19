@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "sdkconfig.h"
 #include "sinkhole/events.hpp"
+#include "sinkhole/memory.hpp"
 #include "sinkhole/text.hpp"
 #include "sinkhole/updaters.hpp"
 
@@ -272,6 +273,11 @@ Updater::ListFetch Updater::downloadList(const char* url, char* why, size_t whyL
 {
     bytes = 0;
     snprintf(why, whyLen, "ok");
+    // Checked here too, so a skipped download doesn't erase the other slot first.
+    if (!tlsRoom()) {
+        snprintf(why, whyLen, "not enough free memory for HTTPS right now");
+        return ListFetch::Failed;
+    }
     esp_err_t err = store_.beginWrite();
     if (err != ESP_OK) {
         snprintf(why, whyLen, "another blocklist update is running");
@@ -453,6 +459,10 @@ esp_err_t Updater::httpGet(const char* url, Sink sink, void* ctx, char* why, siz
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
     cfg.keep_alive_enable = false;
 
+    if (!tlsRoom()) {  // the next scheduled check tries again
+        snprintf(why, whyLen, "not enough free memory for HTTPS right now");
+        return ESP_ERR_NO_MEM;
+    }
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) {
         snprintf(why, whyLen, "http client init failed");

@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "esp_log.h"
+#include "sinkhole/memory.hpp"
 #include "sinkhole/text.hpp"
 
 #ifdef CONFIG_SINKHOLE_DNS_OVER_TLS
@@ -89,6 +90,7 @@ void DotProxy::run()
     static uint8_t buf[2 + 1536];
     char host[64];
     uint32_t lastActivity = 0;
+    uint32_t lowMemoryLogged = 0;
 
     auto disconnect = [&]() {
         if (tls) esp_tls_conn_destroy(tls);
@@ -102,6 +104,15 @@ void DotProxy::run()
             copyStr(host, host_);
         }
         if (!host[0]) return false;
+        // Low on internal RAM: no TLS answer for this query (a backup server,
+        // when set, still answers it; the client retries otherwise).
+        if (!tlsRoom()) {
+            if (const uint32_t now = uptimeSeconds(); lowMemoryLogged == 0 || now - lowMemoryLogged >= 60) {
+                lowMemoryLogged = now ? now : 1;
+                ESP_LOGW(TAG, "not enough free memory for a TLS session, not connecting");
+            }
+            return false;
+        }
         tls = esp_tls_init();
         if (!tls) return false;
         esp_tls_cfg_t cfg = {};

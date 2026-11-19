@@ -44,4 +44,18 @@ inline Region allocTable(size_t elemSize, size_t psramCount, size_t internalCoun
     return r;
 }
 
+// Room to open a TLS session now. mbedTLS takes its 16 KB receive buffer in
+// one piece from internal RAM, and about 36 KB in all by the end of the
+// handshake. Without that room the handshake fails part way, after taking
+// what was left from everything else (DNS included) and leaving holes, so
+// callers skip the connection and try again later instead.
+constexpr size_t kTlsMinFree = 36 * 1024;
+constexpr size_t kTlsMinBlock = 17 * 1024;
+
+inline bool tlsRoom()
+{
+    constexpr uint32_t kCaps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    return heap_caps_get_free_size(kCaps) >= kTlsMinFree && heap_caps_get_largest_free_block(kCaps) >= kTlsMinBlock;
+}
+
 }  // namespace sinkhole

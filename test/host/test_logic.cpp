@@ -1,6 +1,7 @@
 // Host unit tests for the platform-independent parts (hash table, DNS packet
 // handling). No ESP-IDF needed, run from the repo root:
-//   g++ -std=c++17 -Icomponents/blocklist/include -Icomponents/dns/include test/host/test_logic.cpp -o test_logic
+//   g++ -std=c++17 -Icomponents/blocklist/include -Icomponents/dns/include -Icomponents/notify/include
+//       -Icomponents/web/include test/host/test_logic.cpp -o test_logic
 //   ./test_logic [LIST.bin DOMAINS.txt]
 // With a list built by tools/build_blocklist.py and its source domains, it also
 // checks that every domain is blocked (directly or through a listed parent) and
@@ -15,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "sinkhole/backup_reader.hpp"
 #include "sinkhole/bypass_guard.hpp"
 #include "sinkhole/dns_packet.hpp"
 #include "sinkhole/hash_table.hpp"
@@ -603,6 +605,54 @@ static void testNotifyParse()
     CHECK(telegramUpdates(R"({"ok":true,"result":[]})", [](int64_t, int64_t, const char*) {}) == 0);
 }
 
+// Feeds a restore file in pieces of `step` bytes; returns finish().
+static const char* readBackup(BackupReader& r, const std::string& file, size_t step)
+{
+    for (size_t i = 0; i < file.size(); i += step) r.feed(file.data() + i, std::min(step, file.size() - i));
+    return r.finish();
+}
+
+static void testBackupReader()
+{
+    std::array<uint8_t, 256> buf{};
+    // CRLF line ends, a comment with '=', unknown keys, no line end at the end.
+    const std::string good = "# Pocket AdBlock backup = test\r\nformat=1\r\nfirmware=0.6.0\r\nsettings=aGVsbG8=\r\n"
+                             "edition=pro\r\nbanned = AAECAw==";
+    for (size_t step : {size_t{1}, size_t{3}, size_t{7}, good.size()}) {
+        BackupReader r(buf.data(), buf.size());
+        CHECK(readBackup(r, good, step) == nullptr);
+        CHECK(r.count() == 2);
+        if (r.count() != 2) continue;
+        CHECK(std::string(r.item(0).key) == "settings" && r.item(0).len == 5);
+        CHECK(std::memcmp(r.item(0).data, "hello", 5) == 0);
+        CHECK(std::string(r.item(1).key) == "banned" && r.item(1).len == 4);
+        CHECK(r.item(1).data[0] == 0 && r.item(1).data[3] == 3);
+    }
+    // The decoded data always fits the buffer decodedCap() gives.
+    CHECK(BackupReader::decodedCap(good.size()) >= 9);
+
+    auto why = [&buf](const std::string& file) {
+        BackupReader r(buf.data(), buf.size());
+        const char* w = readBackup(r, file, 5);
+        return std::string(w ? w : "");
+    };
+    const std::string damaged = "a section of the file is damaged";
+    CHECK(why("settings=aGVsbG8=\n") == "not a Pocket AdBlock backup (format=1 missing)");
+    CHECK(why("format=10\nsettings=aGVsbG8=\n") == "not a Pocket AdBlock backup (format=1 missing)");
+    CHECK(why("format=1\n# only a comment\n") == "the file contains nothing to restore");
+    CHECK(why("format=1\nbanned=AAECAw==\nbanned=AAECAw==\n") == "a section appears twice");
+    CHECK(why("format=1\nsettings=aGVsbG8\n") == damaged);       // length not a multiple of 4
+    CHECK(why("format=1\nsettings=aGV*bG8=\n") == damaged);      // not base64
+    CHECK(why("format=1\nsettings=aGVsbG8=QQ==\n") == damaged);  // data after the padding
+    CHECK(why("format=1\nsettings=a===\n") == damaged);          // too much padding
+    CHECK(why("format=1\nsettings=\n") == damaged);              // empty section
+
+    // A buffer too small for the data is refused, never overrun.
+    std::array<uint8_t, 4> small{};
+    BackupReader r(small.data(), small.size());
+    CHECK(readBackup(r, "format=1\nsettings=aGVsbG8=\n", 4) == damaged);
+}
+
 int main(int argc, char** argv)
 {
     if (argc == 3) testBuiltList(argv[1], argv[2]);
@@ -614,6 +664,7 @@ int main(int argc, char** argv)
     testDnsPacket();
     testBypassGuard();
     testNotifyParse();
+    testBackupReader();
     std::printf(failures ? "%d FAILED\n" : "all host tests passed\n", failures);
     return failures ? 1 : 0;
 }

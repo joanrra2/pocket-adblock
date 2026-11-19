@@ -1,5 +1,6 @@
 #include "sinkhole/web_server.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstdio>
@@ -17,6 +18,8 @@
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "psa/crypto.h"
+#include "sdkconfig.h"
+#include "sinkhole/backup_reader.hpp"
 #include "sinkhole/events.hpp"
 #include "sinkhole/json_writer.hpp"
 #include "sinkhole/log_buffer.hpp"
@@ -735,18 +738,38 @@ esp_err_t WebServer::getHistory(httpd_req_t* req)
 // for any that are missing, writes the items back and restarts.
 
 namespace {
-constexpr const char* kBackupKeys[] = {"settings", "custom_block", "custom_allow", "local_dns",
-                                       "wol_hosts2", "wol_hosts", "banned", "nofilter", "dev_names",
-                                       "notify"};
 constexpr size_t kBackupMax = 64 * 1024;
+// Internal RAM a backup or restore leaves free for everything else (a TLS
+// session for notifications or updates needs ~40 KB of it at once).
+constexpr size_t kHeapReserve = 20 * 1024;
 
-// The kBackupKeys entry named `name` (the same pointer each time), or nullptr.
-const char* backupKey(const char* name)
-{
-    for (const char* k : kBackupKeys)
-        if (strcmp(name, k) == 0) return k;
-    return nullptr;
-}
+// One short-lived buffer per backup or restore, wiped and freed on scope
+// exit: PSRAM when the board has it, internal RAM only while kHeapReserve
+// stays free. p == nullptr: not now.
+class TempBuf {
+public:
+    explicit TempBuf(size_t len) : n_(len)
+    {
+#if CONFIG_SPIRAM
+        if (psramAvailable()) p_ = static_cast<uint8_t*>(heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+#endif
+        if (!p_ && heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) >= len + kHeapReserve)
+            p_ = static_cast<uint8_t*>(heap_caps_malloc(len, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    }
+    ~TempBuf()
+    {
+        if (!p_) return;
+        secureWipe(p_, n_);  // settings and tokens
+        heap_caps_free(p_);
+    }
+    TempBuf(const TempBuf&) = delete;
+    TempBuf& operator=(const TempBuf&) = delete;
+    uint8_t* get() const { return p_; }
+
+private:
+    uint8_t* p_ = nullptr;
+    size_t n_;
+};
 
 void clearSecrets(Settings& s)
 {
@@ -764,6 +787,15 @@ void clearSecrets(NotifySettings& n)
     memset(n.ntfyToken, 0, sizeof(n.ntfyToken));
     memset(n.tgToken, 0, sizeof(n.tgToken));
 }
+
+// Stored size of a backup item, 0 when there is nothing to back up.
+size_t backupItemSize(const char* key)
+{
+    if (strcmp(key, "settings") == 0) return sizeof(Settings);
+    const size_t len = nvs::blobSize(key);
+    if (strcmp(key, "notify") == 0) return len ? sizeof(NotifySettings) : 0;  // only once something was set
+    return len;
+}
 }  // namespace
 
 esp_err_t WebServer::getBackup(httpd_req_t* req)
@@ -771,64 +803,73 @@ esp_err_t WebServer::getBackup(httpd_req_t* req)
     char q[32] = "", secrets[4] = "";
     if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK)
         httpd_query_key_value(q, "secrets", secrets, sizeof(secrets));
+    const bool withSecrets = secrets[0] == '1';
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"pocket-adblock-backup.txt\"");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
 
     char head[160];
     snprintf(head, sizeof(head), "# Pocket AdBlock backup\nformat=1\nfirmware=%s\nedition=%s\nsecrets=%d\n",
-             FirmwareUpdater::version(), Updater::flavour(), secrets[0] == '1');
+             FirmwareUpdater::version(), Updater::flavour(), withSecrets);
     httpd_resp_sendstr_chunk(req, head);
 
-    for (const char* key : kBackupKeys) {
-        const bool isSettings = strcmp(key, "settings") == 0;
-        const bool isNotify = strcmp(key, "notify") == 0;
-        size_t len = isSettings ? sizeof(Settings) : nvs::blobSize(key);
-        if (isNotify && len) len = sizeof(NotifySettings);  // only once something was set
-        if (!len) continue;
-        auto* raw = static_cast<uint8_t*>(malloc(len));
-        auto* b64 = static_cast<char*>(malloc(len / 3 * 4 + 8));
-        if (!raw || !b64) {
-            free(raw);
-            free(b64);
-            httpd_resp_sendstr_chunk(req, "# out of memory\n");
-            break;
-        }
-        bool ok = true;
-        if (isSettings) {
-            Settings s = d_.cfg.get();
-            if (secrets[0] != '1') clearSecrets(s);
-            memcpy(raw, &s, len);
-            secureWipe(&s, sizeof(s));
-        } else if (isNotify) {
-            NotifySettings n = d_.cfg.readNotify([](const NotifySettings& c) { return c; });
-            if (secrets[0] != '1') clearSecrets(n);
-            memcpy(raw, &n, len);
-            secureWipe(&n, sizeof(n));
-        } else {
-            ok = nvs::loadBlob(key, raw, len, &len) == ESP_OK;
-        }
-        if (ok) {
-            base64Encode(raw, len, b64);
-            httpd_resp_sendstr_chunk(req, key);
-            httpd_resp_sendstr_chunk(req, "=");
-            httpd_resp_sendstr_chunk(req, b64);
-            httpd_resp_sendstr_chunk(req, "\n");
-        }
-        free(raw);
-        free(b64);
+    // One buffer for the largest item, reused for each; the base64 text goes
+    // out through chunk_ in pieces, so it never needs a buffer of its own.
+    size_t cap = 0;
+    for (const char* key : kBackupKeys) cap = std::max(cap, backupItemSize(key));
+    TempBuf raw(cap);
+    if (!raw.get()) {
+        httpd_resp_sendstr_chunk(req, "# not enough free memory right now, try again\n");
+        return httpd_resp_sendstr_chunk(req, nullptr);
     }
+    auto* text = reinterpret_cast<char*>(chunk_);
+    constexpr size_t kB64Slice = (sizeof(chunk_) - 1) / 4 * 3;  // the text and its terminator fill chunk_
+    for (const char* key : kBackupKeys) {
+        size_t len = backupItemSize(key);
+        if (!len) continue;
+        if (strcmp(key, "settings") == 0) {
+            d_.cfg.read([&raw, withSecrets](const Settings& cur) {
+                memcpy(raw.get(), &cur, sizeof(Settings));
+                if (!withSecrets) clearSecrets(*reinterpret_cast<Settings*>(raw.get()));  // NOSONAR the buffer holds a Settings copy
+                return 0;
+            });
+        } else if (strcmp(key, "notify") == 0) {
+            d_.cfg.readNotify([&raw, withSecrets](const NotifySettings& cur) {
+                memcpy(raw.get(), &cur, sizeof(NotifySettings));
+                if (!withSecrets) clearSecrets(*reinterpret_cast<NotifySettings*>(raw.get()));  // NOSONAR the buffer holds a NotifySettings copy
+                return 0;
+            });
+        } else if (nvs::loadBlob(key, raw.get(), cap, &len) != ESP_OK) {
+            snprintf(text, sizeof(chunk_), "# %s could not be read (changed during the backup?)\n", key);
+            httpd_resp_sendstr_chunk(req, text);
+            continue;
+        }
+        httpd_resp_sendstr_chunk(req, key);
+        httpd_resp_sendstr_chunk(req, "=");
+        for (size_t off = 0; off < len; off += kB64Slice) {
+            base64Encode(raw.get() + off, std::min(kB64Slice, len - off), text);
+            httpd_resp_sendstr_chunk(req, text);
+        }
+        httpd_resp_sendstr_chunk(req, "\n");
+    }
+    secureWipe(chunk_, sizeof(chunk_));
     return httpd_resp_sendstr_chunk(req, nullptr);
 }
 
 namespace {
+// Restore scratch, httpd task only (one request at a time).
+Settings gRestoreSettings;
+Settings gCurrentSettings;
+NotifySettings gRestoreNotify;
+
 // A backup's settings, brought up to this firmware's version (an older file's
-// admin password gets hashed); passwords missing from the file keep the
-// device's current ones. Replaces data with a full Settings blob.
-const char* upgradeBackupSettings(uint8_t*& data, int& len, Config& cfg)
+// admin password gets hashed), into gRestoreSettings; passwords missing from
+// the file keep the device's current ones.
+const char* upgradeBackupSettings(const BackupReader::Item& item, Config& cfg)
 {
-    static Settings in, cur;  // httpd task only
-    if (len < 64 || !Config::upgrade(data, static_cast<size_t>(len), in)) return "the settings section is not valid";
+    Settings& in = gRestoreSettings;
+    if (item.len < 64 || !Config::upgrade(item.data, item.len, in)) return "the settings section is not valid";
+    Settings& cur = gCurrentSettings;
     cur = cfg.get();
     if (!in.staPass[0]) memcpy(in.staPass, cur.staPass, sizeof(in.staPass));
     if (!in.apPass[0]) memcpy(in.apPass, cur.apPass, sizeof(in.apPass));
@@ -839,37 +880,21 @@ const char* upgradeBackupSettings(uint8_t*& data, int& len, Config& cfg)
         memcpy(in.adminSalt, cur.adminSalt, sizeof(in.adminSalt));
         in.adminIter = cur.adminIter;
     }
-    auto* full = static_cast<uint8_t*>(malloc(sizeof(Settings)));
-    if (!full) return "out of memory";
-    memcpy(full, &in, sizeof(Settings));
     secureWipe(&cur, sizeof(cur));
-    free(data);
-    data = full;
-    len = sizeof(Settings);
     return nullptr;
 }
-}  // namespace
 
-namespace {
-// Same for the notification settings: tokens missing from the file keep the
-// device's current ones.
-const char* upgradeBackupNotify(uint8_t*& data, int& len, Config& cfg)
+// Same for the notification settings, into gRestoreNotify: tokens missing
+// from the file keep the device's current ones.
+const char* upgradeBackupNotify(const BackupReader::Item& item, Config& cfg)
 {
-    static NotifySettings in;  // httpd task only
-    if (len < 2 || !Config::upgradeNotify(data, static_cast<size_t>(len), in)) return "the notifications section is not valid";
+    if (item.len < 2 || !Config::upgradeNotify(item.data, item.len, gRestoreNotify))
+        return "the notifications section is not valid";
     cfg.readNotify([](const NotifySettings& cur) {
-        if (!in.ntfyToken[0]) memcpy(in.ntfyToken, cur.ntfyToken, sizeof(in.ntfyToken));
-        if (!in.tgToken[0]) memcpy(in.tgToken, cur.tgToken, sizeof(in.tgToken));
+        if (!gRestoreNotify.ntfyToken[0]) memcpy(gRestoreNotify.ntfyToken, cur.ntfyToken, sizeof(cur.ntfyToken));
+        if (!gRestoreNotify.tgToken[0]) memcpy(gRestoreNotify.tgToken, cur.tgToken, sizeof(cur.tgToken));
         return 0;
     });
-    auto* full = static_cast<uint8_t*>(malloc(sizeof(NotifySettings)));  // NOSONAR freed by postRestore with free(), like every item
-    if (!full) return "out of memory";
-    memcpy(full, &in, sizeof(NotifySettings));
-    secureWipe(&in, sizeof(in));
-    secureWipe(data, static_cast<size_t>(len));
-    free(data);  // NOSONAR allocated by postRestore with malloc()
-    data = full;
-    len = sizeof(NotifySettings);
     return nullptr;
 }
 }  // namespace
@@ -878,75 +903,46 @@ esp_err_t WebServer::postRestore(httpd_req_t* req)
 {
     if (req->content_len == 0 || req->content_len > kBackupMax)
         return sendError(req, "400 Bad Request", "not a backup file (empty or too large)");
-    char* body = static_cast<char*>(malloc(req->content_len + 1));
-    if (!body) return sendError(req, "500 Internal Server Error", "out of memory");
-    size_t got = 0;
-    while (got < req->content_len) {
-        const int r = httpd_req_recv(req, body + got, req->content_len - got);
-        if (r <= 0) {
-            free(body);
+    // The file is decoded as it arrives (BackupReader), so only the decoded
+    // items are held: at most 3/4 of the upload, in one buffer.
+    const size_t cap = BackupReader::decodedCap(req->content_len);
+    TempBuf buf(cap);
+    if (!buf.get()) return sendError(req, "503 Service Unavailable", "not enough free memory right now, try again");
+    BackupReader reader(buf.get(), cap);
+    for (size_t got = 0; got < req->content_len;) {
+        const size_t left = req->content_len - got;
+        const int n = recvBody(req, reinterpret_cast<char*>(chunk_), std::min(left, sizeof(chunk_)));
+        if (n <= 0) {
+            secureWipe(chunk_, sizeof(chunk_));
             return sendError(req, "400 Bad Request", "upload interrupted");
         }
-        got += static_cast<size_t>(r);
+        reader.feed(reinterpret_cast<const char*>(chunk_), static_cast<size_t>(n));
+        got += static_cast<size_t>(n);
     }
-    body[got] = '\0';
-    // Files edited on Windows have CRLF line ends: drop the CRs.
-    size_t kept = 0;
-    for (size_t r = 0; r < got; r++)
-        if (body[r] != '\r') body[kept++] = body[r];
-    body[kept] = '\0';
-    if (!strstr(body, "\nformat=1\n") && strncmp(body, "format=1\n", 9) != 0) {
-        free(body);
-        return sendError(req, "400 Bad Request", "not a Pocket AdBlock backup (format=1 missing)");
-    }
+    secureWipe(chunk_, sizeof(chunk_));
 
-    // Decode everything first; write only if the whole file is valid.
-    struct Item {
-        const char* key;
-        uint8_t* data;
-        int len;
-    } items[sizeof(kBackupKeys) / sizeof(kBackupKeys[0])] = {};
-    size_t count = 0;
-    const char* why = nullptr;
-    char* save = nullptr;
-    char* line = strtok_r(body, "\n", &save);
-    while (line && !why) {
-        char* eq = strchr(line, '=');
-        const char* key = nullptr;
-        if (eq && line[0] != '#') {
-            *eq = '\0';
-            key = backupKey(line);
-        }
-        // One slot per known key: a repeated section must not run past items[].
-        bool seen = false;
-        for (size_t k = 0; key && k < count; k++) seen = seen || items[k].key == key;
-        if (key && (seen || count >= std::size(items))) why = "a section appears twice";
-        if (key && !why) {
-            const char* val = eq + 1;
-            size_t vlen = strlen(val);
-            while (vlen && (val[vlen - 1] == '\r' || val[vlen - 1] == ' ')) vlen--;
-            auto* data = static_cast<uint8_t*>(malloc(vlen / 4 * 3 + 4));
-            const int n = data ? base64Decode(val, vlen, data, vlen / 4 * 3 + 4) : -1;
-            if (n > 0) {
-                items[count++] = {key, data, n};
-            } else {
-                free(data);
-                why = "a section of the file is damaged";
-            }
-        }
-        line = strtok_r(nullptr, "\n", &save);
+    // Everything is decoded and checked before anything is written.
+    const char* why = reader.finish();
+    for (size_t i = 0; !why && i < reader.count(); i++) {
+        const BackupReader::Item& it = reader.item(i);
+        if (strcmp(it.key, "settings") == 0) why = upgradeBackupSettings(it, d_.cfg);
+        if (strcmp(it.key, "notify") == 0) why = upgradeBackupNotify(it, d_.cfg);
     }
-    free(body);
-
-    for (size_t i = 0; i < count && !why; i++) {
-        if (strcmp(items[i].key, "settings") == 0) why = upgradeBackupSettings(items[i].data, items[i].len, d_.cfg);
-        if (strcmp(items[i].key, "notify") == 0) why = upgradeBackupNotify(items[i].data, items[i].len, d_.cfg);
+    for (size_t i = 0; !why && i < reader.count(); i++) {
+        const BackupReader::Item& it = reader.item(i);
+        const void* data = it.data;
+        size_t len = it.len;
+        if (strcmp(it.key, "settings") == 0) {
+            data = &gRestoreSettings;
+            len = sizeof(Settings);
+        } else if (strcmp(it.key, "notify") == 0) {
+            data = &gRestoreNotify;
+            len = sizeof(NotifySettings);
+        }
+        if (nvs::saveBlob(it.key, data, len) != ESP_OK) why = "could not write the settings";
     }
-    if (!why && count == 0) why = "the file contains nothing to restore";
-    for (size_t i = 0; i < count && !why; i++)
-        if (nvs::saveBlob(items[i].key, items[i].data, static_cast<size_t>(items[i].len)) != ESP_OK)
-            why = "could not write the settings";
-    for (size_t i = 0; i < count; i++) free(items[i].data);
+    secureWipe(&gRestoreSettings, sizeof(gRestoreSettings));
+    secureWipe(&gRestoreNotify, sizeof(gRestoreNotify));
     if (why) return sendError(req, "400 Bad Request", why);
     FirmwareUpdater::restartIn(1500, BootLog::Cause::Restore);  // every part reloads its data at boot
     return sendOk(req, "restored; restarting");
