@@ -162,9 +162,9 @@ private:
         quad_ = 0;
     }
 
-    void endLine()  // NOSONAR no "using enum": the host tests build as C++17
+    void endLine()
     {
-        if (state_ == State::Format) {
+        if (state_ == State::Format) {  // NOSONAR no "using enum": the host tests build as C++17
             formatOk_ = formatOk_ || (fmtLen_ == 1 && formatOne_);
         } else if (state_ == State::Value && !why_) {
             if (quadLen_ != 0 || items_[count_].len == 0)
