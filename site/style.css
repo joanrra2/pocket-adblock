@@ -99,10 +99,15 @@ td:first-child{font-weight:600}
 .doc article section+section{border-top:1px solid var(--ln);padding-top:30px}
 .doc article ul,.doc article ol{padding-left:22px;margin:0 0 12px}
 .doc article li{margin:5px 0}
-.shots{display:flex;gap:16px;flex-wrap:wrap;margin:16px 0 18px;align-items:flex-start}
-.shots figure{margin:0;flex:1 1 220px;max-width:280px}
-.shots img{width:100%;height:auto;border-radius:16px;border:1px solid var(--ln);background:var(--s1)}
-.shots figcaption{font-size:13.5px;color:var(--mu);margin-top:6px;text-align:center}
+.doc article ol.appsteps{list-style:none;padding:0;margin:16px 0 18px;counter-reset:step}
+.appsteps li{counter-increment:step;display:grid;grid-template-columns:200px minmax(0,1fr);gap:22px;align-items:start;margin:0;padding:18px 0;border-top:1px solid var(--ln)}
+.appsteps li:first-child{border-top:0;padding-top:4px}
+.appsteps figure{margin:0}
+.appsteps img{display:block;width:100%;height:auto;border-radius:14px;border:1px solid var(--ln);background:var(--s1)}
+.appsteps h4{margin:2px 0 6px;font-size:16.5px;display:flex;align-items:center;gap:10px}
+.appsteps h4::before{content:counter(step);flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:13.5px;background:var(--ac);color:var(--onac)}
+.appsteps p{margin:0}
+@media (max-width:560px){.appsteps li{grid-template-columns:minmax(0,1fr);gap:12px}.appsteps figure{order:2;max-width:260px}}
 .doc article h3{margin-top:22px}
 .note{border-left:3px solid var(--wa);background:color-mix(in srgb,var(--wa) 9%,transparent);padding:10px 14px;border-radius:0 10px 10px 0;margin:12px 0;font-size:15px}
 @media (max-width:860px){
