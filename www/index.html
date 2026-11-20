@@ -568,7 +568,15 @@ async function loadClients(){
  $('#clients').innerHTML=c.length?c.map(x=>{const t=x.blocked+x.allowed||1;return `<div><span class="dot${x.banned?' x':''}"></span>
   <div class="g"><b>${esc(x.name||x.ip)}</b> ${x.name?`<span class="k">${x.ip}</span> `:''}<span class="k">${x.mac}</span>${x.noFilter?' <span class="k ok">'+tr('no blocking')+'</span>':''}<div class="bar" style="margin-top:6px;max-width:320px"><i style="width:${x.blocked/t*100}%"></i><u style="width:${x.allowed/t*100}%"></u></div>
   <span class="k">${tr('{0} blocked · {1} allowed · seen {2} ago',n(x.blocked),n(x.allowed),ago(x.seenAgo))}</span></div>
-  <span class="acts">${nameButton(x)}${x.v6?'':`<button class="btn s" data-a="feedip" data-v="${x.ip}">${tr('Queries')}</button><button class="btn s" data-a="nofilter" data-v="${x.ip}" data-b="${x.noFilter?0:1}">${tr(x.noFilter?'Filter again':'No blocking')}</button><button class="btn s ${x.banned?'':'d'}" data-a="ban" data-v="${x.ip}" data-b="${x.banned?0:1}">${tr(x.banned?'Unblock':'Block all')}</button>`}</span></div>`}).join(''):'<div class="mu">'+tr('No devices have used this resolver yet')+'</div>';
+  <span class="acts">${clientButtons(x)}</span></div>`}).join(''):'<div class="mu">'+tr('No devices have used this resolver yet')+'</div>';
+}
+// Name, Queries, No blocking, Block all (IPv6 rows get only Name).
+function clientButtons(x){
+ if(x.v6)return nameButton(x);
+ const filter=tr(x.noFilter?'Filter again':'No blocking'),ban=tr(x.banned?'Unblock':'Block all');
+ return nameButton(x)+`<button class="btn s" data-a="feedip" data-v="${x.ip}">${tr('Queries')}</button>`+
+  `<button class="btn s" data-a="nofilter" data-v="${x.ip}" data-b="${x.noFilter?0:1}">${filter}</button>`+
+  `<button class="btn s${x.banned?'':' d'}" data-a="ban" data-v="${x.ip}" data-b="${x.banned?0:1}">${ban}</button>`;
 }
 let WOL=[];
 function hostStatus(x){
