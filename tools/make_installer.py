@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Assemble the GitHub Pages site: the docs (site/) at the root, the browser
-installer (ESP Web Tools) at install/, and the release images it flashes.
+"""Assemble the GitHub Pages site: the docs (site/) in English at the root and in
+Spanish, French and Italian under /es/, /fr/, /it/ (tools/site_i18n.py), the
+browser installer (ESP Web Tools) at install/ in each, and the release images
+it flashes.
 
   python tools/make_installer.py --bins dist --version 0.2.0 --out _site
 
@@ -11,6 +13,8 @@ import argparse
 import json
 import os
 import shutil
+
+import site_i18n
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 
@@ -29,29 +33,16 @@ BOARDS = {  # board id -> ESP Web Tools chipFamily
 }
 
 
-def copy_page(src, dest, repo):
-    """An HTML page with {{REPO}} replaced by the source repository URL."""
-    with open(src, encoding='utf-8') as f:
-        page = f.read().replace('{{REPO}}', repo)
-    with open(dest, 'w', encoding='utf-8') as f:  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
-        f.write(page)
-
-
 def write_docs(out, repo):
-    """The docs (site/) at the root, the setup videos, and the installer at install/."""
+    """The site's pages in every language (tools/site_i18n.py), its shared files
+    and media, and the setup videos."""
+    site_i18n.build(out, repo)
     site = os.path.join(ROOT, 'site')
-    for name in sorted(os.listdir(site)):
-        src = os.path.join(site, name)
-        if name.endswith('.html'):
-            copy_page(src, os.path.join(out, name), repo)
-        elif os.path.isfile(src):
-            shutil.copy(src, os.path.join(out, name))
-    os.makedirs(os.path.join(out, 'media'), exist_ok=True)  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
+    for name in ('style.css', 'favicon.svg'):
+        shutil.copy(os.path.join(site, name), os.path.join(out, name))
+    shutil.copytree(os.path.join(site, 'media'), os.path.join(out, 'media'), dirs_exist_ok=True)
     for name in ('setup-en.mp4', 'setup-es.mp4'):
         shutil.copy(os.path.join(ROOT, 'docs', 'media', name), os.path.join(out, 'media', name))
-    # Its manifests, firmware and vendor/ stay at the root.
-    os.makedirs(os.path.join(out, 'install'), exist_ok=True)  # NOSONAR - developer tool: the path is a command-line argument chosen by the person running it
-    copy_page(os.path.join(ROOT, 'installer', 'index.html'), os.path.join(out, 'install', 'index.html'), repo)
 
 
 def board_parts(board, out, bins, parts_root):

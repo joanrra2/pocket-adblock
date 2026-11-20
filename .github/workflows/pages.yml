@@ -12,6 +12,7 @@ on:
       - installer/**
       - docs/media/**
       - tools/make_installer.py
+      - tools/site_i18n.py
       - .github/workflows/pages.yml
   workflow_dispatch:
 
