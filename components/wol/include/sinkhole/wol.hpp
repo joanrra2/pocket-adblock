@@ -128,7 +128,7 @@ public:
     void setResultListener(ResultListener fn, void* ctx) { resultListener_ = fn; resultCtx_ = ctx; }
     // Notified (on the caller's task, outside the lock) after a host is removed.
     using RemovedListener = void (*)(void* ctx, const char* name);  // NOSONAR C-style callback like Listener, no heap
-    void setRemovedListener(RemovedListener fn, void* ctx) { removedListener_ = fn; removedCtx_ = ctx; }
+    void setRemovedListener(RemovedListener fn, void* ctx) { removedListener_ = fn; removedCtx_ = ctx; }  // NOSONAR C-style callback, no heap
 
 private:
     static void taskEntry(void* arg);
@@ -211,6 +211,7 @@ private:
     bool announce();
     bool publishWatchOnly();
     bool clearRemoved();
+    bool clearTopics(const char* name);
     void publishBlocking();
     bool enqueue(const char* topic, const char* payload, bool retain);
     bool paced(const char* topic, const char* payload);
@@ -237,12 +238,19 @@ private:
     char clientId_[32]{};
     char nodeId_[24]{};
     char hostname_[32]{};
-    // Removed hosts whose topics are still to be cleared: written by whoever
+    // Removed hosts whose topics are still to be cleared: filled by whoever
     // removes (web UI), emptied by the publisher once the broker has them.
     // A few slots: removals are rare, and wait here only while the broker is away.
-    static constexpr size_t kRemovedSlots = 4;
-    std::array<std::array<char, sizeof(WolHost::name)>, kRemovedSlots> removed_{};
-    portMUX_TYPE removedLock_ = portMUX_INITIALIZER_UNLOCKED;
+    struct RemovedQueue {
+        static constexpr size_t kSlots = 4;
+        using Name = std::array<char, sizeof(WolHost::name)>;
+        bool push(const char* name);           // false when every slot is taken
+        bool peek(size_t i, Name& out);        // false when slot i is empty
+        void drop(size_t i);                   // publisher task only
+        std::array<Name, kSlots> slots{};
+        portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
+    };
+    RemovedQueue removed_;
     // Publisher task only: members rather than its stack.
     struct Publisher {
         uint32_t hostsHash = 0;
