@@ -74,6 +74,7 @@ void App::start()
     mqtt_.start();
     wol_.setListener(&App::onHostState, this);
     wol_.setResultListener(&App::onHostResult, this);
+    wol_.setRemovedListener(&MqttBridge::onHostRemoved, &mqtt_);
 #if CONFIG_SINKHOLE_NOTIFY
     if (notifier_.begin(&App::onCommand, this) == ESP_OK) bootEvents();
 #endif

@@ -116,6 +116,74 @@ void MqttBridge::onHostResult(void* ctx, const char* name, const char* result)  
     self->enqueue(topic.data(), result, true);
 }
 
+void MqttBridge::onHostRemoved(void* ctx, const char* name)  // NOSONAR C-style listener signature
+{
+    auto* self = static_cast<MqttBridge*>(ctx);
+    if (!self->task_) return;  // no broker set (or no publisher task): nothing was published
+    if (!self->removed_.push(name)) {
+        ESP_LOGW(TAG, "too many removals waiting for the broker: '%s' stays listed there", name);
+        return;
+    }
+    xTaskNotifyGive(self->task_);  // cleared now, not on the next tick
+}
+
+bool MqttBridge::RemovedQueue::push(const char* name)
+{
+    bool queued = false;
+    taskENTER_CRITICAL(&lock);
+    for (auto& slot : slots) {
+        if (slot[0]) continue;
+        copyStr(slot.data(), slot.size(), name);
+        queued = true;
+        break;
+    }
+    taskEXIT_CRITICAL(&lock);
+    return queued;
+}
+
+bool MqttBridge::RemovedQueue::peek(size_t i, Name& out)
+{
+    taskENTER_CRITICAL(&lock);
+    out = slots[i];
+    taskEXIT_CRITICAL(&lock);
+    return out[0] != '\0';
+}
+
+void MqttBridge::RemovedQueue::drop(size_t i)
+{
+    taskENTER_CRITICAL(&lock);
+    slots[i][0] = '\0';  // only the publisher empties slots, and push only writes empty ones
+    taskEXIT_CRITICAL(&lock);
+}
+
+// Empty retained state and result delete a removed host's topics from the
+// broker. Publisher task. False when the broker went away part way: the
+// names stay queued and are retried on the next tick.
+bool MqttBridge::clearRemoved()
+{
+    for (size_t i = 0; i < RemovedQueue::kSlots; i++) {
+        RemovedQueue::Name name{};
+        if (!removed_.peek(i, name)) continue;
+        // Added again while waiting: its topics are live, keep them.
+        bool back = false;
+        wol_.forEachHost([&back, &name](const WolHost& h) { back = back || strcmp(h.name, name.data()) == 0; });
+        if (!back && !clearTopics(name.data())) return false;
+        removed_.drop(i);
+    }
+    return true;
+}
+
+bool MqttBridge::clearTopics(const char* name)
+{
+    static constexpr std::array<const char*, 2> kLeaves{"state", "result"};
+    for (const char* leaf : kLeaves) {
+        snprintf(pub_.topic.data(), pub_.topic.size(), "%s/wol/%s/%s", prefix_, name, leaf);  // NOSONAR std::format allocates
+        if (!paced(pub_.topic.data(), "")) return false;
+    }
+    ESP_LOGI(TAG, "cleared the topics of removed host '%s'", name);
+    return true;
+}
+
 // Retained "watch only" results for hosts without a MAC, on every connect:
 // a result set while offline (or before boot) must still reach the broker.
 bool MqttBridge::publishWatchOnly()
@@ -283,6 +351,7 @@ bool MqttBridge::announce()
 void MqttBridge::tick()
 {
     if (!connected_) return;
+    clearRemoved();  // what stays queued is retried on the next tick
     if (watchOnlyNow_.exchange(false) && !publishWatchOnly()) watchOnlyNow_ = true;
     if (ha_) {
         // Re-announce when the WoL host list changed (names and IPs).
