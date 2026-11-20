@@ -140,12 +140,20 @@ esp_err_t WolService::add(const WolHost& h)
 
 esp_err_t WolService::remove(const char* name)
 {
-    LockGuard g(mu_);
-    int i = findLocked(name);
-    if (i < 0) return ESP_ERR_NOT_FOUND;
-    for (size_t j = static_cast<size_t>(i) + 1; j < count_; j++) hosts_[j - 1] = hosts_[j];
-    count_--;
-    return saveLocked();
+    std::array<char, sizeof(WolHost::name)> gone{};
+    esp_err_t err;
+    {
+        LockGuard g(mu_);
+        int i = findLocked(name);
+        if (i < 0) return ESP_ERR_NOT_FOUND;
+        copyStr(gone.data(), gone.size(), hosts_[i].host.name);
+        for (size_t j = static_cast<size_t>(i) + 1; j < count_; j++) hosts_[j - 1] = hosts_[j];
+        count_--;
+        err = saveLocked();
+    }
+    // Gone from the list even when saving failed, so the listener hears of it either way.
+    if (removedListener_) removedListener_(removedCtx_, gone.data());
+    return err;
 }
 
 size_t WolService::list(WolHostState* out, size_t max)
