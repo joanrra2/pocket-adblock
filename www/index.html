@@ -59,6 +59,7 @@ label.ck{display:flex;gap:8px;align-items:center;color:var(--tx);font-size:14px}
 .mt{margin-top:12px}
 .list>div{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--ln)}
 .list>div:last-child{border:0}.list .g{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#clients>div{flex-wrap:wrap}#clients .g{flex:1 1 230px}.acts{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
 .dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--ok)}.dot.x{background:var(--bad)}.dot.off{background:var(--ln)}
 .bar{height:6px;border-radius:9px;background:var(--s2);overflow:hidden;display:flex}.bar i{background:var(--bad)}.bar u{background:var(--ok);text-decoration:none}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
@@ -567,7 +568,7 @@ async function loadClients(){
  $('#clients').innerHTML=c.length?c.map(x=>{const t=x.blocked+x.allowed||1;return `<div><span class="dot${x.banned?' x':''}"></span>
   <div class="g"><b>${esc(x.name||x.ip)}</b> ${x.name?`<span class="k">${x.ip}</span> `:''}<span class="k">${x.mac}</span>${x.noFilter?' <span class="k ok">'+tr('no blocking')+'</span>':''}<div class="bar" style="margin-top:6px;max-width:320px"><i style="width:${x.blocked/t*100}%"></i><u style="width:${x.allowed/t*100}%"></u></div>
   <span class="k">${tr('{0} blocked · {1} allowed · seen {2} ago',n(x.blocked),n(x.allowed),ago(x.seenAgo))}</span></div>
-  ${nameButton(x)}${x.v6?'':`<button class="btn s" data-a="feedip" data-v="${x.ip}">${tr('Queries')}</button><button class="btn s" data-a="nofilter" data-v="${x.ip}" data-b="${x.noFilter?0:1}">${tr(x.noFilter?'Filter again':'No blocking')}</button><button class="btn s ${x.banned?'':'d'}" data-a="ban" data-v="${x.ip}" data-b="${x.banned?0:1}">${tr(x.banned?'Unblock':'Block all')}</button>`}</div>`}).join(''):'<div class="mu">'+tr('No devices have used this resolver yet')+'</div>';
+  <span class="acts">${nameButton(x)}${x.v6?'':`<button class="btn s" data-a="feedip" data-v="${x.ip}">${tr('Queries')}</button><button class="btn s" data-a="nofilter" data-v="${x.ip}" data-b="${x.noFilter?0:1}">${tr(x.noFilter?'Filter again':'No blocking')}</button><button class="btn s ${x.banned?'':'d'}" data-a="ban" data-v="${x.ip}" data-b="${x.banned?0:1}">${tr(x.banned?'Unblock':'Block all')}</button>`}</span></div>`}).join(''):'<div class="mu">'+tr('No devices have used this resolver yet')+'</div>';
 }
 let WOL=[];
 function hostStatus(x){
