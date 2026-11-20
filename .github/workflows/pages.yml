@@ -30,7 +30,7 @@ jobs:
       id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deploy.outputs.page_url || steps.deploy-retry.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - name: Firmware of the latest release
@@ -39,9 +39,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
-          run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml --branch "$tag" --status success --limit 1 --json databaseId -q '.[0].databaseId')
+          # The newest build of the tag whose release job passed: its site job may
+          # have failed (then running this workflow by hand puts the site right).
+          run=""
+          for id in $(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml --branch "$tag" --limit 5 --json databaseId -q '.[].databaseId'); do
+            ok=$(gh run view "$id" --repo "$GITHUB_REPOSITORY" --json jobs -q '[.jobs[] | select(.name == "release" and .conclusion == "success")] | length')
+            if [ "$ok" = 1 ]; then run=$id; break; fi
+          done
           if [ -z "$run" ]; then
-            echo "::error::no successful build of $tag to take the firmware from: publish a release instead"
+            echo "::error::no build of $tag with a published release to take the firmware from: publish a release instead"
             exit 1
           fi
           # Fails (and nothing is deployed) once the artifacts have expired.
@@ -61,8 +67,23 @@ jobs:
         env:
           TAG: ${{ steps.rel.outputs.tag }}
         run: python3 tools/make_installer.py --bins dist --version "${TAG#v}" --out _site --repo "https://github.com/${GITHUB_REPOSITORY}" --web-tools package/dist/web --parts parts
+      # One name per attempt: a re-run must not find the earlier attempt's
+      # upload too ("Multiple artifacts named github-pages").
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+          name: github-pages-${{ github.run_attempt }}
+      # deploy-pages can look for the upload before it is listed ("No artifacts
+      # named ..."): one more try after a pause. Same as build.yml.
       - id: deploy
         uses: actions/deploy-pages@v4
+        continue-on-error: true
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
+      - if: steps.deploy.outcome == 'failure'
+        run: sleep 30
+      - id: deploy-retry
+        if: steps.deploy.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
